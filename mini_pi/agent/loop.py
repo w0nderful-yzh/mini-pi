@@ -22,6 +22,7 @@ from mini_pi.llm.base import LLMClient
 from mini_pi.llm.types import (
     AssistantMessage,
     DoneEvent,
+    ErrorEvent,
     Message,
     TextDeltaEvent,
     ThinkingDeltaEvent,
@@ -56,6 +57,11 @@ def run_loop(
         emit(TurnStartEvent(step=step))
         assistant = _stream_assistant(state, llm, registry, emit)
         last = assistant
+        if assistant.stop_reason == "error":
+            # 每轮 turn_start 都要有对应的 turn_end
+            emit(TurnEndEvent(step=step))
+            emit(AgentEndEvent(reason="error", message=assistant, error=assistant.error_message))
+            return assistant
         if not assistant.tool_calls:
             # 最终回答轮也要收尾，保证 turn_start / turn_end 成对
             emit(TurnEndEvent(step=step))
@@ -83,6 +89,9 @@ def _stream_assistant(
             emit(MessageDeltaEvent(kind="text", delta=event.delta))
         elif isinstance(event, ThinkingDeltaEvent):
             emit(MessageDeltaEvent(kind="thinking", delta=event.delta))
+        elif isinstance(event, ErrorEvent):
+            # 错误编码为 assistant 消息，由 run_loop 决定终止行为
+            final = AssistantMessage(stop_reason="error", error_message=event.message)
         elif isinstance(event, DoneEvent):
             final = event.message
     if final is None:

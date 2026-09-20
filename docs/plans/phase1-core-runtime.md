@@ -148,87 +148,13 @@ mini-pi/
 
 ## M3 Agent Loop 完善
 
-### Task M3.1: LLM 错误处理（stop_reason=error）
+### Task M3.1: LLM 错误处理（已完成）
 
-**Files:**
-- Modify: `mini_pi/agent/loop.py`
-- Test: `tests/test_loop.py`（追加）
+提交：本次提交
 
-- [ ] **Step 1: 追加失败测试到 `tests/test_loop.py`**
+交付物：`mini_pi/agent/loop.py` — `_stream_assistant` 将 `ErrorEvent` 聚合为 `stop_reason="error"` 的 assistant 消息并写入 transcript；`run_loop` 遇错时先补发 `turn_end`，再以 `agent_end(reason="error", error=...)` 结束，不向调用方抛异常。
 
-```python
-from mini_pi.errors import LLMError
-
-
-def test_llm_error_event_ends_agent(echo_registry, events) -> None:
-    state = AgentState(messages=[UserMessage(content="hi")])
-    llm = FakeLLMClient([LLMError("api down", retryable=False)])
-    result = run_loop(state, llm, echo_registry, on_event=events.append)
-    assert result.stop_reason == "error"
-    assert result.error_message == "api down"
-    assert state.step_count == 1
-    assert events[-1].type == "agent_end"
-    assert events[-1].reason == "error"
-    assert events[-1].error == "api down"
-
-
-def test_llm_error_message_is_in_transcript(echo_registry) -> None:
-    state = AgentState(messages=[UserMessage(content="hi")])
-    llm = FakeLLMClient([LLMError("api down", retryable=False)])
-    run_loop(state, llm, echo_registry)
-    assert state.messages[-1].stop_reason == "error"
-```
-
-- [ ] **Step 2: 运行确认失败**
-
-Run: `uv run pytest tests/test_loop.py -v`
-Expected: FAIL（`result.stop_reason == "stop"`，`error_message is None`）
-
-- [ ] **Step 3: 修改 `mini_pi/agent/loop.py`**
-
-`_stream_assistant` 中 import `ErrorEvent` 并处理：
-
-```python
-from mini_pi.llm.types import (
-    AssistantMessage,
-    DoneEvent,
-    ErrorEvent,
-    Message,
-    TextDeltaEvent,
-    ThinkingDeltaEvent,
-    ToolCall,
-    ToolMessage,
-)
-```
-
-```python
-        elif isinstance(event, ErrorEvent):
-            final = AssistantMessage(stop_reason="error", error_message=event.message)
-        elif isinstance(event, DoneEvent):
-            final = event.message
-```
-
-`run_loop` 内在 `_stream_assistant` 之后、判断 tool_calls 之前插入：
-
-```python
-        if assistant.stop_reason == "error":
-            # 每轮 turn_start 都要有对应的 turn_end
-            emit(TurnEndEvent(step=step))
-            emit(AgentEndEvent(reason="error", message=assistant, error=assistant.error_message))
-            return assistant
-```
-
-- [ ] **Step 4: 运行测试通过**
-
-Run: `uv run pytest tests/test_loop.py -v`
-Expected: `11 passed`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mini_pi/agent/loop.py tests/test_loop.py
-git commit -m "feat: encode LLM errors as error stop reason in agent loop"
-```
+验收：`tests/test_loop.py` 新增 2 个用例（error 终止事件、错误消息入 transcript）；全量 50 passed, 2 deselected。
 
 ---
 

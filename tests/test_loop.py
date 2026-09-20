@@ -5,6 +5,7 @@ import pytest
 from mini_pi.agent.events import TurnEndEvent
 from mini_pi.agent.loop import run_loop
 from mini_pi.agent.state import AgentState
+from mini_pi.errors import LLMError
 from mini_pi.llm.types import ToolMessage, UserMessage
 from tests.conftest import FakeLLMClient, assistant, tool_call
 
@@ -49,6 +50,27 @@ def test_read_only_tool_does_not_mark_modified_files(echo_registry) -> None:
     )
     run_loop(state, llm, echo_registry)
     assert state.modified_files == set()
+
+
+def test_llm_error_event_ends_agent(echo_registry, events) -> None:
+    """LLM ErrorEvent 终止本轮：stop_reason=error，事件以 agent_end(error) 收尾。"""
+    state = AgentState(messages=[UserMessage(content="hi")])
+    llm = FakeLLMClient([LLMError("api down", retryable=False)])
+    result = run_loop(state, llm, echo_registry, on_event=events.append)
+    assert result.stop_reason == "error"
+    assert result.error_message == "api down"
+    assert state.step_count == 1
+    assert events[-1].type == "agent_end"
+    assert events[-1].reason == "error"
+    assert events[-1].error == "api down"
+
+
+def test_llm_error_message_is_in_transcript(echo_registry) -> None:
+    """错误 assistant 消息也要落入 transcript，便于 UI 与后续 session 记录。"""
+    state = AgentState(messages=[UserMessage(content="hi")])
+    llm = FakeLLMClient([LLMError("api down", retryable=False)])
+    run_loop(state, llm, echo_registry)
+    assert state.messages[-1].stop_reason == "error"
 
 
 def test_turn_end_is_emitted_for_final_answer(echo_registry, events) -> None:
