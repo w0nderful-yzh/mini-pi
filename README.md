@@ -326,7 +326,7 @@ uv run pytest -m integration        # 需要 API Key
 | 里程碑 | 内容 | 状态 |
 | --- | --- | --- |
 | M1 | LLM 调通：消息模型、OpenAI/DeepSeek 流式 client、重试 | 已完成 |
-| M2 | Tool Calling：Tool/Registry、事件模型、run_loop、FakeLLM 测试 | 未开始 |
+| M2 | Tool Calling：Tool/Registry、事件模型、run_loop、FakeLLM 测试 | 已完成 |
 | M3 | Agent Loop 完善：max_steps、错误处理、Agent 封装、system prompt | 未开始 |
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/run_command/git_diff | 未开始 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 未开始 |
