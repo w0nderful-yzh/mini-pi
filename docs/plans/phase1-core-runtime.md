@@ -1332,7 +1332,7 @@ git commit -m "test: add opt-in real API integration tests"
 - Create: `mini_pi/tools/base.py`
 - Test: `tests/test_tool_base.py`
 
-- [ ] **Step 1: 写失败测试 `tests/test_tool_base.py`**
+- [x] **Step 1: 写失败测试 `tests/test_tool_base.py`**
 
 ```python
 from __future__ import annotations
@@ -1373,12 +1373,12 @@ def test_tool_result_details_default_none() -> None:
     assert ToolResult(content="x").details is None
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `uv run pytest tests/test_tool_base.py -v`
 Expected: FAIL，`No module named 'mini_pi.tools'`
 
-- [ ] **Step 3: 写 `mini_pi/tools/base.py`**
+- [x] **Step 3: 写 `mini_pi/tools/base.py`**
 
 ```python
 from __future__ import annotations
@@ -1412,12 +1412,12 @@ class Tool(ABC):
     def execute(self, **kwargs: Any) -> ToolResult: ...
 ```
 
-- [ ] **Step 4: 运行测试通过**
+- [x] **Step 4: 运行测试通过**
 
 Run: `uv run pytest tests/test_tool_base.py -v`
 Expected: `3 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add mini_pi/tools/__init__.py mini_pi/tools/base.py tests/test_tool_base.py
