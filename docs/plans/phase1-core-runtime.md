@@ -168,207 +168,19 @@ mini-pi/
 
 ---
 
-### Task M3.3: Agent 封装与 system prompt
+### Task M3.3: Agent 封装与 system prompt（已完成）
 
-**Files:**
-- Create: `mini_pi/agent/prompt.py`
-- Create: `mini_pi/agent/agent.py`
-- Test: `tests/test_agent.py`
+提交：本次提交
 
-- [ ] **Step 1: 写失败测试 `tests/test_agent.py`**
+交付物：
 
-```python
-from __future__ import annotations
+- `mini_pi/agent/prompt.py`：`build_system_prompt(*, cwd, tools)`（身份 / 环境 / 工作规则 / 工具清单）
+- `mini_pi/agent/agent.py`：`Agent(llm, registry, cwd, max_steps, on_event)`；首次 `run()` 注入 system 消息，`reset()` 清空状态
+- 依赖方向修正：Agent 只接收 `cwd: Path`，不依赖 Workspace（Workspace 仅属于 Tool 层）
 
-import pytest
+验收：`tests/test_agent.py` 6 passed；全量 57 passed, 2 deselected。M3 里程碑全部完成。
 
-from mini_pi.agent.agent import Agent
-from mini_pi.agent.prompt import build_system_prompt
-from mini_pi.errors import ToolError
-from mini_pi.llm.types import AssistantMessage, SystemMessage, ToolMessage, UserMessage
-from mini_pi.workspace.workspace import Workspace
-from tests.conftest import EchoTool, FakeLLMClient, assistant
-
-
-@pytest.fixture
-def workspace(tmp_path):
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "app.py").write_text("print('hi')\n")
-    return Workspace(tmp_path)
-
-
-@pytest.fixture
-def registry(workspace):
-    from mini_pi.tools.registry import ToolRegistry
-
-    registry = ToolRegistry()
-    registry.register(EchoTool())
-    return registry
-
-
-def make_agent(workspace, registry, script) -> Agent:
-    llm = FakeLLMClient(script)
-    return Agent(llm=llm, registry=registry, workspace=workspace, max_steps=5)
-
-
-def test_run_injects_system_and_user_messages(workspace, registry) -> None:
-    agent = make_agent(workspace, registry, [assistant("ok")])
-    result = agent.run("do something")
-    assert result.content == "ok"
-    assert isinstance(agent.state.messages[0], SystemMessage)
-    tools_section = agent.state.messages[0].content.split("# Tools")[1]
-    assert "- echo:" in tools_section
-    assert "read" not in tools_section
-    assert isinstance(agent.state.messages[1], UserMessage)
-    assert agent.state.messages[1].content == "do something"
-
-
-def test_system_message_is_not_duplicated_across_runs(workspace, registry) -> None:
-    agent = make_agent(workspace, registry, [assistant("first"), assistant("second")])
-    agent.run("one")
-    agent.run("two")
-    systems = [m for m in agent.state.messages if isinstance(m, SystemMessage)]
-    assert len(systems) == 1
-
-
-def test_reset_clears_state(workspace, registry) -> None:
-    agent = make_agent(workspace, registry, [assistant("ok")])
-    agent.run("task")
-    agent.reset()
-    assert agent.state.messages == []
-    assert agent.state.step_count == 0
-    assert agent.state.modified_files == set()
-
-
-def test_empty_task_is_rejected(workspace, registry) -> None:
-    agent = make_agent(workspace, registry, [])
-    with pytest.raises(ValueError, match="empty"):
-        agent.run("   ")
-
-
-def test_invalid_max_steps_is_rejected(workspace, registry) -> None:
-    with pytest.raises(ValueError, match="max_steps"):
-        Agent(llm=FakeLLMClient([]), registry=registry, workspace=workspace, max_steps=0)
-
-
-def test_prompt_contains_environment(workspace) -> None:
-    prompt = build_system_prompt(workspace=workspace, tools=[])
-    assert str(workspace.root) in prompt
-    assert "mini-pi" in prompt
-```
-
-- [ ] **Step 2: 运行确认失败**
-
-Run: `uv run pytest tests/test_agent.py -v`
-Expected: FAIL，`No module named 'mini_pi.agent.prompt'`
-
-- [ ] **Step 3: 写 `mini_pi/agent/prompt.py`**
-
-```python
-from __future__ import annotations
-
-import platform
-
-from mini_pi.llm.types import ToolSchema
-from mini_pi.workspace.workspace import Workspace
-
-
-def build_system_prompt(*, workspace: Workspace, tools: list[ToolSchema]) -> str:
-    tool_lines = "\n".join(f"- {tool.name}: {tool.description}" for tool in tools)
-    return f"""You are mini-pi, a coding agent working inside a local workspace.
-
-# Environment
-- Workspace root: {workspace.root}
-- Platform: {platform.system().lower()}
-
-# Working rules
-- All paths are resolved inside the workspace; paths outside the workspace are rejected.
-- Before changing code, locate it with the search tool and read it with the read tool. Never guess file contents.
-- Prefer edit for minimal changes; use write only for new files or full rewrites.
-- Verify changes with bash (tests/build/lint) and inspect diffs with git_diff.
-- Tool errors are returned to you as error observations; read them and adjust instead of repeating the same call.
-- When the task is complete, stop calling tools and summarize what changed and how it was verified.
-
-# Tools
-{tool_lines}
-"""
-```
-
-- [ ] **Step 4: 写 `mini_pi/agent/agent.py`**
-
-```python
-from __future__ import annotations
-
-from collections.abc import Callable
-
-from mini_pi.agent.events import AgentEvent
-from mini_pi.agent.loop import run_loop
-from mini_pi.agent.prompt import build_system_prompt
-from mini_pi.agent.state import AgentState
-from mini_pi.llm.base import LLMClient
-from mini_pi.llm.types import AssistantMessage, SystemMessage, UserMessage
-from mini_pi.tools.registry import ToolRegistry
-from mini_pi.workspace.workspace import Workspace
-
-
-class Agent:
-    def __init__(
-        self,
-        *,
-        llm: LLMClient,
-        registry: ToolRegistry,
-        workspace: Workspace,
-        max_steps: int = 50,
-        on_event: Callable[[AgentEvent], None] | None = None,
-    ) -> None:
-        if max_steps <= 0:
-            raise ValueError("max_steps must be > 0")
-        self._llm = llm
-        self._registry = registry
-        self._workspace = workspace
-        self._max_steps = max_steps
-        self._on_event = on_event
-        self._system_prompt = build_system_prompt(
-            workspace=workspace, tools=registry.schemas()
-        )
-        self.state = AgentState()
-
-    def run(self, task: str) -> AssistantMessage:
-        if not task.strip():
-            raise ValueError("task must not be empty")
-        if not self.state.messages:
-            self.state.messages.append(SystemMessage(content=self._system_prompt))
-        self.state.messages.append(UserMessage(content=task))
-        return run_loop(
-            self.state,
-            self._llm,
-            self._registry,
-            max_steps=self._max_steps,
-            on_event=self._on_event,
-        )
-
-    def reset(self) -> None:
-        self.state.messages.clear()
-        self.state.step_count = 0
-        self.state.modified_files.clear()
-```
-
-- [ ] **Step 5: 运行测试通过**
-
-Run: `uv run pytest tests/test_agent.py -v`
-Expected: `6 passed`
-
-- [ ] **Step 6: 完整回归并提交**
-
-Run: `uv run pytest -v`
-Expected: 全部通过（M1-M3）
-
-```bash
-git add mini_pi/agent/prompt.py mini_pi/agent/agent.py tests/test_agent.py
-git commit -m "feat: add Agent wrapper and system prompt builder"
-```
-
-> M3 完成标准：`uv run pytest` 全绿；Loop 的错误、截断、step limit、事件序列均有测试覆盖。
+---
 
 ## M4 文件 / Shell Tool
 
@@ -2082,7 +1894,7 @@ def cli(
     agent = Agent(
         llm=llm,
         registry=build_default_registry(workspace),
-        workspace=workspace,
+        cwd=workspace.root,
         max_steps=max_steps,
         on_event=renderer.handle,
     )
@@ -2202,7 +2014,7 @@ def test_agent_fixes_failing_test(tmp_path: Path) -> None:
     agent = Agent(
         llm=create_llm(provider, None),
         registry=build_default_registry(workspace),
-        workspace=workspace,
+        cwd=workspace.root,
         max_steps=30,
     )
     result = agent.run(
