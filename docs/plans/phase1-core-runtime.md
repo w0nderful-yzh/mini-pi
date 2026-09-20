@@ -194,104 +194,13 @@ mini-pi/
 
 ---
 
-### Task M4.2: 截断工具
+### Task M4.2: 截断工具（已完成）
 
-**Files:**
-- Create: `mini_pi/tools/truncate.py`
-- Test: `tests/test_truncate.py`
+提交：本次提交
 
-- [ ] **Step 1: 写失败测试 `tests/test_truncate.py`**
+交付物：`mini_pi/tools/truncate.py` — `truncate_text(text, *, max_lines, max_bytes, keep="head"|"tail") -> (text, truncated)`；按整行丢弃，不切半行、不切多字节字符；非法上限抛 `ValueError`。
 
-```python
-from __future__ import annotations
-
-import pytest
-
-from mini_pi.tools.truncate import truncate_text
-
-
-def test_head_lines() -> None:
-    text, truncated = truncate_text("\n".join(str(i) for i in range(10)), max_lines=3, max_bytes=10_000)
-    assert text == "0\n1\n2"
-    assert truncated is True
-
-
-def test_tail_lines() -> None:
-    text, truncated = truncate_text(
-        "\n".join(str(i) for i in range(10)), max_lines=3, max_bytes=10_000, keep="tail"
-    )
-    assert text == "7\n8\n9"
-    assert truncated is True
-
-
-def test_head_bytes() -> None:
-    text, truncated = truncate_text("a" * 100, max_lines=10, max_bytes=10)
-    assert len(text) <= 9
-    assert truncated is True
-
-
-def test_tail_bytes() -> None:
-    lines = ["x" * 20, "y" * 20, "z" * 20]
-    text, truncated = truncate_text("\n".join(lines), max_lines=10, max_bytes=45, keep="tail")
-    assert text == "z" * 20
-    assert truncated is True
-
-
-def test_no_truncation() -> None:
-    text, truncated = truncate_text("short", max_lines=10, max_bytes=100)
-    assert text == "short"
-    assert truncated is False
-
-
-def test_invalid_limits() -> None:
-    with pytest.raises(ValueError, match="limits"):
-        truncate_text("x", max_lines=0, max_bytes=10)
-```
-
-- [ ] **Step 2: 运行确认失败**
-
-Run: `uv run pytest tests/test_truncate.py -v`
-Expected: FAIL，`No module named 'mini_pi.tools.truncate'`
-
-- [ ] **Step 3: 写 `mini_pi/tools/truncate.py`**
-
-```python
-from __future__ import annotations
-
-from typing import Literal
-
-
-def truncate_text(
-    text: str, *, max_lines: int, max_bytes: int, keep: Literal["head", "tail"] = "head"
-) -> tuple[str, bool]:
-    if max_lines <= 0 or max_bytes <= 0:
-        raise ValueError("limits must be > 0")
-    lines = text.splitlines()
-    truncated = False
-    if len(lines) > max_lines:
-        lines = lines[:max_lines] if keep == "head" else lines[-max_lines:]
-        truncated = True
-
-    def encoded_length(candidate: list[str]) -> int:
-        return len("\n".join(candidate).encode("utf-8"))
-
-    while lines and encoded_length(lines) > max_bytes:
-        lines.pop() if keep == "head" else lines.pop(0)
-        truncated = True
-    return "\n".join(lines), truncated
-```
-
-- [ ] **Step 4: 运行测试通过**
-
-Run: `uv run pytest tests/test_truncate.py -v`
-Expected: `6 passed`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mini_pi/tools/truncate.py tests/test_truncate.py
-git commit -m "feat: add line and byte truncation helper"
-```
+验收：`tests/test_truncate.py` 6 passed；全量 75 passed, 2 deselected。
 
 ---
 
