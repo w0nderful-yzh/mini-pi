@@ -91,7 +91,7 @@ mini-pi/
 - Create: `mini_pi/__init__.py`
 - Create: `tests/test_bootstrap.py`
 
-- [ ] **Step 1: 写 `pyproject.toml`**
+- [x] **Step 1: 写 `pyproject.toml`**
 
 ```toml
 [project]
@@ -112,6 +112,7 @@ mini-pi = "mini_pi.cli.app:main"
 [dependency-groups]
 dev = [
     "pytest>=8.4.0",
+    "httpx>=0.28.0",
 ]
 
 [build-system]
@@ -127,7 +128,7 @@ markers = ["integration: tests that call real LLM APIs"]
 addopts = "-m 'not integration'"
 ```
 
-- [ ] **Step 2: 写 `.gitignore`**
+- [x] **Step 2: 写 `.gitignore`**
 
 ```text
 .venv/
@@ -138,13 +139,13 @@ __pycache__/
 .DS_Store
 ```
 
-- [ ] **Step 3: 写 `mini_pi/__init__.py`**
+- [x] **Step 3: 写 `mini_pi/__init__.py`**
 
 ```python
 """mini-pi: a lightweight coding agent harness."""
 ```
 
-- [ ] **Step 4: 写冒烟测试 `tests/test_bootstrap.py`**
+- [x] **Step 4: 写冒烟测试 `tests/test_bootstrap.py`**
 
 ```python
 from __future__ import annotations
@@ -156,12 +157,12 @@ def test_package_imports() -> None:
     assert mini_pi.__doc__ is not None
 ```
 
-- [ ] **Step 5: 安装依赖并运行测试**
+- [x] **Step 5: 安装依赖并运行测试**
 
 Run: `uv sync && uv run pytest -v`
 Expected: `1 passed`；`uv.lock` 生成；`python3.12` 由 uv 自动下载。
 
-- [ ] **Step 6: 取消 `.idea/` 跟踪并提交**
+- [x] **Step 6: 取消 `.idea/` 跟踪并提交**
 
 ```bash
 git rm -r --cached .idea

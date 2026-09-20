@@ -16,6 +16,7 @@ mini-pi = "mini_pi.cli.app:main"
 [dependency-groups]
 dev = [
     "pytest>=8.4.0",
+    "httpx>=0.28.0",
 ]
 
 [build-system]
