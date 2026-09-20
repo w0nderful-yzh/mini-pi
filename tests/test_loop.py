@@ -51,6 +51,16 @@ def test_read_only_tool_does_not_mark_modified_files(echo_registry) -> None:
     assert state.modified_files == set()
 
 
+def test_turn_end_is_emitted_for_final_answer(echo_registry, events) -> None:
+    """最终回答轮也必须以 turn_end 收尾，保证 turn_start / turn_end 成对。"""
+    state = AgentState(messages=[UserMessage(content="hi")])
+    llm = FakeLLMClient([assistant("done")])
+    run_loop(state, llm, echo_registry, on_event=events.append)
+    types = [event.type for event in events]
+    assert types.count("turn_start") == types.count("turn_end") == 1
+    assert types[-2:] == ["turn_end", "agent_end"]
+
+
 def test_event_sequence(echo_registry, events) -> None:
     """事件顺序稳定：agent_start → turn/message/tool 事件 → agent_end。"""
     state = AgentState(messages=[UserMessage(content="echo")])
@@ -69,6 +79,8 @@ def test_event_sequence(echo_registry, events) -> None:
     assert "tool_execution_end" in types
     assert types[-1] == "agent_end"
     assert events[-1].reason == "completed"
+    assert types.count("turn_start") == types.count("turn_end") == 2
+    assert types[-2:] == ["turn_end", "agent_end"]
     assert any(isinstance(event, TurnEndEvent) for event in events)
 
 

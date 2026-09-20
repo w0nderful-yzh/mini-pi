@@ -212,6 +212,8 @@ from mini_pi.llm.types import (
 
 ```python
         if assistant.stop_reason == "error":
+            # 每轮 turn_start 都要有对应的 turn_end
+            emit(TurnEndEvent(step=step))
             emit(AgentEndEvent(reason="error", message=assistant, error=assistant.error_message))
             return assistant
 ```

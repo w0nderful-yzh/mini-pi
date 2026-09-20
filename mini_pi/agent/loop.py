@@ -57,6 +57,8 @@ def run_loop(
         assistant = _stream_assistant(state, llm, registry, emit)
         last = assistant
         if not assistant.tool_calls:
+            # 最终回答轮也要收尾，保证 turn_start / turn_end 成对
+            emit(TurnEndEvent(step=step))
             emit(AgentEndEvent(reason="completed", message=assistant))
             return assistant
         _execute_tool_calls(state, registry, assistant.tool_calls, emit)
