@@ -628,7 +628,7 @@ git commit -m "feat: add error taxonomy and retrying LLM base client"
 - Create: `mini_pi/llm/openai_client.py`
 - Test: `tests/test_openai_client.py`
 
-- [ ] **Step 1: 写失败测试 `tests/test_openai_client.py`**
+- [x] **Step 1: 写失败测试 `tests/test_openai_client.py`**
 
 ```python
 from __future__ import annotations
@@ -854,12 +854,12 @@ def test_to_openai_tools_wire_format() -> None:
     assert wire[0]["function"]["parameters"] == READ_FILE_SCHEMA.parameters
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `uv run pytest tests/test_openai_client.py -v`
 Expected: FAIL，`No module named 'mini_pi.llm.openai_client'`
 
-- [ ] **Step 3: 写 `mini_pi/llm/openai_client.py`**
+- [x] **Step 3: 写 `mini_pi/llm/openai_client.py`**
 
 ```python
 from __future__ import annotations
@@ -1130,12 +1130,12 @@ class OpenAIClient(BaseLLMClient):
             raise LLMError(f"connection error: {exc}", retryable=True) from exc
 ```
 
-- [ ] **Step 4: 运行测试通过**
+- [x] **Step 4: 运行测试通过**
 
 Run: `uv run pytest tests/test_openai_client.py -v`
 Expected: `10 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add mini_pi/llm/openai_client.py tests/test_openai_client.py
