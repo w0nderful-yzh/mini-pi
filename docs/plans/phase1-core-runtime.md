@@ -77,7 +77,7 @@ mini-pi/
    - 其他异常 → 冒泡
 4. 测试命令统一 `uv run pytest <file> -v`；默认 `addopts = "-m 'not integration'"` 排除真实 API 测试。
 5. 代码必须按 AGENTS.md 第 18 节附带简要中文注释；本计划代码块为节省篇幅可能省略部分注释，落地时补齐。类型标注完整。
-6. 已完成的里程碑在本文档中精简为「交付物 + 验收」摘要，删除完整代码块；未完成部分保留完整步骤与代码。
+6. 已完成的任务与里程碑在本文档中精简为「交付物 + 验收（含提交号）」摘要，删除完整代码块与步骤；未完成部分保留完整步骤与代码。
 6. 工具的文件操作只允许经过 `Workspace`，禁止直接 `open()` / `Path.read_text()`。
 
 ---
@@ -101,245 +101,21 @@ mini-pi/
 
 ## M2 Tool Calling
 
-### Task M2.1: Tool 基类与 ToolResult
+### Task M2.1: Tool 基类与 ToolResult（已完成）
 
-**Files:**
-- Create: `mini_pi/tools/__init__.py`（本任务先留空）
-- Create: `mini_pi/tools/base.py`
-- Test: `tests/test_tool_base.py`
+提交：`645f875`
 
-- [x] **Step 1: 写失败测试 `tests/test_tool_base.py`**
+交付物：`mini_pi/tools/base.py` — `Tool`（声明 `name` / `description` / `args_model`，`schema()` 由 pydantic 模型生成 `ToolSchema`）与 `ToolResult(content, details)`。
 
-```python
-from __future__ import annotations
+验收：`tests/test_tool_base.py` 3 passed。
 
-from pydantic import BaseModel, Field
+### Task M2.2: ToolRegistry（已完成）
 
-from mini_pi.tools.base import Tool, ToolResult
+提交：`8341a25`
 
+交付物：`mini_pi/tools/registry.py` — `register`（重名抛 `ValueError`）、`schemas()`、`execute()`（未注册 → `ToolNotFoundError`；参数校验失败 → `ToolArgumentError`；通过后 `tool.execute(**validated)`）。
 
-class EchoArgs(BaseModel):
-    text: str = Field(description="Text to echo back.")
-
-
-class EchoTool(Tool):
-    name = "echo"
-    description = "Echo the provided text."
-    args_model = EchoArgs
-
-    def execute(self, text: str) -> ToolResult:
-        return ToolResult(content=text, details={"length": len(text)})
-
-
-def test_schema_is_built_from_args_model() -> None:
-    schema = EchoTool().schema()
-    assert schema.name == "echo"
-    assert schema.description == "Echo the provided text."
-    assert schema.parameters["properties"]["text"]["description"] == "Text to echo back."
-    assert schema.parameters["required"] == ["text"]
-
-
-def test_execute_returns_structured_result() -> None:
-    result = EchoTool().execute(text="hi")
-    assert result.content == "hi"
-    assert result.details == {"length": 2}
-
-
-def test_tool_result_details_default_none() -> None:
-    assert ToolResult(content="x").details is None
-```
-
-- [x] **Step 2: 运行确认失败**
-
-Run: `uv run pytest tests/test_tool_base.py -v`
-Expected: FAIL，`No module named 'mini_pi.tools'`
-
-- [x] **Step 3: 写 `mini_pi/tools/base.py`**
-
-```python
-from __future__ import annotations
-
-from abc import ABC, abstractmethod
-from typing import Any, ClassVar
-
-from pydantic import BaseModel
-
-from mini_pi.llm.types import ToolSchema
-
-
-class ToolResult(BaseModel):
-    content: str
-    details: dict[str, Any] | None = None
-
-
-class Tool(ABC):
-    name: ClassVar[str]
-    description: ClassVar[str]
-    args_model: ClassVar[type[BaseModel]]
-
-    def schema(self) -> ToolSchema:
-        return ToolSchema(
-            name=self.name,
-            description=self.description,
-            parameters=self.args_model.model_json_schema(),
-        )
-
-    @abstractmethod
-    def execute(self, **kwargs: Any) -> ToolResult: ...
-```
-
-- [x] **Step 4: 运行测试通过**
-
-Run: `uv run pytest tests/test_tool_base.py -v`
-Expected: `3 passed`
-
-- [x] **Step 5: Commit**
-
-```bash
-git add mini_pi/tools/__init__.py mini_pi/tools/base.py tests/test_tool_base.py
-git commit -m "feat: add Tool base class and ToolResult"
-```
-
----
-
-### Task M2.2: ToolRegistry
-
-**Files:**
-- Create: `mini_pi/tools/registry.py`
-- Test: `tests/test_registry.py`
-
-- [ ] **Step 1: 写失败测试 `tests/test_registry.py`**
-
-```python
-from __future__ import annotations
-
-import pytest
-from pydantic import BaseModel, Field
-
-from mini_pi.errors import ToolArgumentError, ToolError, ToolNotFoundError
-from mini_pi.tools.base import Tool, ToolResult
-from mini_pi.tools.registry import ToolRegistry
-
-
-class AddArgs(BaseModel):
-    a: int
-    b: int = Field(default=1, description="Second operand.")
-
-
-class AddTool(Tool):
-    name = "add"
-    description = "Add two integers."
-    args_model = AddArgs
-
-    def execute(self, a: int, b: int = 1) -> ToolResult:
-        return ToolResult(content=str(a + b))
-
-
-class ExplodingTool(Tool):
-    name = "explode"
-    description = "Always fails with ToolError."
-    args_model = AddArgs
-
-    def execute(self, a: int, b: int = 1) -> ToolResult:
-        raise ToolError("expected failure")
-
-
-def test_register_and_schemas() -> None:
-    registry = ToolRegistry()
-    registry.register(AddTool())
-    schemas = registry.schemas()
-    assert [schema.name for schema in schemas] == ["add"]
-
-
-def test_duplicate_registration_is_rejected() -> None:
-    registry = ToolRegistry()
-    registry.register(AddTool())
-    with pytest.raises(ValueError, match="duplicate"):
-        registry.register(AddTool())
-
-
-def test_execute_validates_and_applies_defaults() -> None:
-    registry = ToolRegistry()
-    registry.register(AddTool())
-    assert registry.execute("add", {"a": 2}).content == "3"
-    assert registry.execute("add", {"a": 2, "b": 5}).content == "7"
-
-
-def test_unknown_tool_raises() -> None:
-    registry = ToolRegistry()
-    with pytest.raises(ToolNotFoundError, match="unknown tool"):
-        registry.execute("nope", {})
-
-
-def test_invalid_arguments_raise() -> None:
-    registry = ToolRegistry()
-    registry.register(AddTool())
-    with pytest.raises(ToolArgumentError, match="invalid arguments"):
-        registry.execute("add", {"a": "not-an-int"})
-    with pytest.raises(ToolArgumentError, match="invalid arguments"):
-        registry.execute("add", {})
-
-
-def test_tool_error_propagates() -> None:
-    registry = ToolRegistry()
-    registry.register(ExplodingTool())
-    with pytest.raises(ToolError, match="expected failure"):
-        registry.execute("explode", {"a": 1})
-```
-
-- [ ] **Step 2: 运行确认失败**
-
-Run: `uv run pytest tests/test_registry.py -v`
-Expected: FAIL，`No module named 'mini_pi.tools.registry'`
-
-- [ ] **Step 3: 写 `mini_pi/tools/registry.py`**
-
-```python
-from __future__ import annotations
-
-from typing import Any
-
-from pydantic import ValidationError
-
-from mini_pi.errors import ToolArgumentError, ToolNotFoundError
-from mini_pi.llm.types import ToolSchema
-from mini_pi.tools.base import Tool, ToolResult
-
-
-class ToolRegistry:
-    def __init__(self) -> None:
-        self._tools: dict[str, Tool] = {}
-
-    def register(self, tool: Tool) -> None:
-        if tool.name in self._tools:
-            raise ValueError(f"duplicate tool name: {tool.name}")
-        self._tools[tool.name] = tool
-
-    def schemas(self) -> list[ToolSchema]:
-        return [tool.schema() for tool in self._tools.values()]
-
-    def execute(self, name: str, arguments: dict[str, Any]) -> ToolResult:
-        tool = self._tools.get(name)
-        if tool is None:
-            raise ToolNotFoundError(f"unknown tool: {name!r}")
-        try:
-            validated = tool.args_model.model_validate(arguments)
-        except ValidationError as exc:
-            raise ToolArgumentError(f"invalid arguments for {name!r}: {exc}") from exc
-        return tool.execute(**validated.model_dump())
-```
-
-- [ ] **Step 4: 运行测试通过**
-
-Run: `uv run pytest tests/test_registry.py -v`
-Expected: `6 passed`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mini_pi/tools/registry.py tests/test_registry.py
-git commit -m "feat: add tool registry with schema validation"
-```
+验收：`tests/test_registry.py` 6 passed；全量 33 passed。
 
 ---
 
