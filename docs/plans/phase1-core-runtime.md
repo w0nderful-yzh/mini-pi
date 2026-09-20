@@ -358,7 +358,7 @@ def test_run_injects_system_and_user_messages(workspace, registry) -> None:
     assert isinstance(agent.state.messages[0], SystemMessage)
     tools_section = agent.state.messages[0].content.split("# Tools")[1]
     assert "- echo:" in tools_section
-    assert "read_file" not in tools_section
+    assert "read" not in tools_section
     assert isinstance(agent.state.messages[1], UserMessage)
     assert agent.state.messages[1].content == "do something"
 
@@ -423,9 +423,9 @@ def build_system_prompt(*, workspace: Workspace, tools: list[ToolSchema]) -> str
 
 # Working rules
 - All paths are resolved inside the workspace; paths outside the workspace are rejected.
-- Before changing code, locate it with search_code and read it with read_file. Never guess file contents.
-- Prefer edit_file for minimal changes; use write_file only for new files or full rewrites.
-- Verify changes with run_command (tests/build/lint) and inspect diffs with git_diff.
+- Before changing code, locate it with the search tool and read it with the read tool. Never guess file contents.
+- Prefer edit for minimal changes; use write only for new files or full rewrites.
+- Verify changes with bash (tests/build/lint) and inspect diffs with git_diff.
 - Tool errors are returned to you as error observations; read them and adjust instead of repeating the same call.
 - When the task is complete, stop calling tools and summarize what changed and how it was verified.
 
@@ -913,7 +913,7 @@ git commit -m "feat: add subprocess runner with process-group timeout kill"
 
 ---
 
-### Task M4.4: read_file
+### Task M4.4: read
 
 **Files:**
 - Create: `mini_pi/tools/read.py`
@@ -929,60 +929,60 @@ from pathlib import Path
 import pytest
 
 from mini_pi.errors import ToolError, WorkspaceViolationError
-from mini_pi.tools.read import ReadFileTool
+from mini_pi.tools.read import ReadTool
 from mini_pi.workspace.workspace import Workspace
 
 
 @pytest.fixture
-def tool(tmp_path: Path) -> ReadFileTool:
+def tool(tmp_path: Path) -> ReadTool:
     (tmp_path / "notes.txt").write_text("line1\nline2\nline3\n", encoding="utf-8")
-    return ReadFileTool(Workspace(tmp_path))
+    return ReadTool(Workspace(tmp_path))
 
 
-def test_reads_whole_file(tool: ReadFileTool) -> None:
+def test_reads_whole_file(tool: ReadTool) -> None:
     result = tool.execute(path="notes.txt")
     assert "line1\nline2\nline3" in result.content
     assert result.details == {"path": "notes.txt", "total_lines": 3}
 
 
-def test_offset_and_limit(tool: ReadFileTool) -> None:
+def test_offset_and_limit(tool: ReadTool) -> None:
     result = tool.execute(path="notes.txt", offset=2, limit=1)
     assert result.content.splitlines()[0] == "line2"
     assert "Use offset=3" in result.content
 
 
-def test_offset_beyond_end_is_error(tool: ReadFileTool) -> None:
+def test_offset_beyond_end_is_error(tool: ReadTool) -> None:
     with pytest.raises(ToolError, match="beyond end of file"):
         tool.execute(path="notes.txt", offset=99)
 
 
-def test_missing_file_is_error(tool: ReadFileTool) -> None:
+def test_missing_file_is_error(tool: ReadTool) -> None:
     with pytest.raises(ToolError, match="not a file"):
         tool.execute(path="missing.txt")
 
 
-def test_escape_is_rejected(tool: ReadFileTool) -> None:
+def test_escape_is_rejected(tool: ReadTool) -> None:
     with pytest.raises(WorkspaceViolationError):
         tool.execute(path="../secret.txt")
 
 
 def test_binary_file_is_rejected(tmp_path: Path) -> None:
     (tmp_path / "bin.dat").write_bytes(b"\x00\x01\x02binary")
-    tool = ReadFileTool(Workspace(tmp_path))
+    tool = ReadTool(Workspace(tmp_path))
     with pytest.raises(ToolError, match="binary"):
         tool.execute(path="bin.dat")
 
 
 def test_invalid_utf8_is_rejected(tmp_path: Path) -> None:
     (tmp_path / "bad.txt").write_bytes(b"\xff\xfe\x00\x41")
-    tool = ReadFileTool(Workspace(tmp_path))
+    tool = ReadTool(Workspace(tmp_path))
     with pytest.raises(ToolError):
         tool.execute(path="bad.txt")
 
 
 def test_line_truncation_adds_hint(tmp_path: Path) -> None:
     (tmp_path / "long.txt").write_text("\n".join(f"l{i}" for i in range(5000)), encoding="utf-8")
-    tool = ReadFileTool(Workspace(tmp_path))
+    tool = ReadTool(Workspace(tmp_path))
     result = tool.execute(path="long.txt")
     assert "[Showing lines 1-2000 of 5000. Use offset=2001 to continue.]" in result.content
 ```
@@ -1005,16 +1005,16 @@ from mini_pi.tools.truncate import truncate_text
 from mini_pi.workspace.workspace import Workspace
 
 
-class ReadFileArgs(BaseModel):
+class ReadArgs(BaseModel):
     path: str = Field(description="File path relative to the workspace root.")
     offset: int = Field(default=1, ge=1, description="1-based line number to start reading from.")
     limit: int | None = Field(default=None, ge=1, description="Maximum number of lines to read.")
 
 
-class ReadFileTool(Tool):
-    name = "read_file"
+class ReadTool(Tool):
+    name = "read"
     description = "Read a UTF-8 text file inside the workspace. Supports offset/limit paging and reports a continuation hint when truncated."
-    args_model = ReadFileArgs
+    args_model = ReadArgs
     max_lines = 2000
     max_bytes = 50_000
 
@@ -1043,7 +1043,7 @@ class ReadFileTool(Tool):
         )
         if body == "" and window:
             return ToolResult(
-                content=f"Selected line is too long to display (byte cap {self.max_bytes}). Use run_command with sed or awk to inspect it.",
+                content=f"Selected line is too long to display (byte cap {self.max_bytes}). Use bash with sed or awk to inspect it.",
                 details={"path": rel, "total_lines": total},
             )
         shown = body.count("\n") + 1 if body else 0
@@ -1066,12 +1066,12 @@ Expected: `8 passed`
 
 ```bash
 git add mini_pi/tools/read.py tests/test_read.py
-git commit -m "feat: add read_file tool"
+git commit -m "feat: add read tool"
 ```
 
 ---
 
-### Task M4.5: write_file
+### Task M4.5: write
 
 **Files:**
 - Create: `mini_pi/tools/write.py`
@@ -1087,7 +1087,7 @@ from pathlib import Path
 import pytest
 
 from mini_pi.errors import WorkspaceViolationError
-from mini_pi.tools.write import WriteFileTool
+from mini_pi.tools.write import WriteTool
 from mini_pi.workspace.workspace import Workspace
 
 
@@ -1097,7 +1097,7 @@ def workspace(tmp_path: Path) -> Workspace:
 
 
 def test_writes_new_file_and_creates_parents(workspace: Workspace) -> None:
-    tool = WriteFileTool(workspace)
+    tool = WriteTool(workspace)
     result = tool.execute(path="pkg/mod.py", content="x = 1\n")
     assert (workspace.root / "pkg" / "mod.py").read_text(encoding="utf-8") == "x = 1\n"
     assert result.content == "Wrote 6 bytes to pkg/mod.py."
@@ -1107,13 +1107,13 @@ def test_writes_new_file_and_creates_parents(workspace: Workspace) -> None:
 def test_overwrites_existing_file(workspace: Workspace) -> None:
     target = workspace.root / "a.txt"
     target.write_text("old", encoding="utf-8")
-    WriteFileTool(workspace).execute(path="a.txt", content="new")
+    WriteTool(workspace).execute(path="a.txt", content="new")
     assert target.read_text(encoding="utf-8") == "new"
 
 
 def test_escape_is_rejected(workspace: Workspace) -> None:
     with pytest.raises(WorkspaceViolationError):
-        WriteFileTool(workspace).execute(path="../out.txt", content="x")
+        WriteTool(workspace).execute(path="../out.txt", content="x")
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -1132,15 +1132,15 @@ from mini_pi.tools.base import Tool, ToolResult
 from mini_pi.workspace.workspace import Workspace
 
 
-class WriteFileArgs(BaseModel):
+class WriteArgs(BaseModel):
     path: str = Field(description="File path relative to the workspace root.")
     content: str = Field(description="Full file content to write.")
 
 
-class WriteFileTool(Tool):
-    name = "write_file"
+class WriteTool(Tool):
+    name = "write"
     description = "Create or fully rewrite a file inside the workspace. Parent directories are created automatically and writes are atomic."
-    args_model = WriteFileArgs
+    args_model = WriteArgs
 
     def __init__(self, workspace: Workspace) -> None:
         self._workspace = workspace
@@ -1165,12 +1165,12 @@ Expected: `3 passed`
 
 ```bash
 git add mini_pi/tools/write.py tests/test_write.py
-git commit -m "feat: add atomic write_file tool"
+git commit -m "feat: add atomic write tool"
 ```
 
 ---
 
-### Task M4.6: edit_file
+### Task M4.6: edit
 
 **Files:**
 - Create: `mini_pi/tools/edit.py`
@@ -1186,7 +1186,7 @@ from pathlib import Path
 import pytest
 
 from mini_pi.errors import ToolArgumentError, ToolError
-from mini_pi.tools.edit import EditFileTool, EditSpec
+from mini_pi.tools.edit import EditTool, EditSpec
 from mini_pi.workspace.workspace import Workspace
 
 
@@ -1197,7 +1197,7 @@ def workspace(tmp_path: Path) -> Workspace:
 
 
 def test_unique_replacement(workspace: Workspace) -> None:
-    tool = EditFileTool(workspace)
+    tool = EditTool(workspace)
     result = tool.execute(path="app.py", edits=[EditSpec(old_text="a - b", new_text="a + b")])
     assert (workspace.root / "app.py").read_text(encoding="utf-8").endswith("return a + b\n")
     assert result.content == "Replaced 1 block(s) in app.py."
@@ -1209,7 +1209,7 @@ def test_unique_replacement(workspace: Workspace) -> None:
 def test_multiple_edits_use_original_offsets(workspace: Workspace) -> None:
     path = workspace.root / "multi.txt"
     path.write_text("alpha beta gamma\n", encoding="utf-8")
-    tool = EditFileTool(workspace)
+    tool = EditTool(workspace)
     result = tool.execute(
         path="multi.txt",
         edits=[
@@ -1222,7 +1222,7 @@ def test_multiple_edits_use_original_offsets(workspace: Workspace) -> None:
 
 
 def test_missing_old_text_is_error(workspace: Workspace) -> None:
-    tool = EditFileTool(workspace)
+    tool = EditTool(workspace)
     with pytest.raises(ToolArgumentError, match="not found"):
         tool.execute(path="app.py", edits=[EditSpec(old_text="nope", new_text="x")])
 
@@ -1230,7 +1230,7 @@ def test_missing_old_text_is_error(workspace: Workspace) -> None:
 def test_ambiguous_old_text_is_error(workspace: Workspace) -> None:
     path = workspace.root / "dup.txt"
     path.write_text("same\nsame\n", encoding="utf-8")
-    tool = EditFileTool(workspace)
+    tool = EditTool(workspace)
     with pytest.raises(ToolArgumentError, match="matches 2 times"):
         tool.execute(path="dup.txt", edits=[EditSpec(old_text="same", new_text="other")])
 
@@ -1238,7 +1238,7 @@ def test_ambiguous_old_text_is_error(workspace: Workspace) -> None:
 def test_overlapping_edits_are_error(workspace: Workspace) -> None:
     path = workspace.root / "overlap.txt"
     path.write_text("abcdef\n", encoding="utf-8")
-    tool = EditFileTool(workspace)
+    tool = EditTool(workspace)
     with pytest.raises(ToolArgumentError, match="overlap"):
         tool.execute(
             path="overlap.txt",
@@ -1250,19 +1250,19 @@ def test_overlapping_edits_are_error(workspace: Workspace) -> None:
 
 
 def test_empty_old_text_is_error(workspace: Workspace) -> None:
-    tool = EditFileTool(workspace)
+    tool = EditTool(workspace)
     with pytest.raises(ToolArgumentError, match="must not be empty"):
         tool.execute(path="app.py", edits=[EditSpec(old_text="", new_text="x")])
 
 
 def test_no_change_is_error(workspace: Workspace) -> None:
-    tool = EditFileTool(workspace)
+    tool = EditTool(workspace)
     with pytest.raises(ToolArgumentError, match="no change"):
         tool.execute(path="app.py", edits=[EditSpec(old_text="a - b", new_text="a - b")])
 
 
 def test_missing_file_is_error(workspace: Workspace) -> None:
-    tool = EditFileTool(workspace)
+    tool = EditTool(workspace)
     with pytest.raises(ToolError, match="not a file"):
         tool.execute(path="missing.py", edits=[EditSpec(old_text="a", new_text="b")])
 ```
@@ -1291,15 +1291,15 @@ class EditSpec(BaseModel):
     new_text: str = Field(description="Replacement text.")
 
 
-class EditFileArgs(BaseModel):
+class EditArgs(BaseModel):
     path: str = Field(description="File path relative to the workspace root.")
     edits: list[EditSpec] = Field(min_length=1, description="Non-overlapping replacements applied to the original file.")
 
 
-class EditFileTool(Tool):
-    name = "edit_file"
+class EditTool(Tool):
+    name = "edit"
     description = "Apply exact, unique text replacements to an existing file. All edits match the original content and must not overlap. Returns a unified diff."
-    args_model = EditFileArgs
+    args_model = EditArgs
 
     def __init__(self, workspace: Workspace) -> None:
         self._workspace = workspace
@@ -1357,12 +1357,12 @@ Expected: `8 passed`
 
 ```bash
 git add mini_pi/tools/edit.py tests/test_edit.py
-git commit -m "feat: add exact-match edit_file tool"
+git commit -m "feat: add exact-match edit tool"
 ```
 
 ---
 
-### Task M4.7: search_code
+### Task M4.7: search
 
 **Files:**
 - Create: `mini_pi/tools/search.py`
@@ -1379,12 +1379,12 @@ from pathlib import Path
 import pytest
 
 from mini_pi.errors import ToolArgumentError
-from mini_pi.tools.search import SearchCodeTool
+from mini_pi.tools.search import SearchTool
 from mini_pi.workspace.workspace import Workspace
 
 
 @pytest.fixture
-def tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SearchCodeTool:
+def tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SearchTool:
     monkeypatch.setattr(shutil, "which", lambda _: None)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
@@ -1392,10 +1392,10 @@ def tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SearchCodeTool:
     (tmp_path / "notes.md").write_text("add documentation here\n", encoding="utf-8")
     (tmp_path / ".venv").mkdir()
     (tmp_path / ".venv" / "ignored.py").write_text("add ignored\n", encoding="utf-8")
-    return SearchCodeTool(Workspace(tmp_path))
+    return SearchTool(Workspace(tmp_path))
 
 
-def test_literal_search(tool: SearchCodeTool) -> None:
+def test_literal_search(tool: SearchTool) -> None:
     result = tool.execute(pattern="add")
     lines = result.content.splitlines()
     assert "src/app.py:1:def add(a, b):" in lines
@@ -1405,38 +1405,38 @@ def test_literal_search(tool: SearchCodeTool) -> None:
     assert result.details["engine"] == "python"
 
 
-def test_regex_search(tool: SearchCodeTool) -> None:
+def test_regex_search(tool: SearchTool) -> None:
     result = tool.execute(pattern=r"return a \+ b", is_regex=True)
     assert "src/app.py:2:    return a + b" in result.content
 
 
-def test_glob_filter(tool: SearchCodeTool) -> None:
+def test_glob_filter(tool: SearchTool) -> None:
     result = tool.execute(pattern="add", glob="*.py")
     assert "notes.md" not in result.content
 
 
-def test_no_matches(tool: SearchCodeTool) -> None:
+def test_no_matches(tool: SearchTool) -> None:
     result = tool.execute(pattern="does-not-exist")
     assert result.content == "No matches found"
 
 
-def test_limit_adds_truncation_hint(tool: SearchCodeTool) -> None:
+def test_limit_adds_truncation_hint(tool: SearchTool) -> None:
     result = tool.execute(pattern="add", limit=1)
     assert "[Truncated at 1 matches" in result.content
 
 
-def test_invalid_regex_is_argument_error(tool: SearchCodeTool) -> None:
+def test_invalid_regex_is_argument_error(tool: SearchTool) -> None:
     with pytest.raises(ToolArgumentError, match="invalid regex"):
         tool.execute(pattern="[", is_regex=True)
 
 
-def test_search_single_file(tool: SearchCodeTool) -> None:
+def test_search_single_file(tool: SearchTool) -> None:
     result = tool.execute(pattern="add", path="src/app.py")
     assert "src/app.py:1" in result.content
     assert "notes.md" not in result.content
 
 
-def test_binary_files_are_skipped(tool: SearchCodeTool, tmp_path: Path) -> None:
+def test_binary_files_are_skipped(tool: SearchTool, tmp_path: Path) -> None:
     (tmp_path / "blob.bin").write_bytes(b"\x00add\x00")
     result = tool.execute(pattern="add")
     assert "blob.bin" not in result.content
@@ -1445,7 +1445,7 @@ def test_binary_files_are_skipped(tool: SearchCodeTool, tmp_path: Path) -> None:
 @pytest.mark.skipif(shutil.which("rg") is None, reason="ripgrep not installed")
 def test_rg_engine(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("needle\n", encoding="utf-8")
-    tool = SearchCodeTool(Workspace(tmp_path))
+    tool = SearchTool(Workspace(tmp_path))
     result = tool.execute(pattern="needle")
     assert result.details is not None
     assert result.details["engine"] == "rg"
@@ -1477,7 +1477,7 @@ from mini_pi.tools.process import run_process
 from mini_pi.workspace.workspace import Workspace
 
 
-class SearchCodeArgs(BaseModel):
+class SearchArgs(BaseModel):
     pattern: str = Field(description="Literal text or regular expression to search for.")
     path: str = Field(default=".", description="File or directory to search, relative to the workspace root.")
     glob: str | None = Field(default=None, description="Only search files matching this glob, e.g. '*.py'.")
@@ -1485,10 +1485,10 @@ class SearchCodeArgs(BaseModel):
     limit: int = Field(default=100, ge=1, le=1000, description="Maximum number of matching lines to return.")
 
 
-class SearchCodeTool(Tool):
-    name = "search_code"
+class SearchTool(Tool):
+    name = "search"
     description = "Search text or regex across workspace files and return file:line:text matches. Skips .git/.venv/node_modules and binary files."
-    args_model = SearchCodeArgs
+    args_model = SearchArgs
     skip_dirs = frozenset(
         {".git", ".venv", "node_modules", "__pycache__", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".idea"}
     )
@@ -1611,12 +1611,12 @@ Expected: `9 passed`（无 rg 时 `8 passed, 1 skipped`）
 
 ```bash
 git add mini_pi/tools/search.py tests/test_search.py
-git commit -m "feat: add search_code tool with rg and python engines"
+git commit -m "feat: add search tool with rg and python engines"
 ```
 
 ---
 
-### Task M4.8: run_command
+### Task M4.8: bash
 
 **Files:**
 - Create: `mini_pi/tools/bash.py`
@@ -1632,16 +1632,16 @@ from pathlib import Path
 
 import pytest
 
-from mini_pi.tools.bash import RunCommandTool
+from mini_pi.tools.bash import BashTool
 from mini_pi.workspace.workspace import Workspace
 
 
 @pytest.fixture
-def tool(tmp_path: Path) -> RunCommandTool:
-    return RunCommandTool(Workspace(tmp_path))
+def tool(tmp_path: Path) -> BashTool:
+    return BashTool(Workspace(tmp_path))
 
 
-def test_successful_command(tool: RunCommandTool) -> None:
+def test_successful_command(tool: BashTool) -> None:
     result = tool.execute(command="echo hello")
     assert "exit_code: 0" in result.content
     assert "hello" in result.content
@@ -1649,24 +1649,24 @@ def test_successful_command(tool: RunCommandTool) -> None:
     assert result.details["exit_code"] == 0
 
 
-def test_non_zero_exit_is_a_normal_result(tool: RunCommandTool) -> None:
+def test_non_zero_exit_is_a_normal_result(tool: BashTool) -> None:
     result = tool.execute(command="exit 3")
     assert "exit_code: 3" in result.content
 
 
-def test_stderr_is_preserved(tool: RunCommandTool) -> None:
+def test_stderr_is_preserved(tool: BashTool) -> None:
     result = tool.execute(command="echo oops 1>&2")
     assert "oops" in result.content
     assert "stderr:" in result.content
 
 
-def test_cwd_is_workspace_root(tool: RunCommandTool, tmp_path: Path) -> None:
+def test_cwd_is_workspace_root(tool: BashTool, tmp_path: Path) -> None:
     tool.execute(command="pwd > cwd.txt")
     recorded = Path((tmp_path / "cwd.txt").read_text(encoding="utf-8").strip()).resolve()
     assert recorded == tmp_path.resolve()
 
 
-def test_timeout_is_reported(tool: RunCommandTool) -> None:
+def test_timeout_is_reported(tool: BashTool) -> None:
     command = f'"{sys.executable}" -c "import time; time.sleep(10)"'
     result = tool.execute(command=command, timeout=1)
     assert "timed out" in result.content
@@ -1674,11 +1674,11 @@ def test_timeout_is_reported(tool: RunCommandTool) -> None:
     assert result.details["timed_out"] is True
 
 
-def test_invalid_timeout_is_rejected_by_schema(tool: RunCommandTool) -> None:
+def test_invalid_timeout_is_rejected_by_schema(tool: BashTool) -> None:
     from pydantic import ValidationError
 
     with pytest.raises(ValidationError):
-        RunCommandTool.args_model.model_validate({"command": "echo hi", "timeout": 0})
+        BashTool.args_model.model_validate({"command": "echo hi", "timeout": 0})
 ```
 
 - [ ] **Step 2: 运行确认失败**
@@ -1699,15 +1699,15 @@ from mini_pi.tools.truncate import truncate_text
 from mini_pi.workspace.workspace import Workspace
 
 
-class RunCommandArgs(BaseModel):
+class BashArgs(BaseModel):
     command: str = Field(description="Shell command to run with cwd set to the workspace root.")
     timeout: int = Field(default=120, ge=1, le=600, description="Timeout in seconds.")
 
 
-class RunCommandTool(Tool):
-    name = "run_command"
+class BashTool(Tool):
+    name = "bash"
     description = "Run a shell command in the workspace root. Returns exit code, stdout and stderr. Non-zero exit codes are reported, not raised."
-    args_model = RunCommandArgs
+    args_model = BashArgs
     max_lines = 2000
     max_bytes = 50_000
 
@@ -1754,7 +1754,7 @@ Expected: `6 passed`
 
 ```bash
 git add mini_pi/tools/bash.py tests/test_bash.py
-git commit -m "feat: add run_command tool with timeout and output truncation"
+git commit -m "feat: add bash tool with timeout and output truncation"
 ```
 
 ---
@@ -1929,11 +1929,11 @@ def test_default_registry_contains_phase1_tools(tmp_path: Path) -> None:
     registry = build_default_registry(Workspace(tmp_path))
     names = [schema.name for schema in registry.schemas()]
     assert names == [
-        "read_file",
-        "write_file",
-        "edit_file",
-        "search_code",
-        "run_command",
+        "read",
+        "write",
+        "edit",
+        "search",
+        "bash",
         "git_diff",
     ]
 ```
@@ -1948,13 +1948,13 @@ Expected: FAIL，`ImportError: cannot import name 'build_default_registry'`
 ```python
 from __future__ import annotations
 
-from mini_pi.tools.bash import RunCommandTool
-from mini_pi.tools.edit import EditFileTool
+from mini_pi.tools.bash import BashTool
+from mini_pi.tools.edit import EditTool
 from mini_pi.tools.git import GitDiffTool
-from mini_pi.tools.read import ReadFileTool
+from mini_pi.tools.read import ReadTool
 from mini_pi.tools.registry import ToolRegistry
-from mini_pi.tools.search import SearchCodeTool
-from mini_pi.tools.write import WriteFileTool
+from mini_pi.tools.search import SearchTool
+from mini_pi.tools.write import WriteTool
 from mini_pi.workspace.workspace import Workspace
 
 __all__ = ["build_default_registry"]
@@ -1962,11 +1962,11 @@ __all__ = ["build_default_registry"]
 
 def build_default_registry(workspace: Workspace) -> ToolRegistry:
     registry = ToolRegistry()
-    registry.register(ReadFileTool(workspace))
-    registry.register(WriteFileTool(workspace))
-    registry.register(EditFileTool(workspace))
-    registry.register(SearchCodeTool(workspace))
-    registry.register(RunCommandTool(workspace))
+    registry.register(ReadTool(workspace))
+    registry.register(WriteTool(workspace))
+    registry.register(EditTool(workspace))
+    registry.register(SearchTool(workspace))
+    registry.register(BashTool(workspace))
     registry.register(GitDiffTool(workspace))
     return registry
 ```
@@ -2032,13 +2032,13 @@ def test_renders_text_deltas() -> None:
 
 def test_renders_tool_starts_and_results() -> None:
     renderer, stream = make_renderer()
-    call = ToolCall(id="c1", name="run_command", arguments={"command": "pytest"})
+    call = ToolCall(id="c1", name="bash", arguments={"command": "pytest"})
     renderer.handle(ToolExecutionStartEvent(tool_call=call))
     renderer.handle(
         ToolExecutionEndEvent(tool_call=call, result=ToolResult(content="exit_code: 0"), is_error=False)
     )
     output = stream.getvalue()
-    assert "run_command" in output
+    assert "bash" in output
     assert "pytest" in output
     assert "exit_code: 0" in output
 
@@ -2372,7 +2372,7 @@ uv run mini-pi --provider deepseek --cwd /tmp/mini-pi-demo \
   "运行 pytest，定位失败原因并修复，修复后再次运行 pytest 验证"
 ```
 
-观察输出应包含：`run_command`（pytest 失败）→ `read_file` / `search_code` → `edit_file` → `run_command`（pytest 通过）→ 最终总结。
+观察输出应包含：`bash`（pytest 失败）→ `read` / `search` → `edit` → `bash`（pytest 通过）→ 最终总结。
 
 - [ ] **Step 5: Commit**
 
@@ -2414,7 +2414,7 @@ def test_expanduser_is_not_a_shortcut(workspace: Workspace) -> None:
 def test_edits_still_apply_when_first_edit_changes_length(workspace: Workspace) -> None:
     path = workspace.root / "grow.txt"
     path.write_text("abc def\n", encoding="utf-8")
-    tool = EditFileTool(workspace)
+    tool = EditTool(workspace)
     tool.execute(
         path="grow.txt",
         edits=[
@@ -2428,7 +2428,7 @@ def test_edits_still_apply_when_first_edit_changes_length(workspace: Workspace) 
 `tests/test_bash.py`：
 
 ```python
-def test_stdout_truncation_marks_details(tool: RunCommandTool) -> None:
+def test_stdout_truncation_marks_details(tool: BashTool) -> None:
     command = f'"{sys.executable}" -c "print(\'x\' * 60000)"'
     result = tool.execute(command=command)
     assert result.details is not None
@@ -2439,7 +2439,7 @@ def test_stdout_truncation_marks_details(tool: RunCommandTool) -> None:
 `tests/test_search.py`：
 
 ```python
-def test_binary_content_in_text_extension_is_skipped(tool: SearchCodeTool, tmp_path: Path) -> None:
+def test_binary_content_in_text_extension_is_skipped(tool: SearchTool, tmp_path: Path) -> None:
     (tmp_path / "fake.txt").write_bytes(b"\xff\xfe\x00add")
     result = tool.execute(pattern="add")
     assert "fake.txt" not in result.content
@@ -2533,7 +2533,7 @@ git commit -m "docs: mark phase 1 milestones complete"
 | Agent Loop（事件、max_steps、错误、length 截断） | M2.4、M3.1-M3.2 |
 | Agent 封装与 system prompt | M3.3 |
 | Workspace 路径逃逸（`../`、绝对路径、symlink）、原子写 | M4.1、M6.1 |
-| read_file / write_file / edit_file / search_code / run_command / git_diff | M4.4-M4.10 |
+| read / write / edit / search / bash / git_diff | M4.4-M4.10 |
 | Shell Tool（cwd、timeout 杀进程组、stdout/stderr 分离、exit code、双限截断） | M4.3、M4.8 |
 | CLI（一次性 + 交互式 + 事件渲染） | M5.1-M5.2 |
 | pytest（FakeLLM、tmp_path、integration 排除、无网络） | 全计划 |

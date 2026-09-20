@@ -163,11 +163,11 @@ Tool Registry
 Workspace
 CLI
 
-read_file
-write_file
-edit_file
-search_code
-run_command
+read
+write
+edit
+search
+bash
 git_diff
 
 pytest
@@ -396,8 +396,8 @@ return exit code
 第一阶段：
 
 ```text
-write_file   新文件或整文件重写，原子写，自动建父目录
-edit_file    对原文精确匹配、唯一匹配、多 edit 不重叠
+write   新文件或整文件重写，原子写，自动建父目录
+edit    对原文精确匹配、唯一匹配、多 edit 不重叠
 ```
 
 后续可升级：

@@ -77,7 +77,7 @@ Python Coding Agent Harness
 | 工具错误 | 所有异常转成 `isError` ToolResult 回传模型 | ToolError 转 `is_error` observation；非预期异常直接冒泡（Fail Fast） |
 | 工具执行 | prepare 串行 + execute 并行 | 第一阶段全部串行，预留 `execution_mode` |
 | 工具定义 | Schema → Definition → AgentTool → Renderer 四层 | 简化为 `pydantic Args + Tool` 单层，渲染由 CLI 事件层承担 |
-| 输出截断 | 行数 + 字节双限，附可操作续读提示 | 复刻（read / run_command / search） |
+| 输出截断 | 行数 + 字节双限，附可操作续读提示 | 复刻（read / bash / search） |
 | edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 第一阶段只做精确唯一匹配，fuzzy 后置 |
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
@@ -115,7 +115,7 @@ Python Coding Agent Harness
 ┌────────────────────────────────────┐
 │               Tool                 │
 │ read / write / edit / search       │
-│ run_command / git_diff             │
+│ bash / git_diff             │
 └────────────────┬───────────────────┘
                  ↓  path
 ┌────────────────────────────────────┐
@@ -255,12 +255,12 @@ LLM → Tool Call → Tool → Observation → LLM → ...
 第一阶段工具：
 
 ```text
-read_file    读文件（offset/limit、二进制识别、截断续读）
-write_file   原子写（自动建父目录）
-edit_file    精确唯一匹配替换（多 edit、不重叠、输出 diff）
-search_code  搜索代码（优先 rg，无 rg 用 Python 扫描）
-run_command  执行命令（cwd=workspace、timeout、stdout/stderr 分离、exit code）
-git_diff     查看改动（支持 staged）
+read     读文件（offset/limit、二进制识别、截断续读）
+write    原子写（自动建父目录）
+edit     精确唯一匹配替换（多 edit、不重叠、输出 diff）
+search   搜索代码（优先 rg，无 rg 用 Python 扫描）
+bash     执行命令（cwd=workspace、timeout、stdout/stderr 分离、exit code）
+git_diff 查看改动（支持 staged）
 ```
 
 约定：
@@ -328,7 +328,7 @@ uv run pytest -m integration        # 需要 API Key
 | M1 | LLM 调通：消息模型、OpenAI/DeepSeek 流式 client、重试 | 已完成 |
 | M2 | Tool Calling：Tool/Registry、事件模型、run_loop、FakeLLM 测试 | 已完成 |
 | M3 | Agent Loop 完善：max_steps、错误处理、Agent 封装、system prompt | 未开始 |
-| M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/run_command/git_diff | 未开始 |
+| M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 未开始 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 未开始 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 未开始 |
 | M7 | Session / Context：JSONL entry 树、AGENTS.md 加载、compaction | 未开始 |
