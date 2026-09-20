@@ -1150,7 +1150,7 @@ git commit -m "feat: add streaming OpenAI-compatible client"
 - Create: `mini_pi/llm/deepseek_client.py`
 - Test: `tests/test_deepseek_client.py`
 
-- [ ] **Step 1: 写失败测试 `tests/test_deepseek_client.py`**
+- [x] **Step 1: 写失败测试 `tests/test_deepseek_client.py`**
 
 ```python
 from __future__ import annotations
@@ -1213,12 +1213,12 @@ def test_deepseek_requires_its_own_key(monkeypatch: pytest.MonkeyPatch) -> None:
         DeepSeekClient(model="deepseek-chat")
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `uv run pytest tests/test_deepseek_client.py -v`
 Expected: FAIL，`No module named 'mini_pi.llm.deepseek_client'`
 
-- [ ] **Step 3: 写 `mini_pi/llm/deepseek_client.py`**
+- [x] **Step 3: 写 `mini_pi/llm/deepseek_client.py`**
 
 ```python
 from __future__ import annotations
@@ -1258,12 +1258,12 @@ class DeepSeekClient(OpenAIClient):
         return to_openai_messages(messages, include_reasoning=True)
 ```
 
-- [ ] **Step 4: 运行测试通过**
+- [x] **Step 4: 运行测试通过**
 
 Run: `uv run pytest tests/test_deepseek_client.py -v`
 Expected: `3 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add mini_pi/llm/deepseek_client.py tests/test_deepseek_client.py
@@ -1277,7 +1277,7 @@ git commit -m "feat: add DeepSeek client with reasoning_content replay"
 **Files:**
 - Create: `tests/test_integration_llm.py`
 
-- [ ] **Step 1: 写集成测试**
+- [x] **Step 1: 写集成测试**
 
 ```python
 from __future__ import annotations
@@ -1307,12 +1307,12 @@ def test_deepseek_complete() -> None:
     assert message.content.strip().lower().startswith("ok")
 ```
 
-- [ ] **Step 2: 运行（有 Key 时）**
+- [x] **Step 2: 运行（有 Key 时）**
 
 Run: `uv run pytest tests/test_integration_llm.py -m integration -v`
 Expected: 有对应 Key 的用例 `PASSED`；无 Key 则 `SKIPPED`。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/test_integration_llm.py
