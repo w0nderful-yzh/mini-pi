@@ -34,6 +34,11 @@ from mini_pi.tools.registry import ToolRegistry
 
 EventSink = Callable[[AgentEvent], None]
 
+_TRUNCATED_MESSAGE = (
+    "Tool call was truncated because the model reached the output token limit. "
+    "Re-issue the call with complete arguments."
+)
+
 
 def run_loop(
     state: AgentState,
@@ -62,6 +67,11 @@ def run_loop(
             emit(TurnEndEvent(step=step))
             emit(AgentEndEvent(reason="error", message=assistant, error=assistant.error_message))
             return assistant
+        if assistant.stop_reason == "length":
+            # 输出被截断时 tool call 参数不完整，执行会产生脏操作
+            _record_truncated_calls(state, assistant.tool_calls, emit)
+            emit(TurnEndEvent(step=step))
+            continue
         if not assistant.tool_calls:
             # 最终回答轮也要收尾，保证 turn_start / turn_end 成对
             emit(TurnEndEvent(step=step))
@@ -122,6 +132,17 @@ def _execute_tool_calls(
             state.modified_files.update(result.modified_files)
         _append_tool_message(state, call, result, is_error)
         emit(ToolExecutionEndEvent(tool_call=call, result=result, is_error=is_error))
+
+
+def _record_truncated_calls(
+    state: AgentState, calls: list[ToolCall], emit: EventSink
+) -> None:
+    """截断的 tool call 一律转 error observation，不进入工具执行。"""
+    for call in calls:
+        emit(ToolExecutionStartEvent(tool_call=call))
+        result = ToolResult(content=_TRUNCATED_MESSAGE)
+        _append_tool_message(state, call, result, is_error=True)
+        emit(ToolExecutionEndEvent(tool_call=call, result=result, is_error=True))
 
 
 def _append_tool_message(

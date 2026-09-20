@@ -52,6 +52,30 @@ def test_read_only_tool_does_not_mark_modified_files(echo_registry) -> None:
     assert state.modified_files == set()
 
 
+def test_length_truncated_tool_calls_are_not_executed(echo_registry, events) -> None:
+    """输出被 length 截断时 tool call 不可信：不执行，转 error observation 让模型重发。"""
+    state = AgentState(messages=[UserMessage(content="long")])
+    llm = FakeLLMClient(
+        [
+            assistant(
+                tool_calls=[tool_call("c1", "echo", {"text": "partial"})],
+                stop_reason="length",
+            ),
+            assistant("recovered"),
+        ]
+    )
+    result = run_loop(state, llm, echo_registry, on_event=events.append)
+    assert result.content == "recovered"
+    tool_messages = [message for message in state.messages if isinstance(message, ToolMessage)]
+    assert len(tool_messages) == 1
+    assert tool_messages[0].is_error is True
+    assert "truncated" in tool_messages[0].content
+    assert state.modified_files == set()
+    # 截断轮同样要 turn_start / turn_end 成对
+    types = [event.type for event in events]
+    assert types.count("turn_start") == types.count("turn_end") == 2
+
+
 def test_llm_error_event_ends_agent(echo_registry, events) -> None:
     """LLM ErrorEvent 终止本轮：stop_reason=error，事件以 agent_end(error) 收尾。"""
     state = AgentState(messages=[UserMessage(content="hi")])

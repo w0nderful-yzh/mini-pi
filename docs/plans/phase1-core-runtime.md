@@ -158,81 +158,13 @@ mini-pi/
 
 ---
 
-### Task M3.2: length 截断保护
+### Task M3.2: length 截断保护（已完成）
 
-**Files:**
-- Modify: `mini_pi/agent/loop.py`
-- Test: `tests/test_loop.py`（追加）
+提交：本次提交
 
-- [ ] **Step 1: 追加失败测试**
+交付物：`mini_pi/agent/loop.py` — `stop_reason="length"` 时不执行任何 tool call，全部转 error observation（提示模型用完整参数重发）后进入下一轮；该轮同样补发 `turn_end`。
 
-```python
-def test_length_truncated_tool_calls_are_not_executed(echo_registry) -> None:
-    state = AgentState(messages=[UserMessage(content="long")])
-    llm = FakeLLMClient(
-        [
-            assistant(
-                tool_calls=[tool_call("c1", "echo", {"text": "partial"})],
-                stop_reason="length",
-            ),
-            assistant("recovered"),
-        ]
-    )
-    result = run_loop(state, llm, echo_registry)
-    assert result.content == "recovered"
-    tool_messages = [message for message in state.messages if isinstance(message, ToolMessage)]
-    assert len(tool_messages) == 1
-    assert tool_messages[0].is_error is True
-    assert "truncated" in tool_messages[0].content
-    assert state.modified_files == set()
-```
-
-- [ ] **Step 2: 运行确认失败**
-
-Run: `uv run pytest tests/test_loop.py::test_length_truncated_tool_calls_are_not_executed -v`
-Expected: FAIL（工具被真实执行，`is_error is False`）
-
-- [ ] **Step 3: 修改 `run_loop`**
-
-在 error 分支之后插入：
-
-```python
-        if assistant.stop_reason == "length":
-            _record_truncated_calls(state, assistant.tool_calls, emit)
-            emit(TurnEndEvent(step=step))
-            continue
-```
-
-新增函数：
-
-```python
-_TRUNCATED_MESSAGE = (
-    "Tool call was truncated because the model reached the output token limit. "
-    "Re-issue the call with complete arguments."
-)
-
-
-def _record_truncated_calls(
-    state: AgentState, calls: list[ToolCall], emit: EventSink
-) -> None:
-    for call in calls:
-        emit(ToolExecutionStartEvent(tool_call=call))
-        result = ToolResult(content=_TRUNCATED_MESSAGE)
-        _append_tool_message(state, call, result, is_error=True)
-        emit(ToolExecutionEndEvent(tool_call=call, result=result, is_error=True))
-```
-
-- [ ] **Step 4: 运行测试通过**
-
-Run: `uv run pytest tests/test_loop.py -v`
-Expected: `12 passed`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mini_pi/agent/loop.py tests/test_loop.py
-git commit -m "feat: reject truncated tool calls on output length limit"
-```
+验收：`tests/test_loop.py::test_length_truncated_tool_calls_are_not_executed`；全量 51 passed, 2 deselected。
 
 ---
 
