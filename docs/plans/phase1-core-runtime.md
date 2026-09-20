@@ -76,7 +76,7 @@ mini-pi/
    - `LLMError` → LLM 层编码为 `ErrorEvent`
    - 其他异常 → 冒泡
 4. 测试命令统一 `uv run pytest <file> -v`；默认 `addopts = "-m 'not integration'"` 排除真实 API 测试。
-5. 不在实现中加注释（除非解释非直觉逻辑），类型标注完整。
+5. 代码必须按 AGENTS.md 第 18 节附带简要中文注释；本计划代码块为节省篇幅可能省略部分注释，落地时补齐。类型标注完整。
 6. 工具的文件操作只允许经过 `Workspace`，禁止直接 `open()` / `Path.read_text()`。
 
 ---
@@ -179,7 +179,7 @@ git commit -m "chore: bootstrap mini-pi project"
 - Create: `mini_pi/llm/types.py`
 - Test: `tests/test_llm_types.py`
 
-- [ ] **Step 1: 写失败测试 `tests/test_llm_types.py`**
+- [x] **Step 1: 写失败测试 `tests/test_llm_types.py`**
 
 ```python
 from __future__ import annotations
@@ -246,12 +246,12 @@ def test_stream_event_discriminator() -> None:
     assert [event.type for event in restored] == ["start", "text_delta", "done", "error"]
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `uv run pytest tests/test_llm_types.py -v`
 Expected: FAIL，`ModuleNotFoundError: No module named 'mini_pi.llm'`
 
-- [ ] **Step 3: 写 `mini_pi/llm/types.py`**
+- [x] **Step 3: 写 `mini_pi/llm/types.py`**
 
 ```python
 from __future__ import annotations
@@ -373,12 +373,12 @@ StreamEvent = Annotated[
 ]
 ```
 
-- [ ] **Step 4: 运行测试通过**
+- [x] **Step 4: 运行测试通过**
 
 Run: `uv run pytest tests/test_llm_types.py -v`
 Expected: `3 passed`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add mini_pi/llm/__init__.py mini_pi/llm/types.py tests/test_llm_types.py
