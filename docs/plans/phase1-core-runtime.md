@@ -394,7 +394,7 @@ git commit -m "feat: add chat message and stream event models"
 - Create: `mini_pi/llm/base.py`
 - Test: `tests/test_llm_base.py`
 
-- [ ] **Step 1: 写失败测试 `tests/test_llm_base.py`**
+- [x] **Step 1: 写失败测试 `tests/test_llm_base.py`**
 
 ```python
 from __future__ import annotations
@@ -486,12 +486,12 @@ def test_backoff_is_capped() -> None:
     assert backoff_seconds(10) == 8.0
 ```
 
-- [ ] **Step 2: 运行确认失败**
+- [x] **Step 2: 运行确认失败**
 
 Run: `uv run pytest tests/test_llm_base.py -v`
 Expected: FAIL，`No module named 'mini_pi.errors'`
 
-- [ ] **Step 3: 写 `mini_pi/errors.py`**
+- [x] **Step 3: 写 `mini_pi/errors.py`**
 
 ```python
 from __future__ import annotations
@@ -524,7 +524,7 @@ class LLMError(MiniPiError):
         self.status_code = status_code
 ```
 
-- [ ] **Step 4: 写 `mini_pi/llm/base.py`**
+- [x] **Step 4: 写 `mini_pi/llm/base.py`**
 
 ```python
 from __future__ import annotations
@@ -608,12 +608,12 @@ class BaseLLMClient(ABC):
         raise LLMError("LLM stream ended without done or error event", retryable=False)
 ```
 
-- [ ] **Step 5: 运行测试通过**
+- [x] **Step 5: 运行测试通过**
 
 Run: `uv run pytest tests/test_llm_base.py -v`
 Expected: `7 passed`
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add mini_pi/errors.py mini_pi/llm/base.py tests/test_llm_base.py
