@@ -106,9 +106,9 @@ def _execute_tool_calls(
         except ToolError as exc:
             result = ToolResult(content=f"{type(exc).__name__}: {exc}")
             is_error = True
-        # 工具通过 details["path"] 声明改动的文件，用于 modified_files 追踪
-        if not is_error and result.details and "path" in result.details:
-            state.modified_files.add(str(result.details["path"]))
+        # 只有工具显式声明 modified_files 时才记录，避免只读工具误入改动列表
+        if not is_error and result.modified_files:
+            state.modified_files.update(result.modified_files)
         _append_tool_message(state, call, result, is_error)
         emit(ToolExecutionEndEvent(tool_call=call, result=result, is_error=is_error))
 

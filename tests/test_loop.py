@@ -38,6 +38,19 @@ def test_tool_call_becomes_observation(echo_registry) -> None:
     assert state.modified_files == {"echo/hi.txt"}
 
 
+def test_read_only_tool_does_not_mark_modified_files(echo_registry) -> None:
+    """只读工具即使 details 带 path，也不得进入 modified_files。"""
+    state = AgentState(messages=[UserMessage(content="inspect")])
+    llm = FakeLLMClient(
+        [
+            assistant(tool_calls=[tool_call("c1", "inspect", {"path": "a.py"})]),
+            assistant("done"),
+        ]
+    )
+    run_loop(state, llm, echo_registry)
+    assert state.modified_files == set()
+
+
 def test_event_sequence(echo_registry, events) -> None:
     """事件顺序稳定：agent_start → turn/message/tool 事件 → agent_end。"""
     state = AgentState(messages=[UserMessage(content="echo")])

@@ -39,3 +39,8 @@ def test_execute_returns_structured_result() -> None:
 def test_tool_result_details_default_none() -> None:
     """details 可省略，表示无额外信息。"""
     assert ToolResult(content="x").details is None
+
+
+def test_tool_result_modified_files_default_empty() -> None:
+    """未显式声明的只读结果不携带任何改动文件。"""
+    assert ToolResult(content="x").modified_files == []

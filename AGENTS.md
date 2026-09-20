@@ -302,6 +302,15 @@ Registry 职责：
 校验通过      -> tool.execute(**validated)
 ```
 
+ToolResult 协议：
+
+```text
+ToolResult(content, details=None, modified_files=[])
+content        回传模型
+details        仅供 UI / 日志
+modified_files 必须显式列出本工具改动的 workspace 相对路径；只读工具留空
+```
+
 禁止在 Agent Loop 中堆：
 
 ```python

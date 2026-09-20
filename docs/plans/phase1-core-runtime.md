@@ -1053,6 +1053,7 @@ class ReadFileTool(Tool):
                 f"\n[Showing lines {offset}-{last} of {total}. "
                 f"Use offset={last + 1} to continue.]"
             )
+        # 只读工具：details 仅用于展示，不声明 modified_files
         return ToolResult(content=body, details={"path": rel, "total_lines": total})
 ```
 
@@ -1148,7 +1149,11 @@ class WriteFileTool(Tool):
         rel = self._workspace.relative(path)
         self._workspace.write_text(path, content)
         size = len(content.encode("utf-8"))
-        return ToolResult(content=f"Wrote {size} bytes to {rel}.", details={"path": rel})
+        return ToolResult(
+            content=f"Wrote {size} bytes to {rel}.",
+            details={"path": rel},
+            modified_files=[rel],
+        )
 ```
 
 - [ ] **Step 4: 运行测试通过**
@@ -1339,6 +1344,7 @@ class EditFileTool(Tool):
         return ToolResult(
             content=f"Replaced {len(edits)} block(s) in {rel}.",
             details={"path": rel, "diff": diff},
+            modified_files=[rel],
         )
 ```
 

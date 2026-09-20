@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from mini_pi.llm.types import ToolSchema
 
@@ -15,6 +15,8 @@ class ToolResult(BaseModel):
 
     content: str
     details: dict[str, Any] | None = None
+    # 显式声明本工具改动的 workspace 相对路径；只读工具必须留空
+    modified_files: list[str] = Field(default_factory=list)
 
 
 class Tool(ABC):

@@ -95,14 +95,33 @@ class EchoArgs(BaseModel):
 
 
 class EchoTool(Tool):
-    """回显工具，details 带 path 用于验证 modified_files 追踪。"""
+    """回显工具，显式声明 modified_files 用于验证改动追踪。"""
 
     name = "echo"
     description = "Echo the input text."
     args_model = EchoArgs
 
     def execute(self, text: str) -> ToolResult:
-        return ToolResult(content=text, details={"path": f"echo/{text}.txt"})
+        return ToolResult(
+            content=text,
+            details={"echoed": text},
+            modified_files=[f"echo/{text}.txt"],
+        )
+
+
+class InspectArgs(BaseModel):
+    path: str
+
+
+class InspectTool(Tool):
+    """只读工具：details 带 path，但不得声明 modified_files。"""
+
+    name = "inspect"
+    description = "Read-only inspection."
+    args_model = InspectArgs
+
+    def execute(self, path: str) -> ToolResult:
+        return ToolResult(content=f"contents of {path}", details={"path": path})
 
 
 class FailingArgs(BaseModel):
@@ -147,6 +166,7 @@ def events() -> list:
 def echo_registry() -> ToolRegistry:
     registry = ToolRegistry()
     registry.register(EchoTool())
+    registry.register(InspectTool())
     registry.register(FailingTool())
     registry.register(CrashTool())
     return registry
