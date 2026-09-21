@@ -206,11 +206,11 @@ mini-pi/
 
 ### Task M4.3: 进程执行器（已完成）
 
-提交：本次提交
+提交：本次提交（有界捕获为后续加固）
 
-交付物：`mini_pi/tools/process.py` — `ProcessResult(exit_code, stdout, stderr, timed_out)`；`run_process(argv)` 与 `run_shell(command)`；`start_new_session=True` + 超时 `os.killpg` 杀整个进程组；stdout / stderr 分离捕获，非 0 退出码原样返回。
+交付物：`mini_pi/tools/process.py` — `ProcessResult(exit_code, stdout, stderr, timed_out, stdout_truncated, stderr_truncated)`；`run_process(argv)` 与 `run_shell(command)`；`start_new_session=True` + 超时 `os.killpg` 杀整个进程组；stdout / stderr 由读取线程持续排空，经 `_BoundedCapture` 有界缓冲（默认 1MB/流，`keep="head"|"tail"`），内存恒定，非 0 退出码原样返回。
 
-验收：`tests/test_process.py` 4 passed（含超时杀进程组）；全量 79 passed, 2 deselected。
+验收：`tests/test_process.py` 8 passed（超时杀进程组、超大输出封顶、head/tail 保留方向、stderr 同样有界）；全量 83 passed, 2 deselected。
 
 ---
 
@@ -1040,8 +1040,8 @@ class BashTool(Tool):
             details={
                 "exit_code": result.exit_code,
                 "timed_out": result.timed_out,
-                "stdout_truncated": stdout_truncated,
-                "stderr_truncated": stderr_truncated,
+                "stdout_truncated": stdout_truncated or result.stdout_truncated,
+                "stderr_truncated": stderr_truncated or result.stderr_truncated,
             },
         )
 ```
@@ -1180,7 +1180,7 @@ class GitDiffTool(Tool):
             argv.append("--cached")
         if path is not None:
             argv.extend(["--", self._workspace.relative(path)])
-        result = run_process(argv, cwd=self._workspace.root, timeout_s=30)
+        result = run_process(argv, cwd=self._workspace.root, timeout_s=30, keep="head")
         if result.exit_code != 0:
             raise ToolError(
                 f"git diff failed (exit {result.exit_code}): {result.stderr.strip()}"

@@ -376,8 +376,8 @@ return exit code
 
 - 非 0 exit code 必须如实返回给 Agent（属于正常 Observation，不抛 ToolError）
 - timeout 必须杀掉整个进程组（`start_new_session=True` + `os.killpg`）
-- stdout / stderr 分离捕获，各自双限（2000 行 / 50KB）后附截断提示
-- 返回结构化 `ProcessResult(exit_code, stdout, stderr, timed_out)`
+- stdout / stderr 分离捕获，进程层有界（默认 1MB/流，超出按 head/tail 方向丢弃并标记），工具层再按 2000 行 / 50KB 双限截断并附提示
+- 返回结构化 `ProcessResult(exit_code, stdout, stderr, timed_out, stdout_truncated, stderr_truncated)`
 
 禁止：
 

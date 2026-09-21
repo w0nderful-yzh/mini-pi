@@ -41,3 +41,50 @@ def test_timeout_kills_process_group(tmp_path: Path) -> None:
     elapsed = time.monotonic() - started
     assert result.timed_out is True
     assert elapsed < 10
+
+
+def test_large_output_is_capped_and_flagged(tmp_path: Path) -> None:
+    """超大输出被截断到内存上限，并标记 truncated。"""
+    code = "print('x' * 3_000_000)"
+    result = run_process(
+        [sys.executable, "-c", code], cwd=tmp_path, timeout_s=30, max_output_bytes=10_000
+    )
+    assert result.exit_code == 0
+    assert result.stdout_truncated is True
+    assert len(result.stdout) <= 10_000
+
+
+def test_tail_keep_keeps_last_bytes(tmp_path: Path) -> None:
+    """keep=tail 保留结尾输出（报错通常出现在后面）。"""
+    code = "import sys; sys.stdout.write('A' * 5000); sys.stdout.write('Z' * 5000)"
+    result = run_process(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        timeout_s=30,
+        max_output_bytes=1000,
+        keep="tail",
+    )
+    assert result.stdout == "Z" * 1000
+
+
+def test_head_keep_keeps_first_bytes(tmp_path: Path) -> None:
+    """keep=head 保留开头输出（diff 等需要从头看）。"""
+    code = "import sys; sys.stdout.write('A' * 5000); sys.stdout.write('Z' * 5000)"
+    result = run_process(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        timeout_s=30,
+        max_output_bytes=1000,
+        keep="head",
+    )
+    assert result.stdout == "A" * 1000
+
+
+def test_stderr_is_bounded_too(tmp_path: Path) -> None:
+    """stderr 同样有界捕获，不能被忽略。"""
+    code = "import sys; print('e' * 3_000_000, file=sys.stderr)"
+    result = run_process(
+        [sys.executable, "-c", code], cwd=tmp_path, timeout_s=30, max_output_bytes=5000
+    )
+    assert result.stderr_truncated is True
+    assert len(result.stderr) <= 5000
