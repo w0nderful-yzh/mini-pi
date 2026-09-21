@@ -446,5 +446,6 @@ Test Core Runtime
 - Pi 源码：`/Users/yzh666/workspace/pi`（本地）
 - Pi 源码学习指南：`/Users/yzh666/workspace/pi/AGENT-LEARNING-GUIDE.md`
 - 项目约束：[`AGENTS.md`](AGENTS.md)
+- Pi 生产架构参考：[`docs/design/pi-production-architecture.md`](docs/design/pi-production-architecture.md)
 - Phase 1 计划：[`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)
 - Phase 2 计划：[`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)

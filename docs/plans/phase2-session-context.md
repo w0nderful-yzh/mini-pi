@@ -4,7 +4,7 @@
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
-**设计依据：** 当前 `mini_pi` 的真实实现与测试；Pi 的生产路径 `packages/agent/src/agent-loop.ts`、`packages/coding-agent/src/core/session-manager.ts`、`agent-session.ts`、`resource-loader.ts`、`system-prompt.ts`、`compaction/`。借鉴数据模型和边界，不复制 Pi 的扩展、分支导航、队列、并发与新 harness 复杂度。
+**设计依据：** 当前 `mini_pi` 的真实实现与测试；Pi 的生产路径 `packages/agent/src/agent-loop.ts`、`packages/coding-agent/src/core/session-manager.ts`、`agent-session.ts`、`resource-loader.ts`、`system-prompt.ts`、`compaction/`。详细源码链路见 [`../design/pi-production-architecture.md`](../design/pi-production-architecture.md)。借鉴数据模型和边界，不复制 Pi 的扩展、分支导航、队列、并发与新 harness 复杂度。
 
 **总原则：** Session 保存完整事实，Context 是可重建投影；Agent Loop 只提供 turn 边界扩展点，不感知 JSONL、AGENTS.md 或摘要格式。
 
