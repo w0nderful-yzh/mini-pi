@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1 已完成，M7.2-M7.7 尚未开始。
+> 状态：实施中；M7.1、M7.2a 已完成，下一任务为 M7.2b。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -191,7 +191,7 @@ Session 中的 `SystemMessage` 保存 section patch：值为文本表示新增/�
 - 非 git workspace 只检查 workspace 根目录。
 - 同一目录只认精确文件名 `AGENTS.md`；不兼容 `CLAUDE.md`、override 或大小写变体。
 - 文件读取失败、非 UTF-8，或 symlink 逃出“git root → workspace”发现区间时显式报错。
-- 内容包在带绝对来源路径的 `<project_instructions>` 中，便于模型区分层级。
+- 内容包在带 workspace 相对来源路径的 `<project_instructions>` 中，便于模型区分层级。
 - 启动时加载，不扫描整个仓库；本阶段不根据每次工具目标动态切换子目录规则。
 
 ### 4.5 Context 投影
@@ -296,16 +296,18 @@ M7.2 之后不再按整个子里程碑一次实现，默认以一个任务编号
 
 ### M7.2 Project Context 与 Prompt Sections
 
-#### M7.2a：发现项目级 `AGENTS.md`
+#### M7.2a：发现项目级 `AGENTS.md`（已完成）
 
-- [ ] 新增 `context/project.py`，只负责发现和读取项目规则。
-- 搜索顺序为 git root → workspace；非 git workspace 只读取 workspace 根文件。
-- 返回内容同时携带 workspace 相对来源路径，便于 prompt 与错误信息展示。
-- 路径必须经过 Workspace 边界校验；越界 symlink 与非 UTF-8 内容 Fail Fast。
-- 针对性测试覆盖：无文件、单文件、父子两级、非 git 目录、symlink 逃逸和非法编码。
-- 不做：prompt 拼装、Agent 注入、JSONL 持久化。
+提交：`73730b7`
 
-验收命令：`uv run pytest tests/context/test_project.py -q`。
+交付物：
+
+- `context/project.py`：git root → workspace 父子顺序发现，非 git 根目录模式，workspace 相对来源路径。
+- 所有候选读取经 Workspace；拒绝发现区间外 symlink，非 UTF-8 与读取错误 Fail Fast。
+- 精确识别 `AGENTS.md`，在大小写不敏感文件系统上也不误读 `agents.md` / `CLAUDE.md`。
+- 明确未做：prompt 拼装、Agent 注入、Provider 改动、JSONL 持久化。
+
+验收：专项 8 passed；全量 `185 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.2b：建立 Prompt Section 数据模型
 
@@ -728,4 +730,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.2a`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.2b`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
