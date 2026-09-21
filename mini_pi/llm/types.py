@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # 停止原因：stop=正常结束，length=输出截断，tool_calls=请求工具，error=调用失败
 StopReason = Literal["stop", "length", "tool_calls", "error"]
+SystemPromptSectionId = Literal[
+    "preamble",
+    "environment",
+    "rules",
+    "tools",
+    "project_context",
+]
+SYSTEM_PROMPT_SECTION_IDS: tuple[SystemPromptSectionId, ...] = (
+    "preamble",
+    "environment",
+    "rules",
+    "tools",
+    "project_context",
+)
 
 
 class Usage(BaseModel):
@@ -27,11 +41,51 @@ class ToolCall(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class SectionPatch(BaseModel):
+    """对一个 system prompt section 的显式 set/delete 操作。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    op: Literal["set", "delete"]
+    id: SystemPromptSectionId
+    content: str | None = None
+
+    @model_validator(mode="after")
+    def validate_operation_content(self) -> Self:
+        """set 必须携带文本，delete 必须使用无 content 的 tombstone。"""
+        if self.op == "set" and self.content is None:
+            raise ValueError("set operation requires content")
+        if self.op == "delete" and self.content is not None:
+            raise ValueError("delete operation must not include content")
+        return self
+
+
 class SystemMessage(BaseModel):
-    """系统提示词消息。"""
+    """系统提示词：兼容旧 content，并支持完整 sections 或增量 patch。"""
 
     role: Literal["system"] = "system"
-    content: str
+    content: str | None = None
+    sections: dict[SystemPromptSectionId, str] | None = None
+    section_patch: list[SectionPatch] | None = None
+
+    @model_validator(mode="after")
+    def validate_payload(self) -> Self:
+        """三类载荷必须且只能存在一个；patch 内 section id 不得重复。"""
+        payload_count = sum(
+            payload is not None
+            for payload in (self.content, self.sections, self.section_patch)
+        )
+        if payload_count != 1:
+            raise ValueError(
+                "system message requires exactly one of content, sections, or section_patch"
+            )
+        if self.section_patch is not None:
+            if not self.section_patch:
+                raise ValueError("section patch must not be empty")
+            ids = [operation.id for operation in self.section_patch]
+            if len(ids) != len(set(ids)):
+                raise ValueError("duplicate section id in patch")
+        return self
 
 
 class UserMessage(BaseModel):

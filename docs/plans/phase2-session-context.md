@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1、M7.2a-M7.2b 已完成，下一任务为 M7.2c。
+> 状态：实施中；M7.1、M7.2a-M7.2c 已完成，下一任务为 M7.2d。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -99,11 +99,12 @@ mini_pi/
 │   └── runtime.py         # AgentSession：run/resume/new/compact
 ├── context/
 │   ├── project.py         # AGENTS.md 发现与加载
-│   ├── prompt.py          # sections 构建、diff、replay、render
+│   ├── sections.py        # section diff、patch 应用与历史 replay
 │   ├── projection.py      # entry path → 当前模型消息
 │   └── compaction.py      # token、切点、摘要与压缩结果
 └── agent/
     ├── agent.py           # 增加消息提交 hook，不持有 Session
+    ├── prompt.py          # sections 构建与文本渲染
     └── loop.py            # 增加 prepare_next_turn hook
 ```
 
@@ -175,7 +176,7 @@ tools
 project_context
 ```
 
-Session 中的 `SystemMessage` 保存 section patch：值为文本表示新增/替换，`null` 表示删除。发给 Provider 前重放所有 system patch，折叠为一条完整 system message。
+`SystemMessage` 的载荷严格三选一：Phase 1 的 opaque `content`、完整 `sections` 快照、或 `section_patch` 操作列表。Patch 中 `set` 必须携带文本，`delete` 不携带 content 并作为显式 tombstone；同一 patch 不允许重复 section id。发给 Provider 前重放完整快照与 patch，折叠为一条完整 system message。
 
 收益：
 
@@ -322,15 +323,18 @@ M7.2 之后不再按整个子里程碑一次实现，默认以一个任务编号
 
 验收：专项 4 passed；Agent 回归 11 passed；全量 `189 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.2c：实现 Section Patch、Diff 与 Replay
+#### M7.2c：实现 Section Patch、Diff 与 Replay（已完成）
 
-- [ ] 扩展 `SystemMessage`，支持完整快照与 section patch 两种互斥载荷。
-- 实现纯函数：当前 section 集合 diff、patch 校验、按历史 replay。
-- 删除 section 使用显式 tombstone；未知操作、重复 id、非法 patch Fail Fast。
-- 针对性测试覆盖：新增、修改、删除、无变化、重复 replay、legacy content 与非法 patch。
-- 不做：Provider 折叠、Agent 自动刷新。
+提交：本任务提交（`feat: 实现 Section Patch 与历史回放`）。
 
-验收命令：`uv run pytest tests/llm/test_messages.py tests/context/test_sections.py -q`。
+交付物：
+
+- `SystemMessage` 支持 legacy content、完整 sections 快照、section patch 三种互斥载荷。
+- `SectionPatch` 使用严格 `set/delete` 协议；delete 是显式 tombstone，未知操作、重复 id、空 patch 与非法 content Fail Fast。
+- `context/sections.py` 提供稳定 diff、纯函数 patch 应用和顺序 replay；legacy content 保持 opaque 快照。
+- 明确未做：Provider 折叠、Agent prompt refresh 与项目规则注入。
+
+验收：专项 11 passed；LLM/Session 兼容回归 20 passed；全量 `205 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.2d：Provider 折叠为唯一 System Prompt
 
@@ -733,4 +737,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.2c`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.2d`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

@@ -6,11 +6,8 @@ import platform
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
-from mini_pi.llm.types import ToolSchema
-
-PromptSectionId = Literal["preamble", "environment", "rules", "tools"]
+from mini_pi.llm.types import SystemPromptSectionId, ToolSchema
 
 _PREAMBLE = "You are mini-pi, a coding agent working inside a local workspace."
 _RULES = (
@@ -21,11 +18,12 @@ _RULES = (
     "- Tool errors are returned to you as error observations; read them and adjust instead of repeating the same call.",
     "- When the task is complete, stop calling tools and summarize what changed and how it was verified.",
 )
-_SECTION_TITLES: dict[PromptSectionId, str | None] = {
+_SECTION_TITLES: dict[SystemPromptSectionId, str | None] = {
     "preamble": None,
     "environment": "Environment",
     "rules": "Working rules",
     "tools": "Tools",
+    "project_context": "Project Context",
 }
 
 
@@ -33,7 +31,7 @@ _SECTION_TITLES: dict[PromptSectionId, str | None] = {
 class PromptSection:
     """一段可独立识别且顺序稳定的 system prompt 内容。"""
 
-    id: PromptSectionId
+    id: SystemPromptSectionId
     content: str
 
 

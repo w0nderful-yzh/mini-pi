@@ -165,7 +165,7 @@ Agent Runtime 自己实现。
 
 ## 5. 目录结构
 
-当前实现范围（M1-M6 + M7.1 + M7.2a-M7.2b）：
+当前实现范围（M1-M6 + M7.1 + M7.2a-M7.2c）：
 
 ```text
 mini-pi/
@@ -217,7 +217,8 @@ mini-pi/
 │   │   └── jsonl.py                  # create / load / append / leaf / 路径发现
 │   │
 │   ├── context/
-│   │   └── project.py                # 项目 AGENTS.md 发现与读取
+│   │   ├── project.py                # 项目 AGENTS.md 发现与读取
+│   │   └── sections.py               # section diff / patch / replay
 │   │
 │   └── workspace/
 │       └── workspace.py               # 路径解析与安全边界
@@ -345,7 +346,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context：JSONL entry 树、AGENTS.md、resume、compaction | 进行中（M7.1、M7.2a-M7.2b 已完成） |
+| M7 | Session / Context：JSONL entry 树、AGENTS.md、resume、compaction | 进行中（M7.1、M7.2a-M7.2c 已完成） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
