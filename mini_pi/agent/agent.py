@@ -55,3 +55,7 @@ class Agent:
         self.state.messages.clear()
         self.state.step_count = 0
         self.state.modified_files.clear()
+
+    def set_llm(self, llm: LLMClient) -> None:
+        """替换 LLM 客户端并保留 transcript（/connect 切换 Key 或 provider）。"""
+        self._llm = llm

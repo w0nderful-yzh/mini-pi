@@ -6,7 +6,8 @@ import pytest
 from typer.testing import CliRunner
 
 from mini_pi.cli.app import app, create_llm
-from mini_pi.errors import MiniPiError
+from mini_pi.errors import LLMError, MiniPiError
+from tests.conftest import FakeLLMClient
 
 runner = CliRunner()
 
@@ -19,12 +20,16 @@ def test_create_llm_rejects_unknown_provider() -> None:
         create_llm("ollama", None)
 
 
-def test_missing_api_key_exits_with_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """缺少 API Key 时以退出码 1 失败，并提示缺失的环境变量。"""
+def test_missing_api_key_exits_with_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """缺少 API Key 时以退出码 1 失败，并提示 /connect 或环境变量。"""
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: None)
     result = runner.invoke(app, ["hello", "--cwd", str(tmp_path)])
     assert result.exit_code == 1
     assert "OPENAI_API_KEY" in result.output
+    assert "/connect" in result.output
 
 
 def test_help_lists_options() -> None:
@@ -38,5 +43,74 @@ def test_help_lists_options() -> None:
 def test_missing_api_key_raises_minipi_error(monkeypatch: pytest.MonkeyPatch) -> None:
     """DeepSeek 使用独立的 DEEPSEEK_API_KEY。"""
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: None)
     with pytest.raises(MiniPiError):
         create_llm("deepseek", None)
+
+
+def test_interactive_without_key_hints_connect(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """无 Key 进入交互模式，提示使用 /connect 而不是直接退出。"""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: None)
+    result = runner.invoke(app, ["--cwd", str(tmp_path)], input="/exit\n")
+    assert result.exit_code == 0
+    assert "/connect" in result.output
+
+
+def test_connect_saves_verified_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """验证通过后写入凭据文件，并替换 Agent 的 LLM 客户端。"""
+    saved: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "mini_pi.cli.app.create_llm", lambda provider, model=None, **kwargs: FakeLLMClient([])
+    )
+    monkeypatch.setattr(
+        "mini_pi.cli.app.ask_credentials", lambda console, default: ("deepseek", "sk-test")
+    )
+    monkeypatch.setattr("mini_pi.cli.app.verify_credentials", lambda provider, key, model: None)
+    monkeypatch.setattr(
+        "mini_pi.cli.app.save_api_key",
+        lambda provider, key: saved.append((provider, key)) or Path("/tmp/fake-auth.json"),
+    )
+    result = runner.invoke(app, ["--cwd", str(tmp_path)], input="/connect\n/exit\n")
+    assert result.exit_code == 0
+    assert saved == [("deepseek", "sk-test")]
+    assert "saved to" in result.output
+
+
+def test_connect_verification_failure_does_not_save(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Key 验证失败时不落盘，并提示失败原因。"""
+    saved: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "mini_pi.cli.app.create_llm", lambda provider, model=None, **kwargs: FakeLLMClient([])
+    )
+    monkeypatch.setattr(
+        "mini_pi.cli.app.ask_credentials", lambda console, default: ("openai", "bad-key")
+    )
+
+    def fail_verify(provider: str, key: str, model: str | None) -> None:
+        raise LLMError("401 unauthorized", retryable=False)
+
+    monkeypatch.setattr("mini_pi.cli.app.verify_credentials", fail_verify)
+    monkeypatch.setattr(
+        "mini_pi.cli.app.save_api_key",
+        lambda provider, key: saved.append((provider, key)) or Path("/tmp/fake-auth.json"),
+    )
+    result = runner.invoke(app, ["--cwd", str(tmp_path)], input="/connect\n/exit\n")
+    assert result.exit_code == 0
+    assert saved == []
+    assert "verification failed" in result.output
+
+
+def test_task_without_key_shows_connect_hint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """交互模式下未配置 Key 就输入任务，提示先 /connect。"""
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: None)
+    result = runner.invoke(app, ["--cwd", str(tmp_path)], input="fix bug\n/exit\n")
+    assert result.exit_code == 0
+    assert "/connect" in result.output

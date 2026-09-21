@@ -293,11 +293,13 @@ symlink 指向外部     → 报错
 
 ```bash
 mini-pi "修复某个 bug"          # 一次性执行
-mini-pi                         # 交互式 REPL（/reset /exit）
+mini-pi                         # 交互式 REPL（/connect /reset /exit）
 mini-pi --provider deepseek --model deepseek-chat
 ```
 
-- Provider / Key：`--provider` + `OPENAI_API_KEY` / `DEEPSEEK_API_KEY`，缺失时直接报错退出
+- API Key 解析顺序：环境变量（`OPENAI_API_KEY` / `DEEPSEEK_API_KEY`）> `~/.mini-pi/auth.json`（目录 0700、文件 0600）
+- 交互式首次使用：输入 `/connect` → 选择 provider → 隐藏输入 Key → 真实请求验证通过后保存
+- 一次性模式缺少 Key 时明确报错，并提示环境变量与 `/connect` 两种方式
 - 流式打印模型正文，工具调用与结果以简洁格式展示
 - `--max-steps` 控制单次任务的最大循环步数（默认 50）
 
@@ -308,6 +310,7 @@ mini-pi --provider deepseek --model deepseek-chat
 ```bash
 uv sync
 export OPENAI_API_KEY=sk-...        # 或 DEEPSEEK_API_KEY
+# 也可以先 `uv run mini-pi`，在交互模式输入 /connect 配置 Key
 
 uv run mini-pi "介绍一下这个仓库"
 uv run mini-pi --provider deepseek "运行 pytest 并修复失败用例"

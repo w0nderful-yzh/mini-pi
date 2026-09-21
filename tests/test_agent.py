@@ -54,6 +54,16 @@ def test_reset_clears_state(tmp_path: Path, registry: ToolRegistry) -> None:
     assert agent.state.modified_files == set()
 
 
+def test_set_llm_swaps_client_and_keeps_transcript(tmp_path: Path, registry: ToolRegistry) -> None:
+    """替换 LLM 客户端（/connect 换 Key/provider）时保留已有 transcript。"""
+    agent = make_agent(tmp_path, registry, [assistant("first")])
+    agent.run("one")
+    agent.set_llm(FakeLLMClient([assistant("second")]))
+    result = agent.run("two")
+    assert result.content == "second"
+    assert len(agent.state.messages) == 5  # system + user + assistant + user + assistant
+
+
 def test_empty_task_is_rejected(tmp_path: Path, registry: ToolRegistry) -> None:
     """空任务在入口直接拒绝，不进入 Loop。"""
     agent = make_agent(tmp_path, registry, [])

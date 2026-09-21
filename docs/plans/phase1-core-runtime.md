@@ -326,6 +326,20 @@ mini-pi/
 
 ---
 
+### Task M5.4: /connect 凭据配置（已完成）
+
+提交：本次提交
+
+交付物：
+
+- `mini_pi/auth.py`：`resolve_api_key`（环境变量 > auth.json）、`load_api_key`、`save_api_key`（合并写入、临时文件原子替换、目录 0700 / 文件 0600；损坏文件显式报错不静默覆盖）
+- `mini_pi/cli/app.py`：`/connect` 交互命令（选择 provider → 隐藏输入 Key → 最小真实请求验证 → 保存并切换客户端；验证失败不落盘）；无 Key 时进入 REPL 提示而不是直接退出；一次性模式仍报错并提示环境变量与 `/connect`
+- `mini_pi/agent/agent.py`：`Agent.set_llm()` 替换客户端并保留 transcript
+
+验收：`tests/test_auth.py` 9 passed；`tests/test_cli.py` 8 passed（保存成功 / 验证失败不落盘 / 无 Key 提示）；`tests/test_agent.py` 新增 set_llm 用例；全量 149 passed, 3 deselected。
+
+---
+
 ## M6 pytest 完善与收尾
 
 ### Task M6.1: 边界用例补全

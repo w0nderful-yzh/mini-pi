@@ -469,6 +469,14 @@ tool call 增量按 index 聚合，结束后显式解析 JSON（非法 JSON 报�
 DeepSeek 差异只允许出现在 DeepSeekClient：base_url、API Key 环境变量、reasoning_content 回放
 ```
 
+凭据管理：
+
+```text
+解析顺序：环境变量 > ~/.mini-pi/auth.json（目录 0700 / 文件 0600）
+交互式通过 /connect 选择 provider、隐藏输入 Key、真实请求验证后保存
+禁止把 Key 写入项目目录、日志或提交到 git
+```
+
 Agent 不应包含 Provider-specific 逻辑。
 
 ---
