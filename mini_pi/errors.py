@@ -28,3 +28,7 @@ class LLMError(MiniPiError):
         super().__init__(message)
         self.retryable = retryable
         self.status_code = status_code
+
+
+class SessionError(MiniPiError):
+    """Session 文件或 entry 不符合持久化协议。"""
