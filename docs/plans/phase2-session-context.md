@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：设计完成，尚未开始实现。
+> 状态：实施中；M7.1 已完成，M7.2-M7.7 尚未开始。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -270,14 +270,18 @@ Loop 不知道 hook 做的是压缩、prompt refresh 或其他 Context 工作。
 
 ## 5. M7 子里程碑
 
-### M7.1 Session Schema 与 JSONL 基础
+### M7.1 Session Schema 与 JSONL 基础（已完成）
 
-- [ ] 新增 `session/models.py`：严格判别联合与 version=1 header。
-- [ ] 新增 `session/jsonl.py`：create/load/append、leaf 推进、路径发现。
-- [ ] 校验 parent 链、重复 id、错误 header、未知版本、损坏/半行 JSON。
-- [ ] 测试 fsync append 后可由新进程对象完整恢复。
+提交：`fce8686`
 
-验收：纯 Session 测试不依赖 Agent 或网络；合法文件 round-trip 相等，所有损坏样例明确失败。
+交付物：
+
+- `mini_pi/session/models.py`：严格 version=1 header、MessageEntry / CompactionEntry 判别联合、JSON alias 与时区/cwd/非空字段约束。
+- `mini_pi/session/jsonl.py`：按 cwd 哈希定位，独占创建，durable-first append + fsync，load、leaf 推进与文件发现。
+- 树结构校验：单根、id 唯一、parent 必须指向更早 entry、compaction 切点必须属于当前分支。
+- Fail Fast：错误 header、未知版本、未知字段、空行、损坏/半行 JSON、孤儿 parent 与 cwd 冲突全部抛 `SessionError`。
+
+验收：Session 专项 19 passed；`uv run pytest -q` → 177 passed, 3 deselected；compileall 与 `git diff --check` 通过。
 
 ### M7.2 Project Context 与 Prompt Sections
 
