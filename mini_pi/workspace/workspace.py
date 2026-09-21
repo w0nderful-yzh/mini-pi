@@ -40,6 +40,10 @@ class Workspace:
     def read_text(self, path: str | Path, *, encoding: str = "utf-8") -> str:
         return self.resolve(path).read_text(encoding=encoding)
 
+    def read_bytes(self, path: str | Path) -> bytes:
+        """读取原始字节，供 read 工具做二进制嗅探与解码判断。"""
+        return self.resolve(path).read_bytes()
+
     def write_text(self, path: str | Path, content: str, *, encoding: str = "utf-8") -> Path:
         """原子写：先写同目录临时文件，再 os.replace 覆盖目标。"""
         target = self.resolve(path)
