@@ -102,3 +102,18 @@ def test_edit_through_registry_receives_model_instances(workspace: Workspace) ->
     )
     assert result.content == "Replaced 1 block(s) in app.py."
     assert (workspace.root / "app.py").read_text(encoding="utf-8").endswith("return a + b\n")
+
+
+def test_edits_still_apply_when_first_edit_changes_length(workspace: Workspace) -> None:
+    """第一个 edit 变长时，后续 edit 仍按原文偏移应用。"""
+    path = workspace.root / "grow.txt"
+    path.write_text("abc def\n", encoding="utf-8")
+    tool = EditTool(workspace)
+    tool.execute(
+        path="grow.txt",
+        edits=[
+            EditSpec(old_text="abc", new_text="abcdefghij"),
+            EditSpec(old_text="def", new_text="DEF"),
+        ],
+    )
+    assert path.read_text(encoding="utf-8") == "abcdefghij DEF\n"

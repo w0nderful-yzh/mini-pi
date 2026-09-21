@@ -72,6 +72,13 @@ def test_binary_files_are_skipped(tool: SearchTool, tmp_path: Path) -> None:
     assert "blob.bin" not in result.content
 
 
+def test_binary_content_in_text_extension_is_skipped(tool: SearchTool, tmp_path: Path) -> None:
+    """扩展名是文本但内容含 NUL 时也按二进制跳过。"""
+    (tmp_path / "fake.txt").write_bytes(b"\xff\xfe\x00add")
+    result = tool.execute(pattern="add")
+    assert "fake.txt" not in result.content
+
+
 @pytest.mark.skipif(_find_rg() is None, reason="ripgrep not installed")
 def test_rg_engine(tmp_path: Path) -> None:
     """有 rg 时走 rg 引擎，输出仍归一为 workspace 相对路径。"""

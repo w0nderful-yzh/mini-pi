@@ -342,142 +342,32 @@ mini-pi/
 
 ---
 
-## M6 pytest 完善与收尾
+## M6 pytest 完善与收尾（已完成）
 
-### Task M6.1: 边界用例补全
+### Task M6.1: 边界用例补全（已完成）
 
-**Files:**
-- Modify: `tests/test_workspace.py` / `tests/test_edit.py` / `tests/test_bash.py` / `tests/test_search.py` / `tests/test_loop.py`
+提交：本次提交
 
-- [ ] **Step 1: 追加边界测试（逐个文件）**
+交付物：新增边界用例 — workspace 经 symlink 父目录写入拦截、`~` 展开不绕过边界；edit 首个 edit 变长不影响后续偏移；bash 50KB stdout 截断标记；search 文本扩展名但含 NUL 的文件跳过；max_steps=1 的工具调用计数。
 
-`tests/test_workspace.py`：
+### Task M6.2: 全量回归与文档同步（已完成）
 
-```python
-def test_write_through_symlinked_parent_is_rejected(workspace: Workspace) -> None:
-    outside = workspace.root.parent / "outside_dir"
-    outside.mkdir()
-    (workspace.root / "linkdir").symlink_to(outside, target_is_directory=True)
-    with pytest.raises(WorkspaceViolationError):
-        workspace.write_text("linkdir/new.txt", "x")
+提交：本次提交
 
-
-def test_expanduser_is_not_a_shortcut(workspace: Workspace) -> None:
-    with pytest.raises(WorkspaceViolationError):
-        workspace.resolve("~/secret.txt")
-```
-
-`tests/test_edit.py`：
-
-```python
-def test_edits_still_apply_when_first_edit_changes_length(workspace: Workspace) -> None:
-    path = workspace.root / "grow.txt"
-    path.write_text("abc def\n", encoding="utf-8")
-    tool = EditTool(workspace)
-    tool.execute(
-        path="grow.txt",
-        edits=[
-            EditSpec(old_text="abc", new_text="abcdefghij"),
-            EditSpec(old_text="def", new_text="DEF"),
-        ],
-    )
-    assert path.read_text(encoding="utf-8") == "abcdefghij DEF\n"
-```
-
-`tests/test_bash.py`：
-
-```python
-def test_stdout_truncation_marks_details(tool: BashTool) -> None:
-    command = f'"{sys.executable}" -c "print(\'x\' * 60000)"'
-    result = tool.execute(command=command)
-    assert result.details is not None
-    assert result.details["stdout_truncated"] is True
-    assert "[output truncated]" in result.content
-```
-
-`tests/test_search.py`：
-
-```python
-def test_binary_content_in_text_extension_is_skipped(tool: SearchTool, tmp_path: Path) -> None:
-    (tmp_path / "fake.txt").write_bytes(b"\xff\xfe\x00add")
-    result = tool.execute(pattern="add")
-    assert "fake.txt" not in result.content
-```
-
-`tests/test_loop.py`：
-
-```python
-def test_max_steps_one_with_tool_call_reports_step_limit(echo_registry) -> None:
-    state = AgentState(messages=[UserMessage(content="once")])
-    llm = FakeLLMClient([assistant(tool_calls=[tool_call("c1", "echo", {"text": "x"})])])
-    result = run_loop(state, llm, echo_registry, max_steps=1)
-    assert result.tool_calls
-    assert state.step_count == 1
-```
-
-- [ ] **Step 2: 运行新增用例并修复发现的问题**
-
-Run: `uv run pytest -v`
-Expected: 全部通过。若暴露实现缺陷，先修实现再提交，不允许绕过测试。
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add tests
-git commit -m "test: cover workspace, edit, truncation and step-limit edge cases"
-```
+- 全量：`uv run pytest -q` → 158 passed, 3 deselected（无网络依赖）
+- 集成：`MINI_PI_PROVIDER=deepseek uv run pytest -m integration -v` → 2 passed, 1 skipped（OpenAI 无 Key）
+- README：M1-M6 状态更新为已完成，新增「已知限制（Phase 1）」
+- 计划：M1-M6 全部任务压缩为摘要，Phase 1 验收清单全部满足
 
 ---
 
-### Task M6.2: 全量回归与文档同步
+## Phase 1 完成标准（M1-M6，已验证）
 
-**Files:**
-- Modify: `README.md`
-- Modify: `docs/plans/phase1-core-runtime.md`
-- Modify: `AGENTS.md`（仅当设计发生偏差时）
-
-- [ ] **Step 1: 全量测试（含集成测试可选）**
-
-Run: `uv run pytest -q`
-Expected: 全部通过，无 skipped 异常、无网络访问
-
-Run: `uv run pytest -m integration -q`（可选）
-Expected: 有 Key 时通过；无 Key 时全部 skipped
-
-- [ ] **Step 2: 逐项勾选本计划 M1-M6 的复选框，并更新 README 路线图状态**
-
-README 状态改为：
-
-```text
-M1 已完成 / M2 已完成 / ... / M6 已完成
-```
-
-- [ ] **Step 3: 对照 Phase 1 验收清单**
-
-```text
-[ ] Agent 能自主搜索、读取、修改、运行测试并修复失败
-[ ] 所有文件操作被限制在 workspace 内
-[ ] 工具错误作为 observation 回传，Agent 能自我纠正
-[ ] LLM 错误、step limit、length 截断有明确终止行为
-[ ] 无真实 API Key 时测试套件仍然全绿
-```
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add README.md docs/plans/phase1-core-runtime.md AGENTS.md
-git commit -m "docs: mark phase 1 milestones complete"
-```
-
----
-
-## Phase 1 完成标准（M1-M6）
-
-- `uv run pytest` 全绿，且不依赖网络 / 真实 API
-- `uv run pytest -m integration` 在配置 API Key 后通过
-- 在 `tests/fixtures/sample_project` 上由真实模型完成“运行测试 → 定位 → 修改 → 验证”闭环
-- `README.md` 路线图表、本计划复选框与实际状态一致
-- 已知限制记录在 README（如：edit 仅精确匹配、无 Session、无并行工具执行）
+- `uv run pytest` → 158 passed, 3 deselected，不依赖网络 / 真实 API
+- `MINI_PI_PROVIDER=deepseek uv run pytest -m integration -v` → 2 passed, 1 skipped
+- 真实模型在 `tests/fixtures/sample_project` 上完成「运行测试 → 定位 → 修改 → 验证」闭环（人工 + 自动验收各一次）
+- `README.md` 路线图表、本计划任务状态与实际一致
+- 已知限制记录在 README 第 9 节
 
 ---
 

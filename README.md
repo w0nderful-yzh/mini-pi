@@ -334,7 +334,7 @@ uv run pytest -m integration        # 需要 API Key
 | M3 | Agent Loop 完善：max_steps、错误处理、Agent 封装、system prompt | 已完成 |
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
-| M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 未开始 |
+| M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
 | M7 | Session / Context：JSONL entry 树、AGENTS.md 加载、compaction | 未开始 |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
@@ -390,6 +390,15 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 目标是：
 
 > 由模型在 Agent Loop 中根据当前上下文和 Tool Result 自主决定下一步行动。
+
+### 已知限制（Phase 1）
+
+- `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
+- 工具串行执行，无并行；`bash` 无危险命令确认机制
+- 无 Session / 上下文持久化，退出即丢失 transcript；无 Context Compaction
+- `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
+- 进程组与文件权限语义依赖 POSIX，未适配 Windows
+- LSP / MCP / Task / Memory / Multi-Agent 属于后续阶段
 
 ---
 

@@ -88,3 +88,19 @@ def test_root_must_exist(tmp_path: Path) -> None:
     """workspace root 必须已存在，否则构造失败。"""
     with pytest.raises(NotADirectoryError):
         Workspace(tmp_path / "missing")
+
+
+def test_write_through_symlinked_parent_is_rejected(workspace: Workspace) -> None:
+    """写入路径的父目录是外指 symlink 时同样拦截。"""
+    # 注意：tmp_path.parent 被同会话测试共享，目录名必须唯一避免互相污染
+    outside = workspace.root.parent / "outside_write_dir"
+    outside.mkdir()
+    (workspace.root / "linkdir").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(WorkspaceViolationError):
+        workspace.write_text("linkdir/new.txt", "x")
+
+
+def test_expanduser_is_not_a_shortcut(workspace: Workspace) -> None:
+    """`~` 展开后按绝对路径校验，不允许绕过边界。"""
+    with pytest.raises(WorkspaceViolationError):
+        workspace.resolve("~/secret.txt")

@@ -58,3 +58,12 @@ def test_invalid_timeout_is_rejected_by_schema(tool: BashTool) -> None:
 
     with pytest.raises(ValidationError):
         BashTool.args_model.model_validate({"command": "echo hi", "timeout": 0})
+
+
+def test_stdout_truncation_marks_details(tool: BashTool) -> None:
+    """超过 50KB 的 stdout 被截断并在 details 中标记。"""
+    code = "import sys; sys.stdout.write('x' * 60000)"
+    result = tool.execute(command=f'"{sys.executable}" -c "{code}"')
+    assert result.details is not None
+    assert result.details["stdout_truncated"] is True
+    assert "[output truncated]" in result.content

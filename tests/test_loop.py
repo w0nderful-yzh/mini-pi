@@ -206,3 +206,12 @@ def test_empty_user_message_is_allowed(echo_registry) -> None:
     state = AgentState(messages=[UserMessage(content="")])
     llm = FakeLLMClient([assistant("ok")])
     assert run_loop(state, llm, echo_registry).content == "ok"
+
+
+def test_max_steps_one_with_tool_call_reports_step_limit(echo_registry) -> None:
+    """max_steps=1 且模型请求工具时，工具已执行但循环停止并如实计数。"""
+    state = AgentState(messages=[UserMessage(content="once")])
+    llm = FakeLLMClient([assistant(tool_calls=[tool_call("c1", "echo", {"text": "x"})])])
+    result = run_loop(state, llm, echo_registry, max_steps=1)
+    assert result.tool_calls
+    assert state.step_count == 1
