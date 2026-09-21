@@ -88,3 +88,22 @@ def test_stderr_is_bounded_too(tmp_path: Path) -> None:
     )
     assert result.stderr_truncated is True
     assert len(result.stderr) <= 5000
+
+
+def test_orphan_descendant_is_killed_with_pid_as_pgid(tmp_path: Path) -> None:
+    """直接子进程退出但孙进程仍持有管道时，按 pid=PGID 清理，不能漏杀。"""
+    marker = tmp_path / "grandchild-ran.txt"
+    grandchild = (
+        "import time, pathlib; "
+        f"time.sleep(2); pathlib.Path({str(marker)!r}).write_text('alive')"
+    )
+    parent = (
+        "import subprocess, sys; "
+        f"subprocess.Popen([sys.executable, '-c', {grandchild!r}]); "
+        "print('parent done')"
+    )
+    result = run_process([sys.executable, "-c", parent], cwd=tmp_path, timeout_s=10)
+    assert "parent done" in result.stdout
+    # 孙进程继承管道会拖住读取线程，此时 group kill 必须生效
+    time.sleep(3)
+    assert not marker.exists()

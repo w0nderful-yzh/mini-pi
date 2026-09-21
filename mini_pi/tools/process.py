@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import threading
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -133,14 +134,11 @@ def _run_bounded(
         _kill_group(process)
         process.wait()
 
-    for thread in threads:
-        thread.join(timeout=1)
+    _join_with_deadline(threads, 1.0)
     if any(thread.is_alive() for thread in threads):
         # 直接子进程已退出，但孙进程仍持有管道：清掉进程组后再收尾
         _kill_group(process)
-        for thread in threads:
-            thread.join(timeout=1)
-
+        _join_with_deadline(threads, 1.0)
     stdout, stdout_truncated = stdout_capture.result()
     stderr, stderr_truncated = stderr_capture.result()
     _close(process.stdout)
@@ -153,6 +151,13 @@ def _run_bounded(
         stdout_truncated=stdout_truncated,
         stderr_truncated=stderr_truncated,
     )
+
+
+def _join_with_deadline(threads: list[threading.Thread], timeout_s: float) -> None:
+    """多个线程共享同一个等待预算，避免逐个 join 把延迟翻倍。"""
+    deadline = time.monotonic() + timeout_s
+    for thread in threads:
+        thread.join(timeout=max(0.0, deadline - time.monotonic()))
 
 
 def _pump(stream: IO[bytes] | None, capture: _BoundedCapture) -> None:
@@ -171,10 +176,15 @@ def _pump(stream: IO[bytes] | None, capture: _BoundedCapture) -> None:
 
 
 def _kill_group(process: subprocess.Popen[bytes]) -> None:
+    """start_new_session 保证 PID == PGID；子进程被回收后仍按该值清理残留成员。
+
+    不用 os.getpgid：直接子进程退出并被 wait() 回收后，PID 可能已查不到，
+    getpgid 会抛 ProcessLookupError，反而漏杀仍持有管道的孙进程。
+    """
     try:
-        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        os.killpg(process.pid, signal.SIGKILL)
     except ProcessLookupError:
-        # 进程可能恰好在超时瞬间自行退出
+        # 进程组已空（全部自然退出）
         pass
 
 
