@@ -150,6 +150,10 @@ def cli(
         except KeyboardInterrupt:
             # 只中断当前任务，不退出交互
             console.print("interrupted", style="yellow")
+        except Exception as exc:
+            # REPL 顶层边界：程序缺陷要完整可见，但不因此终止整个会话
+            console.print(f"unexpected error: {type(exc).__name__}: {exc}", style="red")
+            console.print_exception()
 
 
 def main() -> None:

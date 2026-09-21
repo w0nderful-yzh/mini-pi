@@ -113,7 +113,7 @@ mini-pi/
 
 提交：`8341a25`
 
-交付物：`mini_pi/tools/registry.py` — `register`（重名抛 `ValueError`）、`schemas()`、`execute()`（未注册 → `ToolNotFoundError`；参数校验失败 → `ToolArgumentError`；通过后 `tool.execute(**validated)`）。
+交付物：`mini_pi/tools/registry.py` — `register`（重名抛 `ValueError`）、`schemas()`、`execute()`（未注册 → `ToolNotFoundError`；参数校验失败 → `ToolArgumentError`；通过后浅取字段调用 `tool.execute(**dict(validated))`，保留嵌套 pydantic 模型对象）。
 
 验收：`tests/test_registry.py` 6 passed；全量 33 passed。
 

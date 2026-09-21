@@ -114,3 +114,13 @@ def test_task_without_key_shows_connect_hint(
     result = runner.invoke(app, ["--cwd", str(tmp_path)], input="fix bug\n/exit\n")
     assert result.exit_code == 0
     assert "/connect" in result.output
+
+
+def test_repl_survives_unexpected_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """程序缺陷要可见，但不应该让整个 REPL 退出。"""
+    monkeypatch.setattr(
+        "mini_pi.cli.app.create_llm", lambda provider, model=None, **kwargs: FakeLLMClient([])
+    )
+    result = runner.invoke(app, ["--cwd", str(tmp_path)], input="do something\n/exit\n")
+    assert result.exit_code == 0
+    assert "unexpected error" in result.output

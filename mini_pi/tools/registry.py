@@ -36,4 +36,5 @@ class ToolRegistry:
         except ValidationError as exc:
             # 参数校验失败是可预期失败：转 ToolArgumentError，由 Loop 回传模型纠正
             raise ToolArgumentError(f"invalid arguments for {name!r}: {exc}") from exc
-        return tool.execute(**validated.model_dump())
+        # 浅取字段：model_dump() 会递归把嵌套模型转成 dict，破坏 execute 的类型标注
+        return tool.execute(**dict(validated))

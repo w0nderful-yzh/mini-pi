@@ -35,6 +35,26 @@ class ExplodingTool(Tool):
         raise ToolError("expected failure")
 
 
+class NestedItem(BaseModel):
+    value: int = Field(description="Nested value.")
+
+
+class NestedArgs(BaseModel):
+    items: list[NestedItem]
+
+
+class NestedTool(Tool):
+    """嵌套参数工具，验证 Registry 传入的是模型对象而不是 dict。"""
+
+    name = "nested"
+    description = "Tool with nested pydantic args."
+    args_model = NestedArgs
+
+    def execute(self, items: list[NestedItem]) -> ToolResult:
+        assert isinstance(items[0], NestedItem), "nested args must stay model instances"
+        return ToolResult(content=str(items[0].value))
+
+
 def test_register_and_schemas() -> None:
     """注册后能导出全部工具 schema。"""
     registry = ToolRegistry()
@@ -74,6 +94,13 @@ def test_invalid_arguments_raise() -> None:
         registry.execute("add", {"a": "not-an-int"})
     with pytest.raises(ToolArgumentError, match="invalid arguments"):
         registry.execute("add", {})
+
+
+def test_nested_args_stay_model_instances() -> None:
+    """回归：model_dump() 深转换会把嵌套模型变 dict，必须浅取字段。"""
+    registry = ToolRegistry()
+    registry.register(NestedTool())
+    assert registry.execute("nested", {"items": [{"value": 7}]}).content == "7"
 
 
 def test_tool_error_propagates() -> None:

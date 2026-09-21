@@ -88,3 +88,17 @@ def test_missing_file_is_error(workspace: Workspace) -> None:
     tool = EditTool(workspace)
     with pytest.raises(ToolError, match="not a file"):
         tool.execute(path="missing.py", edits=[EditSpec(old_text="a", new_text="b")])
+
+
+def test_edit_through_registry_receives_model_instances(workspace: Workspace) -> None:
+    """回归：真实调用链由 Registry 传入 dict 参数，edit 必须能正常处理。"""
+    from mini_pi.tools.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    registry.register(EditTool(workspace))
+    result = registry.execute(
+        "edit",
+        {"path": "app.py", "edits": [{"old_text": "a - b", "new_text": "a + b"}]},
+    )
+    assert result.content == "Replaced 1 block(s) in app.py."
+    assert (workspace.root / "app.py").read_text(encoding="utf-8").endswith("return a + b\n")
