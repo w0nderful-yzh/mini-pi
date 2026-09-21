@@ -54,6 +54,23 @@ def test_renders_errors() -> None:
     assert "api down" in stream.getvalue()
 
 
+def test_preview_skips_blank_lines() -> None:
+    """首行为空行时展示首个非空行；全空白内容显示 (empty)。"""
+    renderer, stream = make_renderer()
+    call = ToolCall(id="c1", name="read", arguments={})
+    renderer.handle(
+        ToolExecutionEndEvent(
+            tool_call=call, result=ToolResult(content="\n  \nsecond line"), is_error=False
+        )
+    )
+    renderer.handle(
+        ToolExecutionEndEvent(tool_call=call, result=ToolResult(content="\n \n"), is_error=False)
+    )
+    output = stream.getvalue()
+    assert "second line" in output
+    assert "(empty)" in output
+
+
 def test_renders_step_limit() -> None:
     """达到步数上限要有明确提示。"""
     renderer, stream = make_renderer()

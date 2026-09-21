@@ -16,6 +16,14 @@ from mini_pi.agent.events import (
 )
 
 
+def _preview(content: str, *, limit: int = 200) -> str:
+    """取首个非空行做预览；全空白内容返回 (empty)，超长行加省略号。"""
+    for line in content.splitlines():
+        if line.strip():
+            return line[:limit] + ("…" if len(line) > limit else "")
+    return "(empty)"
+
+
 class ConsoleRenderer:
     """on_event 消费者：只做渲染，不参与任何决策。"""
 
@@ -38,8 +46,7 @@ class ConsoleRenderer:
             self.console.print(f"→ {event.tool_call.name} {arguments}", style="cyan", markup=False)
         elif isinstance(event, ToolExecutionEndEvent):
             style = "red" if event.is_error else "green"
-            preview = event.result.content.splitlines()[0] if event.result.content else "(empty)"
-            self.console.print(f"  {preview[:200]}", style=style, markup=False)
+            self.console.print(f"  {_preview(event.result.content)}", style=style, markup=False)
         elif isinstance(event, AgentEndEvent):
             self._render_end(event)
 

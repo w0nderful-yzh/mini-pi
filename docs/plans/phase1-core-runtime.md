@@ -293,9 +293,9 @@ mini-pi/
 
 提交：本次提交
 
-交付物：`mini_pi/cli/console.py` — `ConsoleRenderer(console=None)` 消费 `AgentEvent`：正文 / 思考增量逐段打印（thinking 用暗色）、`message_end` 收尾换行、工具调用 `→ name {args}` 与结果首行（错误红 / 正常绿）、`agent_end` 的 step_limit / error 提示；只做渲染，不参与决策。
+交付物：`mini_pi/cli/console.py` — `ConsoleRenderer(console=None)` 消费 `AgentEvent`：正文 / 思考增量逐段打印（thinking 用暗色）、`message_end` 收尾换行、工具调用 `→ name {args}` 与结果预览（跳过空白行，错误红 / 正常绿，超长截断加省略号）、`agent_end` 的 step_limit / error 提示；只做渲染，不参与决策。
 
-验收：`tests/test_console.py` 4 passed；全量 130 passed, 2 deselected。
+验收：`tests/test_console.py` 5 passed；全量 131 passed, 2 deselected。
 
 ---
 
