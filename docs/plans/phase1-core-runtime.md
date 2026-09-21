@@ -227,102 +227,13 @@ mini-pi/
 
 ---
 
-### Task M4.5: write
+### Task M4.5: write（已完成）
 
-**Files:**
-- Create: `mini_pi/tools/write.py`
-- Test: `tests/test_write.py`
+提交：本次提交
 
-- [ ] **Step 1: 写失败测试 `tests/test_write.py`**
+交付物：`mini_pi/tools/write.py` — `WriteTool`（name=`write`）— 参数 `{path, content}`；整文件写、自动建父目录（复用 Workspace 原子写）、按 UTF-8 字节数回报、显式声明 `modified_files=[rel]`；路径逃逸由 Workspace 拦截。
 
-```python
-from __future__ import annotations
-
-from pathlib import Path
-
-import pytest
-
-from mini_pi.errors import WorkspaceViolationError
-from mini_pi.tools.write import WriteTool
-from mini_pi.workspace.workspace import Workspace
-
-
-@pytest.fixture
-def workspace(tmp_path: Path) -> Workspace:
-    return Workspace(tmp_path)
-
-
-def test_writes_new_file_and_creates_parents(workspace: Workspace) -> None:
-    tool = WriteTool(workspace)
-    result = tool.execute(path="pkg/mod.py", content="x = 1\n")
-    assert (workspace.root / "pkg" / "mod.py").read_text(encoding="utf-8") == "x = 1\n"
-    assert result.content == "Wrote 6 bytes to pkg/mod.py."
-    assert result.details == {"path": "pkg/mod.py"}
-
-
-def test_overwrites_existing_file(workspace: Workspace) -> None:
-    target = workspace.root / "a.txt"
-    target.write_text("old", encoding="utf-8")
-    WriteTool(workspace).execute(path="a.txt", content="new")
-    assert target.read_text(encoding="utf-8") == "new"
-
-
-def test_escape_is_rejected(workspace: Workspace) -> None:
-    with pytest.raises(WorkspaceViolationError):
-        WriteTool(workspace).execute(path="../out.txt", content="x")
-```
-
-- [ ] **Step 2: 运行确认失败**
-
-Run: `uv run pytest tests/test_write.py -v`
-Expected: FAIL，`No module named 'mini_pi.tools.write'`
-
-- [ ] **Step 3: 写 `mini_pi/tools/write.py`**
-
-```python
-from __future__ import annotations
-
-from pydantic import BaseModel, Field
-
-from mini_pi.tools.base import Tool, ToolResult
-from mini_pi.workspace.workspace import Workspace
-
-
-class WriteArgs(BaseModel):
-    path: str = Field(description="File path relative to the workspace root.")
-    content: str = Field(description="Full file content to write.")
-
-
-class WriteTool(Tool):
-    name = "write"
-    description = "Create or fully rewrite a file inside the workspace. Parent directories are created automatically and writes are atomic."
-    args_model = WriteArgs
-
-    def __init__(self, workspace: Workspace) -> None:
-        self._workspace = workspace
-
-    def execute(self, path: str, content: str) -> ToolResult:
-        rel = self._workspace.relative(path)
-        self._workspace.write_text(path, content)
-        size = len(content.encode("utf-8"))
-        return ToolResult(
-            content=f"Wrote {size} bytes to {rel}.",
-            details={"path": rel},
-            modified_files=[rel],
-        )
-```
-
-- [ ] **Step 4: 运行测试通过**
-
-Run: `uv run pytest tests/test_write.py -v`
-Expected: `3 passed`
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mini_pi/tools/write.py tests/test_write.py
-git commit -m "feat: add atomic write tool"
-```
+验收：`tests/test_write.py` 4 passed；全量 96 passed, 2 deselected。
 
 ---
 
