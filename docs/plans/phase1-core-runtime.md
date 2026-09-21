@@ -309,7 +309,7 @@ mini-pi/
 
 ---
 
-### Task M5.3: 样例项目与真实闭环验收（实现完成，真实 API 验收待执行）
+### Task M5.3: 样例项目与真实闭环验收（已完成）
 
 提交：本次提交
 
@@ -317,12 +317,14 @@ mini-pi/
 
 - `tests/fixtures/sample_project/`：`calculator.py`（bug：`add` 实现为 `a - b`）+ `test_calculator.py`（必失败用例）
 - `pyproject.toml`：新增 `norecursedirs = ["sample_project"]`，默认套件不收集 fixture，显式指定路径仍可运行
-- `tests/test_integration_agent.py`：复制 fixture 到 tmp_path，真实模型执行完整闭环，再用真实 pytest 复核 `returncode == 0` 且 `calculator.py` 进入 `modified_files`；无 Key 时 skip
+- `tests/test_integration_agent.py`：复制 fixture 到 tmp_path，真实模型执行完整闭环，再用真实 pytest 复核 `returncode == 0` 且 `calculator.py` 进入 `modified_files`
+- 集成测试凭据检查统一改为 `resolve_api_key`：环境变量或 `/connect` 保存的凭据均可触发
 
 验收状态：
 
-- fixture 显式运行确认 `1 failed`；默认套件 135 passed, 3 deselected；`-m integration` 无 Key 时 3 skipped
-- 真实 API 集成测试与人工验收（README 第 9 节命令）尚未执行，需配置 `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` 后执行；未通过前 M5 不标记完成
+- fixture 显式运行确认 `1 failed`；默认套件 152 passed, 3 deselected
+- 人工验收：DeepSeek 在 `/tmp/mini-pi-demo` 完成 `bash`(失败) → `read` → `edit` → `bash`(通过) → 总结；`git_diff` 因非 git 目录报错后模型自行降级说明
+- 自动验收：`MINI_PI_PROVIDER=deepseek uv run pytest -m integration -v` → Agent 闭环与 DeepSeek 调用 PASSED（OpenAI 无 Key skipped）
 
 ---
 

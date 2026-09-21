@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from mini_pi.agent.agent import Agent
+from mini_pi.auth import resolve_api_key
 from mini_pi.cli.app import create_llm
 from mini_pi.tools import build_default_registry
 from mini_pi.workspace.workspace import Workspace
@@ -17,7 +18,10 @@ FIXTURE = Path(__file__).parent / "fixtures" / "sample_project"
 
 
 def _credentials_available() -> bool:
-    return bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"))
+    """环境变量或 /connect 保存的凭据任一存在即可运行。"""
+    return resolve_api_key("openai", env_var="OPENAI_API_KEY") is not None or resolve_api_key(
+        "deepseek", env_var="DEEPSEEK_API_KEY"
+    ) is not None
 
 
 # 真实 API 测试：默认被 addopts 排除，仅在显式 -m integration 且配置 Key 时运行
