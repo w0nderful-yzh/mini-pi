@@ -81,7 +81,7 @@ Python Coding Agent Harness
 | edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 第一阶段只做精确唯一匹配，fuzzy 后置 |
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
-| System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | 第一阶段固定字符串；Session 阶段升级为 sections + diff |
+| System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7 升级为 sections + diff，并加载项目 `AGENTS.md` |
 | 持久化 | JSONL entry 树（`parentId` 链）+ compaction | 第二阶段复刻最小子集：`message + compaction` entry |
 
 ---
@@ -335,12 +335,25 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context：JSONL entry 树、AGENTS.md 加载、compaction | 未开始 |
+| M7 | Session / Context：JSONL entry 树、AGENTS.md、resume、compaction | 已规划，未实现 |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
 
 M1-M6 的详细任务拆解见 [`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)。
+M7 的架构设计、子里程碑与 M8-M10 准入条件见 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)。
+
+MVP 后的实施顺序保持为：先让会话可恢复、上下文可控，再扩展外部能力。
+
+```text
+M7 Session / Context
+  ↓
+M8 LSP / MCP
+  ↓
+M9 Task / Memory
+  ↓
+M10 Multi-Agent
+```
 
 不要跨阶段同时开太多功能。每完成一个里程碑：
 
@@ -434,3 +447,4 @@ Test Core Runtime
 - Pi 源码学习指南：`/Users/yzh666/workspace/pi/AGENT-LEARNING-GUIDE.md`
 - 项目约束：[`AGENTS.md`](AGENTS.md)
 - Phase 1 计划：[`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)
+- Phase 2 计划：[`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)
