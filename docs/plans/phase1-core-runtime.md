@@ -309,112 +309,20 @@ mini-pi/
 
 ---
 
-### Task M5.3: 样例项目与真实闭环验收
+### Task M5.3: 样例项目与真实闭环验收（实现完成，真实 API 验收待执行）
 
-**Files:**
-- Create: `tests/fixtures/sample_project/calculator.py`
-- Create: `tests/fixtures/sample_project/test_calculator.py`
-- Create: `tests/test_integration_agent.py`
+提交：本次提交
 
-- [ ] **Step 1: 写样例项目（故意留下失败用例）**
+交付物：
 
-`tests/fixtures/sample_project/calculator.py`：
+- `tests/fixtures/sample_project/`：`calculator.py`（bug：`add` 实现为 `a - b`）+ `test_calculator.py`（必失败用例）
+- `pyproject.toml`：新增 `norecursedirs = ["sample_project"]`，默认套件不收集 fixture，显式指定路径仍可运行
+- `tests/test_integration_agent.py`：复制 fixture 到 tmp_path，真实模型执行完整闭环，再用真实 pytest 复核 `returncode == 0` 且 `calculator.py` 进入 `modified_files`；无 Key 时 skip
 
-```python
-def add(a: float, b: float) -> float:
-    return a - b
-```
+验收状态：
 
-`tests/fixtures/sample_project/test_calculator.py`：
-
-```python
-from calculator import add
-
-
-def test_add() -> None:
-    assert add(2, 3) == 5
-```
-
-Run: `uv run pytest tests/fixtures/sample_project -q`
-Expected: `1 failed`（`assert -1 == 5`）
-
-- [ ] **Step 2: 写集成测试 `tests/test_integration_agent.py`**
-
-```python
-from __future__ import annotations
-
-import os
-import shutil
-import subprocess
-import sys
-from pathlib import Path
-
-import pytest
-
-from mini_pi.agent.agent import Agent
-from mini_pi.cli.app import create_llm
-from mini_pi.tools import build_default_registry
-from mini_pi.workspace.workspace import Workspace
-
-FIXTURE = Path(__file__).parent / "fixtures" / "sample_project"
-
-
-def _credentials_available() -> bool:
-    return bool(os.environ.get("OPENAI_API_KEY") or os.environ.get("DEEPSEEK_API_KEY"))
-
-
-pytestmark = [
-    pytest.mark.integration,
-    pytest.mark.skipif(not _credentials_available(), reason="no LLM API key configured"),
-]
-
-
-def test_agent_fixes_failing_test(tmp_path: Path) -> None:
-    target = tmp_path / "sample_project"
-    shutil.copytree(FIXTURE, target)
-    workspace = Workspace(target)
-    provider = os.environ.get("MINI_PI_PROVIDER", "openai")
-    agent = Agent(
-        llm=create_llm(provider, None),
-        registry=build_default_registry(workspace),
-        cwd=workspace.root,
-        max_steps=30,
-    )
-    result = agent.run(
-        "Run pytest, find the failing test, fix the code, then run pytest again to verify."
-    )
-    assert result.stop_reason in {"stop", "tool_calls"}
-    completed = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q"],
-        cwd=workspace.root,
-        capture_output=True,
-        text=True,
-    )
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert "calculator.py" in agent.state.modified_files
-```
-
-- [ ] **Step 3: 运行集成测试（需要 Key）**
-
-Run: `MINI_PI_PROVIDER=deepseek uv run pytest tests/test_integration_agent.py -m integration -v`
-Expected: `PASSED`；若模型未完成则根据失败信息调整 system prompt（`mini_pi/agent/prompt.py`），不要放宽断言。
-
-- [ ] **Step 4: 人工验收（与 README 第 9 节一致，在副本上执行，避免污染仓库）**
-
-```bash
-rm -rf /tmp/mini-pi-demo && cp -R tests/fixtures/sample_project /tmp/mini-pi-demo
-uv run mini-pi --provider deepseek --cwd /tmp/mini-pi-demo \
-  "运行 pytest，定位失败原因并修复，修复后再次运行 pytest 验证"
-```
-
-观察输出应包含：`bash`（pytest 失败）→ `read` / `search` → `edit` → `bash`（pytest 通过）→ 最终总结。
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add tests/fixtures tests/test_integration_agent.py
-git commit -m "test: add sample project and end-to-end agent acceptance test"
-```
+- fixture 显式运行确认 `1 failed`；默认套件 135 passed, 3 deselected；`-m integration` 无 Key 时 3 skipped
+- 真实 API 集成测试与人工验收（README 第 9 节命令）尚未执行，需配置 `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` 后执行；未通过前 M5 不标记完成
 
 ---
 
