@@ -44,6 +44,10 @@ class Workspace:
         """读取原始字节，供 read 工具做二进制嗅探与解码判断。"""
         return self.resolve(path).read_bytes()
 
+    def entry_names(self, path: str | Path = ".") -> set[str]:
+        """返回目录项的精确名称，避免大小写不敏感文件系统误匹配。"""
+        return {entry.name for entry in self.resolve(path).iterdir()}
+
     def write_text(self, path: str | Path, content: str, *, encoding: str = "utf-8") -> Path:
         """原子写：先写同目录临时文件，再 os.replace 覆盖目标。"""
         target = self.resolve(path)
