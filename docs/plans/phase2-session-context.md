@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1、M7.2a 已完成，下一任务为 M7.2b。
+> 状态：实施中；M7.1、M7.2a-M7.2b 已完成，下一任务为 M7.2c。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -309,15 +309,18 @@ M7.2 之后不再按整个子里程碑一次实现，默认以一个任务编号
 
 验收：专项 8 passed；全量 `185 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.2b：建立 Prompt Section 数据模型
+#### M7.2b：建立 Prompt Section 数据模型（已完成）
 
-- [ ] 将静态 system prompt 拆成有稳定 id 与顺序的 section，并保留现有 `build_system_prompt()` 对外行为。
-- 实现纯函数 `build_sections()` 与 `render_sections()`；相同输入必须得到字节级一致结果。
-- XML/标题边界只在这一任务定义，不修改 Provider wire 格式。
-- 针对性测试覆盖：固定顺序、空 section、特殊字符和 legacy prompt 等价性。
-- 不做：section diff、历史 replay、项目规则自动注入。
+提交：本任务提交（`feat: 建立 Prompt Section 数据模型`）。
 
-验收命令：`uv run pytest tests/agent/test_prompt.py -q`。
+交付物：
+
+- `PromptSection` 不可变模型，以及固定顺序的 `build_sections()`、统一标题边界的 `render_sections()`。
+- section id 固定为 `preamble / environment / rules / tools`；空 tools section 仍保留标题。
+- `build_system_prompt()` 改为 sections 构建与渲染，Phase 1 接口及 prompt 文本保持字节级兼容。
+- 特殊字符按模型原文保留；明确未做 diff/replay、`SystemMessage` 改造、项目规则注入和 Provider 改动。
+
+验收：专项 4 passed；Agent 回归 11 passed；全量 `189 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.2c：实现 Section Patch、Diff 与 Replay
 
@@ -730,4 +733,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.2b`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.2c`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
