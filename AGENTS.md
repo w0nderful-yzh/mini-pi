@@ -52,6 +52,7 @@ pytest
 openai SDK（同步 client）
 Typer
 Rich
+ripgrep-bin（search 工具内置 rg，Python 扫描兜底）
 OpenAI-Compatible API
 ```
 

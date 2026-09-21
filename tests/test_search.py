@@ -6,14 +6,14 @@ from pathlib import Path
 import pytest
 
 from mini_pi.errors import ToolArgumentError
-from mini_pi.tools.search import SearchTool
+from mini_pi.tools.search import SearchTool, _find_rg
 from mini_pi.workspace.workspace import Workspace
 
 
 @pytest.fixture
 def tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SearchTool:
     # 强制走 Python 引擎，保证无 rg 环境下测试确定性
-    monkeypatch.setattr(shutil, "which", lambda _: None)
+    monkeypatch.setattr(shutil, "which", lambda *args, **kwargs: None)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
     (tmp_path / "src" / "other.py").write_text("value = 42\n", encoding="utf-8")
@@ -72,7 +72,7 @@ def test_binary_files_are_skipped(tool: SearchTool, tmp_path: Path) -> None:
     assert "blob.bin" not in result.content
 
 
-@pytest.mark.skipif(shutil.which("rg") is None, reason="ripgrep not installed")
+@pytest.mark.skipif(_find_rg() is None, reason="ripgrep not installed")
 def test_rg_engine(tmp_path: Path) -> None:
     """有 rg 时走 rg 引擎，输出仍归一为 workspace 相对路径。"""
     (tmp_path / "a.py").write_text("needle\n", encoding="utf-8")
@@ -81,3 +81,13 @@ def test_rg_engine(tmp_path: Path) -> None:
     assert result.details is not None
     assert result.details["engine"] == "rg"
     assert "a.py:1:needle" in result.content
+
+
+def test_find_rg_prefers_environment_binary(tmp_path: Path) -> None:
+    """优先使用当前环境 bin 下的 rg（ripgrep-bin），不依赖 PATH。"""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    rg_path = fake_bin / "rg"
+    rg_path.write_text("#!/bin/sh\n", encoding="utf-8")
+    rg_path.chmod(0o755)
+    assert _find_rg(executable=str(fake_bin / "python")) == str(rg_path)

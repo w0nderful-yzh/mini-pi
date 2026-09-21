@@ -251,9 +251,9 @@ mini-pi/
 
 提交：本次提交
 
-交付物：`mini_pi/tools/search.py` — `SearchTool`（name=`search`）— 参数 `{pattern, path, glob, is_regex, limit<=1000}`；优先 rg（`--fixed-strings` / `--glob`，输出归一为 workspace 相对路径），无 rg 时用内置 Python 扫描（确定性排序、跳过 `.git/.venv/node_modules` 等目录、跳过 >1MB 与含 NUL 的二进制文件、单行截 500 字符）；非法正则 → `ToolArgumentError`；结果格式 `file:line:text` 并附截断提示；只读工具。
+交付物：`mini_pi/tools/search.py` — `SearchTool`（name=`search`）— 参数 `{pattern, path, glob, is_regex, limit<=1000}`；`_find_rg` 优先取当前环境 bin 下的 rg（`ripgrep-bin` 依赖自带，不依赖 PATH），无 rg 时用内置 Python 扫描（确定性排序、跳过 `.git/.venv/node_modules` 等目录、跳过 >1MB 与含 NUL 的二进制文件、单行截 500 字符）；非法正则 → `ToolArgumentError`；结果格式 `file:line:text` 并附截断提示；只读工具。
 
-验收：`tests/test_search.py` 9 passed（含 rg 引擎用例）；全量 113 passed, 2 deselected。
+验收：`tests/test_search.py` 10 passed（含 rg 引擎与环境内 rg 优先级用例）；全量 120 passed, 2 deselected。
 
 ---
 

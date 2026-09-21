@@ -142,6 +142,7 @@ Pydantic v2
 openai SDK（同步 client）
 Typer
 Rich
+ripgrep-bin（search 工具内置 rg）
 pytest
 ```
 
@@ -258,7 +259,7 @@ LLM → Tool Call → Tool → Observation → LLM → ...
 read     读文件（offset/limit、二进制识别、截断续读）
 write    原子写（自动建父目录）
 edit     精确唯一匹配替换（多 edit、不重叠、输出 diff）
-search   搜索代码（优先 rg，无 rg 用 Python 扫描）
+search   搜索代码（依赖自带 rg，无可用 rg 时用 Python 扫描）
 bash     执行命令（cwd=workspace、timeout、stdout/stderr 分离、exit code）
 git_diff 查看改动（支持 staged）
 ```

@@ -6,6 +6,7 @@ import fnmatch
 import os
 import re
 import shutil
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -15,6 +16,15 @@ from mini_pi.errors import ToolArgumentError, ToolError
 from mini_pi.tools.base import Tool, ToolResult
 from mini_pi.tools.process import run_process
 from mini_pi.workspace.workspace import Workspace
+
+
+def _find_rg(executable: str | None = None) -> str | None:
+    """优先使用当前环境安装的 rg（ripgrep-bin 依赖自带），再回退 PATH。
+
+    不直接依赖 PATH：uv tool 安装等场景下环境 bin 目录不一定在 PATH 中。
+    """
+    env_bin = str(Path(executable or sys.executable).parent)
+    return shutil.which("rg", path=env_bin) or shutil.which("rg")
 
 
 class SearchArgs(BaseModel):
@@ -66,7 +76,7 @@ class SearchTool(Tool):
         base = self._workspace.resolve(path)
         if not base.exists():
             raise ToolError(f"path not found: {self._workspace.relative(path)}")
-        rg = shutil.which("rg")
+        rg = _find_rg()
         if rg is not None and base.is_dir():
             engine = "rg"
             matches, truncated = self._search_rg(rg, pattern, base, glob, is_regex, limit)
