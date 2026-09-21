@@ -283,60 +283,363 @@ Loop 不知道 hook 做的是压缩、prompt refresh 或其他 Context 工作。
 
 验收：Session 专项 19 passed；`uv run pytest -q` → 177 passed, 3 deselected；compileall 与 `git diff --check` 通过。
 
+### 审查批次规则
+
+M7.2 之后不再按整个子里程碑一次实现，默认以一个任务编号作为一次审查批次：
+
+1. 一次只执行一个编号任务，例如只做 `M7.2a`，不得顺带实现 `M7.2b`。
+2. 每个任务只引入一个可观察行为，并同时补齐该行为的针对性测试。
+3. 每个任务完成后执行针对性测试、全量离线测试与 `git diff --check`，然后停止并等待审查。
+4. 每个任务至少有一个独立功能提交；状态文档可使用紧随其后的独立小提交，方便只审代码或只审文档。
+5. 汇报必须列出：任务编号、行为变化、文件清单、测试命令、测试结果、提交号和明确未做项。
+6. 未经确认不提前创建下一任务的接口、占位实现或兼容分支；后续任务需要的抽象到真正使用时再引入。
+
 ### M7.2 Project Context 与 Prompt Sections
 
-- [ ] 新增 `context/project.py`，实现 git root → workspace 的 `AGENTS.md` 加载顺序。
-- [ ] 将 `agent/prompt.py` 迁移为 sections 构建，补充 diff / replay / render。
-- [ ] 扩展 `SystemMessage`，OpenAI / DeepSeek wire 层只接收折叠后的完整 prompt。
-- [ ] 覆盖父子规则、内容变化、section 删除、legacy content 与非法 patch。
+#### M7.2a：发现项目级 `AGENTS.md`
 
-验收：同一段历史重放后 Provider 得到唯一、确定的 system prompt；项目规则来源路径可见。
+- [ ] 新增 `context/project.py`，只负责发现和读取项目规则。
+- 搜索顺序为 git root → workspace；非 git workspace 只读取 workspace 根文件。
+- 返回内容同时携带 workspace 相对来源路径，便于 prompt 与错误信息展示。
+- 路径必须经过 Workspace 边界校验；越界 symlink 与非 UTF-8 内容 Fail Fast。
+- 针对性测试覆盖：无文件、单文件、父子两级、非 git 目录、symlink 逃逸和非法编码。
+- 不做：prompt 拼装、Agent 注入、JSONL 持久化。
+
+验收命令：`uv run pytest tests/context/test_project.py -q`。
+
+#### M7.2b：建立 Prompt Section 数据模型
+
+- [ ] 将静态 system prompt 拆成有稳定 id 与顺序的 section，并保留现有 `build_system_prompt()` 对外行为。
+- 实现纯函数 `build_sections()` 与 `render_sections()`；相同输入必须得到字节级一致结果。
+- XML/标题边界只在这一任务定义，不修改 Provider wire 格式。
+- 针对性测试覆盖：固定顺序、空 section、特殊字符和 legacy prompt 等价性。
+- 不做：section diff、历史 replay、项目规则自动注入。
+
+验收命令：`uv run pytest tests/agent/test_prompt.py -q`。
+
+#### M7.2c：实现 Section Patch、Diff 与 Replay
+
+- [ ] 扩展 `SystemMessage`，支持完整快照与 section patch 两种互斥载荷。
+- 实现纯函数：当前 section 集合 diff、patch 校验、按历史 replay。
+- 删除 section 使用显式 tombstone；未知操作、重复 id、非法 patch Fail Fast。
+- 针对性测试覆盖：新增、修改、删除、无变化、重复 replay、legacy content 与非法 patch。
+- 不做：Provider 折叠、Agent 自动刷新。
+
+验收命令：`uv run pytest tests/llm/test_messages.py tests/context/test_sections.py -q`。
+
+#### M7.2d：Provider 折叠为唯一 System Prompt
+
+- [ ] OpenAI / DeepSeek wire 层在请求前 replay 所有 `SystemMessage`，只发送一个完整 system prompt。
+- Provider-specific 差异仍留在各自 Client；Agent 与 Context 不感知请求体差异。
+- 针对性测试断言：快照、patch、删除混合历史最终只产生一个确定 system message。
+- 不做：加载 `AGENTS.md`、写 Session。
+
+验收命令：`uv run pytest tests/llm -q`。
+
+#### M7.2e：Agent 注入并刷新项目规则
+
+- [ ] Agent 每次 `run()` 前构建目标 sections：首次追加完整快照，内容变化时仅追加 patch，无变化时不追加消息。
+- 项目规则 section 展示来源路径，并按 M7.2a 的父子顺序渲染。
+- prompt refresh 只改变 `AgentState.messages`，持久化留给 M7.3。
+- 针对性测试覆盖：首次运行、规则未变化、文件修改、文件删除和连续两次运行。
+- 不做：resume、CLI Session 参数、compaction。
+
+验收命令：`uv run pytest tests/agent -q`。
+
+M7.2 总验收：同一段历史重放后 Provider 得到唯一、确定的 system prompt；项目规则来源路径可见。
 
 ### M7.3 AgentSession、持久化与 Resume
 
-- [ ] 新增消息提交 hook，保证每条完整消息追加式落盘。
-- [ ] 新增 `session/runtime.py::AgentSession`，负责 create/resume/run/new。
-- [ ] resume 从 entry path 重建 messages、step_count、modified_files 与最后使用的 provider / model。
-- [ ] CLI 增加 `--resume <path>`、`--continue`、`--no-session` 与 `/new`。
-- [ ] resume 时 cwd 不存在或显式 cwd 冲突直接报错。
-- [ ] `/connect` 替换 LLM 时保留同一 Session，不把 API Key 写入 Session。
+#### M7.3a：完整消息提交 Hook
 
-验收：运行一轮 → 退出进程 → resume → 继续提问；第二轮 LLM 收到第一轮历史，JSONL parent 链连续。
+- [ ] 为 Agent / Loop 增加单一消息提交回调，覆盖 system、user、assistant、tool 四种完整消息。
+- 回调只在消息完成后触发；流式 delta 不落盘，tool result 必须在执行完成后提交。
+- 持久化模式采用 durable-first：写入失败时消息不得进入内存历史，循环立即失败。
+- `ToolMessage` 显式携带本次工具的 `modified_files`，供 Session entry 保存。
+- 不做：创建 Session、resume、CLI 接线。
+
+验收命令：`uv run pytest tests/agent/test_agent.py tests/agent/test_loop.py -q`。
+
+#### M7.3b：创建模式 `AgentSession`
+
+- [ ] 新增 `session/runtime.py::AgentSession`，只实现 create 与 run。
+- 创建时写 header；运行时把 M7.3a 的提交回调接入 `JsonlSession.append()`。
+- 运行中的 provider、model、step_count 与 modified_files 写入既定 entry 字段，不新增旁路状态文件。
+- 针对性测试覆盖：纯文本轮、工具轮、写盘失败和 parent 链推进。
+- 不做：resume、CLI flags、`/new`。
+
+验收命令：`uv run pytest tests/session/test_runtime_create.py -q`。
+
+#### M7.3c：从活动分支恢复基础状态
+
+- [ ] 为 `JsonlSession` 提供按 leaf 沿 parent 回溯并正序返回活动分支的只读能力。
+- 仅从 `message` entry 恢复 messages、累计 step_count、modified_files 与最后使用的 provider / model。
+- 本任务暂不解释 compaction entry；遇到 compaction 明确报“需要 M7.4 投影”，禁止静默跳过。
+- 针对性测试覆盖：线性链、非 leaf 分支、空消息链、重复修改文件和含 compaction 的拒绝路径。
+- 不做：真正运行 resumed Agent、CLI。
+
+验收命令：`uv run pytest tests/session/test_replay.py -q`。
+
+#### M7.3d：Resume 模式 `AgentSession`
+
+- [ ] `AgentSession.resume()` 加载 M7.3c 的状态并继续沿原 leaf 追加。
+- session cwd 不存在、显式 cwd 与 header 冲突时 Fail Fast。
+- 未显式覆盖 provider / model 时沿用最后记录值；凭据仍只从认证配置读取。
+- 针对性测试覆盖：跨实例恢复继续提问、leaf 连续、cwd 冲突与缺失凭据。
+- 不做：CLI 参数、compaction-aware resume。
+
+验收命令：`uv run pytest tests/session/test_runtime_resume.py -q`。
+
+#### M7.3e：CLI 默认 Session 与 `--no-session`
+
+- [ ] CLI 默认创建 Session；`--no-session` 保持当前纯内存行为。
+- 默认存储目录、创建失败提示和最终 session path 使用 Rich 展示，但 CLI 不参与消息决策。
+- 针对性测试覆盖：默认创建、显式禁用、启动失败和退出后文件可加载。
+- 不做：`--resume`、`--continue`、`/new`。
+
+验收命令：`uv run pytest tests/cli/test_session_create.py -q`。
+
+#### M7.3f：CLI `--resume` 与 `--continue`
+
+- [ ] `--resume <path>` 恢复指定文件；`--continue` 选择当前 cwd 最近的合法 Session。
+- 两参数互斥；不存在、损坏、cwd 不匹配时给出明确错误并退出非零。
+- “最近”只依据已验证 Session 的时间字段，不根据模糊文件名猜测。
+- 针对性测试覆盖：成功恢复、互斥参数、无候选、多候选排序和损坏候选。
+- 不做：交互命令 `/new`、自动压缩。
+
+验收命令：`uv run pytest tests/cli/test_session_resume.py -q`。
+
+#### M7.3g：`/new` 与 `/connect` 会话连续性
+
+- [ ] `/new` 结束当前 Session 并创建新 Session；旧文件保持可恢复。
+- `/connect` 只替换运行时 LLM，并在下一条 message entry 记录新的 provider / model。
+- API Key 不进入消息、details、Session header 或 entry。
+- 针对性测试覆盖：新会话 id/parent 重置、旧会话不变、切换模型后继续同一链和敏感信息不落盘。
+- 不做：`/compact`。
+
+验收命令：`uv run pytest tests/cli/test_session_commands.py -q`。
+
+M7.3 总验收：运行一轮 → 退出进程 → resume → 继续提问；第二轮 LLM 收到第一轮历史，JSONL parent 链连续。
 
 ### M7.4 Context 投影、Token 与安全切点
 
-- [ ] 新增 `context/projection.py`，实现 parent path 与 latest compaction 投影。
-- [ ] 新增 token 估算，优先 usage，字符估算兜底。
-- [ ] 实现 user / assistant 安全切点及 tool_call / tool_result 配对约束。
-- [ ] 增加未知模型 context window 的显式配置与提示。
+#### M7.4a：活动 Entry 路径投影
 
-验收：表驱动测试覆盖无 usage、尾随消息、连续工具调用、单 turn 超长、找不到安全切点、重复 compaction。
+- [ ] 新增 `context/projection.py`，将 Session 活动分支投影为有序 entry path。
+- 投影输入不可变；孤儿、循环和非法 leaf 明确报错。
+- 与 M7.3c 的 Session 读取逻辑去重，但本任务不改变 Agent resume 行为。
+- 不做：compaction 解释、token、切点。
+
+验收命令：`uv run pytest tests/context/test_projection_path.py -q`。
+
+#### M7.4b：Message Entry 投影
+
+- [ ] 将 message entry path 还原为模型 messages，并恢复结构化 system section 状态。
+- 校验 assistant tool call 与 tool result 的 id 配对；不完整配对 Fail Fast。
+- 针对性测试覆盖四种 role、连续工具调用、legacy system message 和坏配对。
+- 不做：compaction entry、运行时接线。
+
+验收命令：`uv run pytest tests/context/test_projection_messages.py -q`。
+
+#### M7.4c：Compaction Entry 投影
+
+- [ ] 选择活动路径上最新 compaction，投影为 system snapshot + summary + kept messages。
+- 重复 compaction 只使用最新有效投影；切点必须属于该 compaction 的祖先路径。
+- 针对性测试覆盖：无 compaction、一次、连续两次、旧分支 compaction 与非法切点。
+- 不做：生成摘要、自动触发。
+
+验收命令：`uv run pytest tests/context/test_projection_compaction.py -q`。
+
+#### M7.4d：Token 估算
+
+- [ ] 新增独立 token estimator：有 provider usage 时优先使用，无 usage 时按统一字符规则保守估算。
+- 返回结果标记来源，禁止把估算值伪装为 provider 精确值。
+- 针对性测试覆盖：usage、中文、英文、空内容、tool arguments/result 和极长消息。
+- 不做：阈值决策、压缩。
+
+验收命令：`uv run pytest tests/context/test_tokens.py -q`。
+
+#### M7.4e：基础安全切点
+
+- [ ] 只允许在完整 user turn 或完整 assistant turn 边界切分。
+- 至少保留最近一轮可用对话；无安全切点时返回显式结果而非强行截断。
+- 针对性测试覆盖：尾随 user、尾随 assistant、空历史、单 turn 超长和刚好命中边界。
+- 不做：split-turn tool 配对特例。
+
+验收命令：`uv run pytest tests/context/test_cut_points.py -q`。
+
+#### M7.4f：工具轮 Split-Turn 切点
+
+- [ ] 扩展切点算法，保证 assistant tool calls 与对应 tool results 永不被拆散。
+- 多工具调用必须作为一个不可分割 batch；缺少结果时只能整体保留。
+- 针对性测试覆盖：单工具、多工具、部分结果、连续工具轮和超长单结果。
+- 不做：调用摘要模型。
+
+验收命令：`uv run pytest tests/context/test_cut_points_tools.py -q`。
+
+#### M7.4g：Context Window 配置与阈值策略
+
+- [ ] 定义模型 context window、reserve 与 auto-compaction threshold 配置。
+- 已知模型可使用显式内置表；未知模型必须由用户配置，否则关闭自动压缩并给出明确提示。
+- 纯函数返回“无需压缩 / 应压缩 / 无法判断”，不直接修改状态。
+- 针对性测试覆盖：已知模型、未知模型、非法 reserve、临界值和估算来源。
+- 不做：自动调用 compact。
+
+验收命令：`uv run pytest tests/context/test_policy.py -q`。
+
+#### M7.4h：Resume 使用统一 Context 投影
+
+- [ ] `AgentSession.resume()` 切换为 M7.4a-c 的统一投影，解除 M7.3c 对 compaction 的临时拒绝。
+- 恢复后的 state 与直接对同一 Session 投影的结果完全一致。
+- 针对性测试覆盖：无压缩、一轮压缩、重复压缩和含 prompt patch 的恢复。
+- 不做：创建新的 compaction entry。
+
+验收命令：`uv run pytest tests/session/test_runtime_resume.py tests/context -q`。
+
+M7.4 总验收：表驱动测试覆盖无 usage、尾随消息、连续工具调用、单 turn 超长、找不到安全切点、重复 compaction。
 
 ### M7.5 手动 Compaction
 
-- [ ] 新增固定摘要模板与 transcript serializer；单条 tool result 摘要输入限长。
-- [ ] 实现 `/compact [instructions]`，摘要调用禁止携带 tools。
-- [ ] compaction entry 保存 firstKeptEntryId、tokensBefore、usage、system snapshot 与 modifiedFiles。
-- [ ] 摘要失败、空摘要、写盘失败时保持原 Session 与 AgentState 不变。
+#### M7.5a：Transcript Serializer
 
-验收：FakeLLM 生成摘要后，模型上下文缩短，JSONL 原始 message 数量不变，resume 得到相同投影。
+- [ ] 新增供摘要模型读取的确定性 transcript serializer。
+- role、tool name、call id、arguments、result 与错误状态显式可见；单条 tool result 输入按固定上限截断并标记。
+- 序列化不得修改原始 message，也不得把 UI details 当作模型事实。
+- 不做：摘要 prompt、LLM 调用。
+
+验收命令：`uv run pytest tests/context/test_serializer.py -q`。
+
+#### M7.5b：固定摘要协议与调用器
+
+- [ ] 定义摘要 system/user 模板与结构要求，单次调用必须 `tools=None`。
+- 摘要为空、只有空白、LLM error 或意外 tool call 均视为失败。
+- FakeLLM 测试断言请求内容和调用参数，不调用真实网络。
+- 不做：选择切点、写 Session。
+
+验收命令：`uv run pytest tests/context/test_summarizer.py -q`。
+
+#### M7.5c：准备 Compaction 输入
+
+- [ ] 组合投影、token estimator 与安全切点，生成不可变的 compaction plan。
+- plan 明确列出：待摘要 entries、保留 entries、firstKeptEntryId、tokensBefore、system snapshot、modifiedFiles。
+- 找不到安全切点时返回可解释错误，不调用摘要器。
+- 不做：LLM 调用与 append。
+
+验收命令：`uv run pytest tests/context/test_compaction_plan.py -q`。
+
+#### M7.5d：生成 Compaction Result
+
+- [ ] 使用 M7.5b 为 M7.5c 的 plan 生成摘要与 usage 元数据。
+- 重复压缩时把上一份 summary 作为历史摘要输入，不重新发送已压缩原文。
+- split-turn 场景必须在摘要中保留未完成工具轮的必要上下文。
+- 不做：写盘、替换 AgentState。
+
+验收命令：`uv run pytest tests/context/test_compaction_result.py -q`。
+
+#### M7.5e：Compaction 事务提交
+
+- [ ] 仅在摘要成功并完成字段校验后 append `CompactionEntry`。
+- append 成功后从 JSONL 重新 build 投影，再一次性替换 `AgentState.messages`。
+- 摘要失败、空摘要、写盘失败或重建失败时，不写半条 entry、不删除旧消息、不改变内存投影。
+- 不做：CLI 命令、自动触发。
+
+验收命令：`uv run pytest tests/session/test_compaction_transaction.py -q`。
+
+#### M7.5f：CLI `/compact [instructions]`
+
+- [ ] 接入手动压缩命令；可选 instructions 仅进入本次摘要请求，不持久化为全局 prompt。
+- 命令输出压缩前后 token、保留切点与 session path，不展示内部敏感配置。
+- `--no-session` 模式明确拒绝该命令，不创建隐式 Session。
+- 不做：自动压缩。
+
+验收命令：`uv run pytest tests/cli/test_compact_command.py -q`。
+
+M7.5 总验收：FakeLLM 生成摘要后，模型上下文缩短，JSONL 原始 message 数量不变，resume 得到相同投影。
 
 ### M7.6 自动 Compaction 与 turn hook
 
-- [ ] 为 `run_loop` 增加 `prepare_next_turn`，默认 None 时保持 Phase 1 行为与事件顺序。
-- [ ] 在新 prompt 前，以及 tool batch 完成后、下一次 LLM 前检查阈值。
-- [ ] 自动压缩成功后在同一次 run 中继续，不重放已执行工具。
-- [ ] 压缩失败编码为清晰的 agent error；禁止带着超限 context 盲目重试。
+#### M7.6a：`prepare_next_turn` Hook
 
-验收：FakeLLM 构造跨阈值工具轮，断言调用序列为 assistant → tool → compact → assistant，工具只执行一次。
+- [ ] 为 `run_loop` 增加可选 hook，只在完整 tool batch 已提交、下一次 LLM 请求前调用。
+- hook 返回 messages 时整体替换投影，返回 `None` 时保持原状。
+- 默认 `None` 必须保持 Phase 1 行为、事件顺序和测试完全不变。
+- 不做：阈值判断、实际压缩。
+
+验收命令：`uv run pytest tests/agent/test_loop.py -q`。
+
+#### M7.6b：新用户 Prompt 前阈值检查
+
+- [ ] `AgentSession.run()` 在追加新 user message 前检查当前投影是否达到阈值。
+- 达到阈值时复用 M7.5 事务；未达到或策略无法判断时按 M7.4g 的明确结果处理。
+- 压缩成功后只追加一次新 user message。
+- 不做：工具轮中自动检查。
+
+验收命令：`uv run pytest tests/session/test_auto_compact_before_prompt.py -q`。
+
+#### M7.6c：工具轮之间自动压缩
+
+- [ ] 把 M7.5 事务封装进 M7.6a hook，在 tool batch 后按阈值决定是否压缩。
+- 成功后同一次 `run()` 继续下一次 LLM 请求；已执行工具绝不重放。
+- 不做：LLM context overflow 后的自动 retry。
+
+验收命令：`uv run pytest tests/session/test_auto_compact_tool_turn.py -q`。
+
+#### M7.6d：自动压缩错误语义
+
+- [ ] 摘要失败、无安全切点和写盘失败统一转为明确的 agent error 终止原因与事件。
+- 错误后 Session 与 AgentState 仍指向压缩前的有效投影；禁止带超限 context 继续请求。
+- 未开始输出前的 Provider 重试规则保持原样，压缩层不额外重试。
+- 不做：overflow recovery、降级删除历史。
+
+验收命令：`uv run pytest tests/session/test_auto_compact_errors.py -q`。
+
+#### M7.6e：自动压缩端到端离线验收
+
+- [ ] 用 FakeLLM 构造跨阈值工具轮，验证完整事件与持久化序列。
+- 断言调用顺序为 assistant → tool → compact → assistant，工具仅执行一次。
+- 退出并 resume 后再次投影，结果必须与压缩后的内存状态一致。
+- 不做：真实模型网络测试，留给 M7.7。
+
+验收命令：`uv run pytest tests/integration/test_auto_compaction.py -q`。
+
+M7.6 总验收：自动压缩后在同一次 run 中继续，工具不重复，失败时不破坏原 Session。
 
 ### M7.7 回归、真实验收与文档同步
 
-- [ ] `uv run pytest` 全量通过，默认测试无网络。
-- [ ] 新增长会话 integration marker，使用真实模型验证自动压缩后能继续完成任务。
-- [ ] 人工验证 create → exit → resume → compact → continue。
-- [ ] 更新 README 路线图、目录、CLI、已知限制与测试结果。
-- [ ] 将本计划已完成任务压缩成“交付物 + 验收 + 提交号”。
+#### M7.7a：离线全量回归与不变量补强
+
+- [ ] 运行全部非 integration 测试，并针对发现的覆盖缺口只补 Session / Context 不变量测试。
+- 明确验证：默认无网络、`--no-session` Phase 1 兼容、JSONL append-only、tool pair 不拆分。
+- 不做：真实模型请求、文档状态更新。
+
+验收命令：`uv run pytest -q`、`uv run python -m compileall mini_pi tests`、`git diff --check`。
+
+#### M7.7b：真实模型长会话 Integration
+
+- [ ] 新增 `integration` marker 测试，使用用户已配置 Provider 验证长会话自动压缩后继续完成任务。
+- 测试缺少凭据时 skip，不影响默认离线套件；日志不得输出 API Key。
+- OpenAI 与 DeepSeek 至少完成一个 Provider 的真实验收，另一个未测状态必须如实记录。
+- 不做：为通过测试增加新 Provider 或网络 fallback。
+
+验收命令：`uv run pytest -m integration <目标测试> -q`。
+
+#### M7.7c：人工 CLI 场景验收
+
+- [ ] 按脚本人工验证 create → 工具调用 → exit → resume → `/compact` → continue → `/new`。
+- 保存可复核的命令、Session 路径与非敏感结果摘要，不提交真实 Session 文件。
+- 每个失败点先记录实际行为，再决定是否创建修复任务，禁止在验收任务里顺带大改。
+- 不做：文档宣称未执行的场景通过。
+
+验收：人工验收清单逐项签名，敏感信息扫描无命中。
+
+#### M7.7d：文档收尾
+
+- [ ] 更新 README 路线图、目录、CLI、设计取舍、已知限制与最新测试结果。
+- 将本计划已完成任务压缩成“交付物 + 验收 + 提交号”，保留未完成任务的细分清单。
+- 核对 README、AGENTS.md、CLI `--help` 与真实行为一致。
+- 不做：任何运行时代码变化；发现代码问题另开任务。
+
+验收命令：`uv run mini-pi --help`、`git diff --check`。
 
 M7 完成标准：
 
@@ -404,19 +707,25 @@ M7 完成标准：
 ## 8. 推荐实施顺序
 
 ```text
-M7.1 JSONL
+M7.1 JSONL（已完成）
   ↓
-M7.2 prompt / AGENTS.md
+M7.2a → 2b → 2c → 2d → 2e
+项目规则发现   Section 模型   Patch/Replay   Provider 折叠   Agent 接入
+  ↓ 每个编号审查通过后再继续
+M7.3a → 3b → 3c → 3d → 3e → 3f → 3g
+提交 Hook   创建运行时   基础恢复   Resume   默认 Session   CLI 恢复   交互命令
+  ↓ 首个完整用户可见闭环
+M7.4a → 4b → 4c → 4d → 4e → 4f → 4g → 4h
+路径投影   消息投影   压缩投影   Token   基础切点   工具切点   阈值策略   Resume 接入
   ↓
-M7.3 resume 闭环          ← 首个用户可见增量
-  ↓
-M7.4 token / 切点
-  ↓
-M7.5 手动 compact         ← 先把事务做对
-  ↓
-M7.6 自动 compact         ← 再接 turn hook
-  ↓
-M7.7 真实验收与文档收尾
+M7.5a → 5b → 5c → 5d → 5e → 5f
+序列化   摘要调用   压缩计划   生成结果   事务提交   手动命令
+  ↓ 先把手动事务做对
+M7.6a → 6b → 6c → 6d → 6e
+Turn Hook   Prompt 前检查   工具轮检查   错误语义   离线端到端
+  ↓ 再启用自动压缩
+M7.7a → 7b → 7c → 7d
+离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-不要把 M7.3 与 M7.6 合并成一次大改：先证明完整历史可靠持久化与恢复，再让 Context 改写运行投影。
+当前唯一允许开始的下一任务是 `M7.2a`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
