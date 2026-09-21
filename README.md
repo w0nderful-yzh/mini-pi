@@ -306,8 +306,9 @@ mini-pi                         # 交互式 REPL（/connect /reset /exit）
 mini-pi --provider deepseek --model deepseek-chat
 ```
 
+- 启动选择顺序：显式 `--provider/--model` > 上次成功使用的 provider/model > OpenAI 内置默认值
 - API Key 解析顺序：环境变量（`OPENAI_API_KEY` / `DEEPSEEK_API_KEY`）> `~/.mini-pi/auth.json`（目录 0700、文件 0600）
-- 交互式首次使用：输入 `/connect` → 选择 provider → 隐藏输入 Key → 真实请求验证通过后保存
+- 交互式首次使用：输入 `/connect` → 选择 provider → 隐藏输入 Key → 真实请求验证；通过后原子保存 Key 与 provider/model，下次启动自动恢复
 - 一次性模式缺少 Key 时明确报错，并提示环境变量与 `/connect` 两种方式
 - 流式打印模型正文，工具调用与结果以简洁格式展示
 - `--max-steps` 控制单次任务的最大循环步数（默认 50）

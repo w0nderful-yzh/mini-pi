@@ -472,8 +472,9 @@ DeepSeek 差异只允许出现在 DeepSeekClient：base_url、API Key 环境变�
 凭据管理：
 
 ```text
+启动选择顺序：显式 --provider/--model > auth.json 中上次成功连接 > 内置默认值
 解析顺序：环境变量 > ~/.mini-pi/auth.json（目录 0700 / 文件 0600）
-交互式通过 /connect 选择 provider、隐藏输入 Key、真实请求验证后保存
+交互式通过 /connect 选择 provider、隐藏输入 Key、真实请求验证后原子保存 Key 与 provider/model
 禁止把 Key 写入项目目录、日志或提交到 git
 ```
 

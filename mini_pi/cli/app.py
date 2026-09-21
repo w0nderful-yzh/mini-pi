@@ -9,7 +9,12 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from mini_pi.agent.agent import Agent
-from mini_pi.auth import resolve_api_key, save_api_key
+from mini_pi.auth import (
+    load_last_connection,
+    resolve_api_key,
+    save_connection,
+    save_last_connection,
+)
 from mini_pi.cli.console import ConsoleRenderer
 from mini_pi.errors import MiniPiError
 from mini_pi.llm.base import LLMClient
@@ -59,6 +64,28 @@ def verify_credentials(provider: str, api_key: str, model: str | None) -> None:
     llm.complete([UserMessage(content="Reply with OK")])
 
 
+def _resolve_connection(
+    provider: str | None, model: str | None
+) -> tuple[str, str]:
+    """按显式参数、上次选择、内置默认值的顺序解析启动配置。"""
+    previous = load_last_connection()
+    resolved_provider = provider or (previous.provider if previous is not None else "openai")
+    if resolved_provider not in PROVIDERS:
+        if provider is None:
+            raise MiniPiError(
+                f"unsupported provider {resolved_provider!r} in saved connection"
+            )
+        raise typer.BadParameter(
+            f"unsupported provider: {resolved_provider!r} (expected 'openai' or 'deepseek')"
+        )
+    previous_model = (
+        previous.model
+        if previous is not None and previous.provider == resolved_provider
+        else None
+    )
+    return resolved_provider, model or previous_model or DEFAULT_MODELS[resolved_provider]
+
+
 def _build_agent(
     *, llm: LLMClient, workspace: Workspace, max_steps: int, renderer: ConsoleRenderer
 ) -> Agent:
@@ -74,7 +101,7 @@ def _build_agent(
 @app.command()
 def cli(
     prompt: str | None = typer.Argument(None, help="Task to run once; omit to start an interactive session."),
-    provider: str = typer.Option("openai", "--provider", "-p"),
+    provider: str | None = typer.Option(None, "--provider", "-p"),
     model: str | None = typer.Option(None, "--model", "-m"),
     cwd: Path = typer.Option(Path("."), "--cwd"),
     max_steps: int = typer.Option(50, "--max-steps", min=1),
@@ -84,15 +111,26 @@ def cli(
     renderer = ConsoleRenderer(console)
     agent: Agent | None = None
     startup_error: str | None = None
+    provider_override = provider
+    model_override = model
     try:
-        agent = _build_agent(
+        provider, model = _resolve_connection(provider, model)
+        new_agent = _build_agent(
             llm=create_llm(provider, model),
             workspace=workspace,
             max_steps=max_steps,
             renderer=renderer,
         )
+        # 显式选择代表用户更新默认项；从已保存配置启动时无需重复写盘。
+        if provider_override is not None or model_override is not None:
+            save_last_connection(provider, model)
+        agent = new_agent
     except MiniPiError as exc:
         startup_error = str(exc)
+
+    # 解析失败时仍给 /connect 一个确定默认值，避免交互层处理 Optional。
+    provider = provider or "openai"
+    model = model or DEFAULT_MODELS.get(provider, DEFAULT_MODELS["openai"])
 
     if prompt is not None:
         if agent is None:
@@ -124,14 +162,17 @@ def cli(
                 console.print("connect cancelled", style="yellow")
                 continue
             new_provider, api_key = credentials
+            new_model = model if new_provider == provider else DEFAULT_MODELS[new_provider]
             try:
-                verify_credentials(new_provider, api_key, model)
+                verify_credentials(new_provider, api_key, new_model)
             except MiniPiError as exc:
                 console.print(f"key verification failed: {exc}", style="red")
                 continue
-            auth_path = save_api_key(new_provider, api_key)
+            auth_path = save_connection(new_provider, api_key, new_model)
             provider = new_provider
-            new_llm = create_llm(provider, model)
+            model = new_model
+            # 当前进程继续使用刚验证的 Key；环境变量优先级在下次启动时再生效。
+            new_llm = create_llm(provider, model, api_key=api_key)
             if agent is None:
                 agent = _build_agent(
                     llm=new_llm, workspace=workspace, max_steps=max_steps, renderer=renderer

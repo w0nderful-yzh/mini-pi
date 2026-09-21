@@ -5,11 +5,22 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from mini_pi.auth import ConnectionPreference
 from mini_pi.cli.app import app, create_llm
 from mini_pi.errors import LLMError, MiniPiError
 from tests.conftest import FakeLLMClient
 
 runner = CliRunner()
+
+
+@pytest.fixture(autouse=True)
+def isolate_connection_preferences(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CLI 测试不读取或改写用户真实的 ~/.mini-pi/auth.json。"""
+    monkeypatch.setattr("mini_pi.cli.app.load_last_connection", lambda: None)
+    monkeypatch.setattr(
+        "mini_pi.cli.app.save_last_connection",
+        lambda provider, model: Path("/tmp/fake-auth.json"),
+    )
 
 
 def test_create_llm_rejects_unknown_provider() -> None:
@@ -60,8 +71,8 @@ def test_interactive_without_key_hints_connect(
 
 
 def test_connect_saves_verified_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """验证通过后写入凭据文件，并替换 Agent 的 LLM 客户端。"""
-    saved: list[tuple[str, str]] = []
+    """验证通过后保存凭据与模型选择，并替换 Agent 的 LLM 客户端。"""
+    saved: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
         "mini_pi.cli.app.create_llm", lambda provider, model=None, **kwargs: FakeLLMClient([])
     )
@@ -70,12 +81,13 @@ def test_connect_saves_verified_key(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     )
     monkeypatch.setattr("mini_pi.cli.app.verify_credentials", lambda provider, key, model: None)
     monkeypatch.setattr(
-        "mini_pi.cli.app.save_api_key",
-        lambda provider, key: saved.append((provider, key)) or Path("/tmp/fake-auth.json"),
+        "mini_pi.cli.app.save_connection",
+        lambda provider, key, model: saved.append((provider, key, model))
+        or Path("/tmp/fake-auth.json"),
     )
     result = runner.invoke(app, ["--cwd", str(tmp_path)], input="/connect\n/exit\n")
     assert result.exit_code == 0
-    assert saved == [("deepseek", "sk-test")]
+    assert saved == [("deepseek", "sk-test", "deepseek-chat")]
     assert "saved to" in result.output
 
 
@@ -83,7 +95,7 @@ def test_connect_verification_failure_does_not_save(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Key 验证失败时不落盘，并提示失败原因。"""
-    saved: list[tuple[str, str]] = []
+    saved: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
         "mini_pi.cli.app.create_llm", lambda provider, model=None, **kwargs: FakeLLMClient([])
     )
@@ -96,13 +108,73 @@ def test_connect_verification_failure_does_not_save(
 
     monkeypatch.setattr("mini_pi.cli.app.verify_credentials", fail_verify)
     monkeypatch.setattr(
-        "mini_pi.cli.app.save_api_key",
-        lambda provider, key: saved.append((provider, key)) or Path("/tmp/fake-auth.json"),
+        "mini_pi.cli.app.save_connection",
+        lambda provider, key, model: saved.append((provider, key, model))
+        or Path("/tmp/fake-auth.json"),
     )
     result = runner.invoke(app, ["--cwd", str(tmp_path)], input="/connect\n/exit\n")
     assert result.exit_code == 0
     assert saved == []
     assert "verification failed" in result.output
+
+
+def test_startup_restores_last_provider_and_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """无显式参数时使用上次成功保存的 provider/model。"""
+    calls: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        "mini_pi.cli.app.load_last_connection",
+        lambda: ConnectionPreference(provider="deepseek", model="deepseek-reasoner"),
+    )
+    monkeypatch.setattr(
+        "mini_pi.cli.app.create_llm",
+        lambda provider, model=None, **kwargs: calls.append((provider, model))
+        or FakeLLMClient([]),
+    )
+
+    result = runner.invoke(app, ["--cwd", str(tmp_path)], input="/exit\n")
+
+    assert result.exit_code == 0
+    assert calls == [("deepseek", "deepseek-reasoner")]
+
+
+def test_explicit_selection_overrides_and_updates_last_connection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """显式 CLI 参数优先，并成为后续启动的新默认选择。"""
+    calls: list[tuple[str, str | None]] = []
+    saved: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "mini_pi.cli.app.load_last_connection",
+        lambda: ConnectionPreference(provider="deepseek", model="deepseek-reasoner"),
+    )
+    monkeypatch.setattr(
+        "mini_pi.cli.app.create_llm",
+        lambda provider, model=None, **kwargs: calls.append((provider, model))
+        or FakeLLMClient([]),
+    )
+    monkeypatch.setattr(
+        "mini_pi.cli.app.save_last_connection",
+        lambda provider, model: saved.append((provider, model)) or Path("/tmp/fake-auth.json"),
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-custom",
+            "--cwd",
+            str(tmp_path),
+        ],
+        input="/exit\n",
+    )
+
+    assert result.exit_code == 0
+    assert calls == [("openai", "gpt-custom")]
+    assert saved == [("openai", "gpt-custom")]
 
 
 def test_task_without_key_shows_connect_hint(

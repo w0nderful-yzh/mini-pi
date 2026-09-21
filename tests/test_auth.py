@@ -6,7 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from mini_pi.auth import load_api_key, resolve_api_key, save_api_key
+from mini_pi.auth import (
+    ConnectionPreference,
+    load_api_key,
+    load_last_connection,
+    resolve_api_key,
+    save_api_key,
+    save_connection,
+    save_last_connection,
+)
 from mini_pi.errors import MiniPiError
 
 
@@ -76,3 +84,39 @@ def test_invalid_entry_is_error(auth_path: Path) -> None:
 def test_empty_key_is_rejected(auth_path: Path) -> None:
     with pytest.raises(ValueError, match="must not be empty"):
         save_api_key("openai", "   ", path=auth_path)
+
+
+def test_save_connection_persists_key_provider_and_model(auth_path: Path) -> None:
+    """成功连接时一次写入凭据与下次启动所需的选择。"""
+    save_connection("deepseek", "sk-test", "deepseek-reasoner", path=auth_path)
+
+    assert load_api_key("deepseek", path=auth_path) == "sk-test"
+    assert load_last_connection(path=auth_path) == ConnectionPreference(
+        provider="deepseek",
+        model="deepseek-reasoner",
+    )
+
+
+def test_save_last_connection_preserves_existing_keys(auth_path: Path) -> None:
+    """只更新默认选择时不得覆盖已保存的 provider Key。"""
+    save_api_key("openai", "sk-openai", path=auth_path)
+
+    save_last_connection("openai", "gpt-4.1-mini", path=auth_path)
+
+    assert load_api_key("openai", path=auth_path) == "sk-openai"
+    assert load_last_connection(path=auth_path) == ConnectionPreference(
+        provider="openai",
+        model="gpt-4.1-mini",
+    )
+
+
+def test_invalid_last_connection_is_error(auth_path: Path) -> None:
+    """损坏的默认连接配置必须显式报错，不能静默回退。"""
+    auth_path.parent.mkdir(parents=True)
+    auth_path.write_text(
+        '{"_last_connection": {"provider": "deepseek", "model": 123}}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MiniPiError, match="invalid last connection"):
+        load_last_connection(path=auth_path)
