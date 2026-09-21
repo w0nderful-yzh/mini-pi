@@ -530,6 +530,8 @@ type:   message | compaction
 - resume = 读取 entries + 沿 parentId 回放
 - fork 留到后续
 
+M7 的详细设计、子里程碑与验收标准见 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)。
+
 不要第一阶段就引入数据库。
 
 ---
@@ -800,3 +802,19 @@ User → 固定 Workflow
 - git commit message 使用中文，简洁说明改动内容
 - 设计决策发生变化时，同步更新 `README.md` 第 2 节（设计取舍）与本文件
 - 禁止在没有实际验证的情况下声称测试通过
+
+---
+
+## 23. 参考文档（开发时必读）
+
+项目开发时必须参考以下文档，架构与实现取舍以它们为准：
+
+```text
+docs/design/pi-production-architecture.md   Pi 生产架构参考（Agent/AgentSession/Loop/Tool/Session 链路）
+docs/plans/phase1-core-runtime.md           Phase 1（M1-M6）交付物与验收
+docs/plans/phase2-session-context.md        Phase 2（M7）设计与子里程碑；M8-M10 准入条件
+README.md 第 2 节                            与 pi 的设计取舍对照
+```
+
+- 新增/修改 Agent Core、Session、Context 相关设计前，先读 `pi-production-architecture.md` 对应章节，确认与 pi 的差异是有意为之
+- 实现过程中如发现文档与代码不一致，先更新文档再继续，不允许“文档写一套、代码做一套”
