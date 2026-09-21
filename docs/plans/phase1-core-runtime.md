@@ -378,7 +378,7 @@ mini-pi/
 | 要求 | 覆盖任务 |
 | --- | --- |
 | LLM Client（OpenAI/DeepSeek、流式、重试、reasoning 回放） | M1.2-M1.6 |
-| Tool Calling / Registry 校验与错误分类 | M2.1-M2.5 |
+| Tool Calling / Registry 校验与错误分类 | M2.1-M2.4 |
 | Agent Loop（事件、max_steps、错误、length 截断） | M2.4、M3.1-M3.2 |
 | Agent 封装与 system prompt | M3.3 |
 | Workspace 路径逃逸（`../`、绝对路径、symlink）、原子写 | M4.1、M6.1 |
@@ -393,7 +393,7 @@ mini-pi/
 **Type consistency 检查：**
 
 - `run_loop(state, llm, registry, *, max_steps, on_event)`：M2.4 定义，M3.1/M3.2 原地修改，M3.3 Agent 调用一致。
-- `ToolResult(content, details)`：M2.1 定义，M2.4、M4.x、M5.1 使用一致。
+- `ToolResult(content, details, modified_files)`：M2.1 定义，M2.4、M4.x、M5.1 使用一致（后续以显式 `modified_files` 取代 details["path"]）。
 - `AgentEvent` 判别字段 `type`、`reason ∈ {completed, step_limit, error}`：M2.3 定义，M3/M5 使用一致。
 - `ToolError` 子类：M1.3 定义（`errors.py`），M2.2 registry、M2.4 loop、M4.x tools 使用一致。
 - `Workspace.resolve/relative/read_text/write_text`：M4.1 定义，M4.4-M4.10、M3.3 使用一致。
