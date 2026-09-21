@@ -277,82 +277,13 @@ mini-pi/
 
 ---
 
-### Task M4.10: 默认工具注册
+### Task M4.10: 默认工具注册（已完成）
 
-**Files:**
-- Modify: `mini_pi/tools/__init__.py`
-- Test: `tests/test_registry_defaults.py`
+提交：本次提交
 
-- [ ] **Step 1: 写失败测试 `tests/test_registry_defaults.py`**
+交付物：`mini_pi/tools/__init__.py` — `build_default_registry(workspace)` 按固定顺序装配 read / write / edit / search / bash / git_diff；顺序即 system prompt 与工具 schema 的展示顺序。
 
-```python
-from __future__ import annotations
-
-from pathlib import Path
-
-from mini_pi.tools import build_default_registry
-from mini_pi.workspace.workspace import Workspace
-
-
-def test_default_registry_contains_phase1_tools(tmp_path: Path) -> None:
-    registry = build_default_registry(Workspace(tmp_path))
-    names = [schema.name for schema in registry.schemas()]
-    assert names == [
-        "read",
-        "write",
-        "edit",
-        "search",
-        "bash",
-        "git_diff",
-    ]
-```
-
-- [ ] **Step 2: 运行确认失败**
-
-Run: `uv run pytest tests/test_registry_defaults.py -v`
-Expected: FAIL，`ImportError: cannot import name 'build_default_registry'`
-
-- [ ] **Step 3: 写 `mini_pi/tools/__init__.py`**
-
-```python
-from __future__ import annotations
-
-from mini_pi.tools.bash import BashTool
-from mini_pi.tools.edit import EditTool
-from mini_pi.tools.git import GitDiffTool
-from mini_pi.tools.read import ReadTool
-from mini_pi.tools.registry import ToolRegistry
-from mini_pi.tools.search import SearchTool
-from mini_pi.tools.write import WriteTool
-from mini_pi.workspace.workspace import Workspace
-
-__all__ = ["build_default_registry"]
-
-
-def build_default_registry(workspace: Workspace) -> ToolRegistry:
-    registry = ToolRegistry()
-    registry.register(ReadTool(workspace))
-    registry.register(WriteTool(workspace))
-    registry.register(EditTool(workspace))
-    registry.register(SearchTool(workspace))
-    registry.register(BashTool(workspace))
-    registry.register(GitDiffTool(workspace))
-    return registry
-```
-
-- [ ] **Step 4: 运行测试通过并全量回归**
-
-Run: `uv run pytest -v`
-Expected: 全部通过
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add mini_pi/tools/__init__.py tests/test_registry_defaults.py
-git commit -m "feat: register the six phase-1 tools by default"
-```
-
-> M4 完成标准：`uv run pytest` 全绿；路径逃逸、编辑歧义、Shell 超时、二进制文件都有测试覆盖。
+验收：`tests/test_registry_defaults.py` 1 passed；全量 126 passed, 2 deselected。M4 里程碑全部完成。
 
 ---
 
