@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4e 已完成，下一任务为 M7.4f。
+> 状态：实施中；M7.1-M7.4f 已完成，下一任务为 M7.4g。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -526,14 +526,18 @@ M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 →
 
 验收：专项 `uv run pytest tests/context/test_cut_points.py -q` → 10 passed；全量 `328 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.4f：工具轮 Split-Turn 切点
+#### M7.4f：工具轮 Split-Turn 切点（已完成）
 
-- [ ] 扩展切点算法，保证 assistant tool calls 与对应 tool results 永不被拆散。
-- 多工具调用必须作为一个不可分割 batch；缺少结果时只能整体保留。
-- 针对性测试覆盖：单工具、多工具、部分结果、连续工具轮和超长单结果。
-- 不做：调用摘要模型。
+提交：本任务提交（`feat: 支持工具轮 split-turn 切点`）。
 
-验收命令：`uv run pytest tests/context/test_cut_points_tools.py -q`。
+交付物：
+
+- `find_cut_point` 扩展原子段模型：assistant 多工具调用消费紧随的 tool results 并校验 call id 覆盖，多工具作为不可分割 batch。
+- 完整工具轮可作为超预算 turn 内的 split-turn 切点；结果缺失的工具轮不可作为切点，只能连同所在 turn 整体保留或整体进入摘要。
+- 单条超长 tool result 不拆分：切点回到该工具轮起点，整批保留。
+- 明确未做：摘要模型调用、阈值决策。
+
+验收：专项 `uv run pytest tests/context/test_cut_points_tools.py -q` → 6 passed；M7.4e 既有切点测试仍全绿；全量 `334 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.4g：Context Window 配置与阈值策略
 
