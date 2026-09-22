@@ -47,6 +47,7 @@ class ConsoleRenderer:
         self._input_tokens = 0
         self._output_tokens = 0
         self._has_usage = False
+        self.last_tool_count = 0
 
     def _start_thinking(self) -> None:
         """只在足够宽的交互终端显示瞬时状态，不把图案写进日志。"""
@@ -70,11 +71,17 @@ class ConsoleRenderer:
         """运行中断或抛错时清理终端状态。"""
         self._stop_thinking()
 
+    @property
+    def last_provider_usage(self) -> tuple[int, int] | None:
+        """最近一次 run 的实际输入/输出用量，缺失时不伪装估算。"""
+        return (self._input_tokens, self._output_tokens) if self._has_usage else None
+
     def handle(self, event: AgentEvent) -> None:
         if isinstance(event, AgentStartEvent):
             self._input_tokens = 0
             self._output_tokens = 0
             self._has_usage = False
+            self.last_tool_count = 0
         elif isinstance(event, MessageStartEvent):
             self._start_thinking()
         elif isinstance(event, MessageDeltaEvent):
@@ -104,6 +111,7 @@ class ConsoleRenderer:
                 highlight=False,
             )
         elif isinstance(event, ToolExecutionEndEvent):
+            self.last_tool_count += 1
             line = f"  {_preview(event.result.content)}"
             if event.result.modified_files:
                 line += f" · {len(event.result.modified_files)} file(s) changed"

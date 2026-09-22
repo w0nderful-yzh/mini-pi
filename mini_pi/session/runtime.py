@@ -9,11 +9,12 @@ from mini_pi.agent.agent import Agent
 from mini_pi.agent.events import AgentEvent
 from mini_pi.agent.state import AgentState
 from mini_pi.auth import resolve_api_key
+from mini_pi.context.projection import project_compaction, project_entry_path
 from mini_pi.errors import MiniPiError, SessionError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
 from mini_pi.llm.openai_client import OpenAIClient
-from mini_pi.llm.types import AssistantMessage, Message
+from mini_pi.llm.types import AssistantMessage, Message, ToolSchema
 from mini_pi.session.jsonl import JsonlSession
 from mini_pi.tools.registry import ToolRegistry
 
@@ -162,6 +163,22 @@ class AgentSession:
     def model(self) -> str:
         """返回后续消息将记录的模型。"""
         return self._model
+
+    @property
+    def session_id(self) -> str:
+        """返回 JSONL header 的稳定会话标识。"""
+        return str(self._session.header.id)
+
+    @property
+    def tool_schemas(self) -> list[ToolSchema]:
+        """向 CLI 暴露当前 Registry 的工具说明。"""
+        return self._registry.schemas()
+
+    @property
+    def summary_index(self) -> int | None:
+        """当前投影含有效 compaction 时，摘要固定在 system 快照之后。"""
+        path = project_entry_path(self._session.entries, leaf_id=self._session.leaf_id)
+        return 1 if project_compaction(path) is not None else None
 
     def new(self, *, sessions_root: str | Path | None = None) -> AgentSession:
         """用当前模型和工具创建独立会话，保留旧 JSONL 以供恢复。"""

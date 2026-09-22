@@ -12,7 +12,7 @@ from mini_pi.agent.state import AgentState, MessageCommit, commit_message
 from mini_pi.context.project import load_project_instructions
 from mini_pi.context.sections import diff_sections, replay_system_messages
 from mini_pi.llm.base import LLMClient
-from mini_pi.llm.types import AssistantMessage, SystemMessage, UserMessage
+from mini_pi.llm.types import AssistantMessage, SystemMessage, ToolSchema, UserMessage
 from mini_pi.tools.registry import ToolRegistry
 from mini_pi.workspace.workspace import Workspace
 
@@ -93,3 +93,8 @@ class Agent:
     def set_llm(self, llm: LLMClient) -> None:
         """替换 LLM 客户端并保留 transcript（/connect 切换 Key 或 provider）。"""
         self._llm = llm
+
+    @property
+    def tool_schemas(self) -> list[ToolSchema]:
+        """向 CLI 暴露当前实际 Registry 的只读工具说明。"""
+        return self._registry.schemas()

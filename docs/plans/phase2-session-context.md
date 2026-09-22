@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4、M7.C1-C2 已完成，下一任务为 M7.C3。
+> 状态：实施中；M7.1-M7.4、M7.C1-C3 已完成，下一任务为 M7.C4。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载、上下文压缩和可长期使用的 CLI，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -593,12 +593,11 @@ M7.4 总验收：`tests/context/test_m7_4_projection_pipeline.py` 表驱动覆�
 
 验收：`tests/test_console.py` 与 `tests/cli/test_display_context_boundary.py` → 13 passed；全量离线 379 passed, 3 deselected。
 
-#### M7.C3：`/status` 与 `/context`
+#### M7.C3：`/status` 与 `/context`（已完成）
 
-- [ ] `/status` 显示 provider/model、简短 cwd、session id（纯内存模式明确标识）、最近一次 run 的工具次数和 context 占用；详细路径仅显式请求时显示。
-- [ ] `/context` 按当前投影列出 system / AGENTS、conversation、tool results、summary、total 与 window 使用率；各分类只给估算值，Provider 返回的整体 usage 单独标示，不伪装成分类实测值，也不重复计数。
-- [ ] 未配置 context window 时显示未知及自动压缩关闭；压缩前后、resume 后从当前投影重算，不读旧 Session 全量原文冒充当前上下文。
-- [ ] `/tools` 列出当前 Registry 的工具名与简述；`/help` 同步命令可用条件，`/reset` 与 `/new` 原有模式约束保持不变。
+交付物：`context/stats.py` 基于当前投影分类估算、只回放最新 system 状态；CLI `/status [full]`、`/context`、`/tools` 展示模型、会话、工具和上下文占用，未知窗口明确标识。真实 Provider usage 单列，自动压缩仍标记待 M7.6。提交：本任务提交。
+
+验收：`tests/context/test_stats.py`、`tests/cli/test_status_commands.py` → 4 passed；全量离线 383 passed, 3 deselected。
 
 #### M7.C4：工具事件摘要与 `--verbose`
 
@@ -871,4 +870,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.C3`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.C4`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

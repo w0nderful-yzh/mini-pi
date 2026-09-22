@@ -187,10 +187,12 @@ mini-pi/
 │   ├── cli/
 │   │   ├── app.py                     # Typer 入口：一次性 / 交互式
 │   │   ├── banner.py                  # 启动图案
-│   │   └── console.py                 # AgentEvent -> Rich 渲染
+│   │   ├── console.py                 # AgentEvent -> Rich 渲染
+│   │   └── status.py                  # 状态、上下文与工具展示
 │   │
 │   ├── assets/
-│   │   └── banner.txt                 # 启动图案资源
+│   │   ├── banner.txt                 # 启动图案资源
+│   │   └── thinking.txt               # 思考状态图案资源
 │   │
 │   ├── agent/
 │   │   ├── agent.py                   # Agent：状态 + run / reset
@@ -228,7 +230,8 @@ mini-pi/
 │   │   ├── projection.py             # Session 活动路径的消息投影
 │   │   ├── tokens.py                 # token 估算
 │   │   ├── compaction.py             # 安全切点
-│   │   └── policy.py                 # context window 与阈值策略
+│   │   ├── policy.py                 # context window 与阈值策略
+│   │   └── stats.py                  # 当前投影分类估算
 │   │
 │   └── workspace/
 │       └── workspace.py               # 路径解析与安全边界
@@ -319,7 +322,7 @@ mini-pi --no-session            # 保留纯内存模式（/model /reset /exit）
 mini-pi --resume <session.jsonl> # 恢复指定会话
 mini-pi --continue              # 继续当前 workspace 最近的会话
 mini-pi --no-banner             # 交互启动时不打印 ASCII Banner
-# 持久化 REPL 支持 /new、/model、/help、/exit；纯内存模式支持 /reset
+# 持久化 REPL 支持 /new、/model、/status、/context、/tools、/help、/exit；纯内存模式支持 /reset
 ```
 
 - 新建会话时的模型选择顺序：显式 `--provider/--model` > 上次连接（其 provider 有可用 Key 时）> 第一个已配 Key 的 provider > 内置默认值；恢复时默认使用会话活动路径最后的 provider/model，显式参数仅覆盖后续新消息
@@ -332,6 +335,7 @@ mini-pi --no-banner             # 交互启动时不打印 ASCII Banner
 - `--no-session` 不创建持久化文件，保留原有 `/reset` 与 `/model` 行为；持久化模式用 `/new` 开启独立会话，`/model` 在当前链切换模型且仅让后续 entry 使用新配置；`/reset` 在持久化模式下提示改用 `/new`
 - 交互启动显示 ASCII Banner 与标语（`mini_pi/assets/banner.txt` 原样输出）；终端宽度不足或非 tty 时降级为单行；`--no-banner` 可关闭
 - `/help` 列出可用命令；未知 `/命令` 只提示且不会作为任务发给模型
+- `/status` 显示模型、短会话 id、最近工具调用数与估算占用；`/status full` 才显示完整路径；`/context` 列出当前投影分类估算与已知窗口；`/tools` 列出工具
 - 流式打印模型正文，工具调用与结果以简洁格式展示；有改动文件时追加 `· N file(s) changed`，有 provider usage 时在任务结束处汇总本次 run 的 token 用量
 - `--max-steps` 控制单次任务的最大循环步数（默认 50）
 
@@ -367,7 +371,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C2 已完成；下一项 M7.C3） |
+| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C3 已完成；下一项 M7.C4） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

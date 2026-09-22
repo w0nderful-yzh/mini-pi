@@ -20,6 +20,7 @@ from mini_pi.auth import (
 )
 from mini_pi.cli.banner import render_banner
 from mini_pi.cli.console import ConsoleRenderer
+from mini_pi.cli.status import render_context, render_status, render_tools
 from mini_pi.errors import MiniPiError, MissingAPIKeyError, SessionError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
@@ -40,6 +41,9 @@ _HELP_TEXT = """Available commands:
   /model [provider] [model]  switch provider/model (reuse saved key; ask only if missing)
   /new                       start a new session (saved sessions only)
   /reset                     clear in-memory context (memory-only sessions)
+  /status [full]             show model, workspace, session, and context
+  /context                   show estimated context categories
+  /tools                     list available tools
   /help                      show this help
   /exit                      quit mini-pi
 
@@ -382,7 +386,11 @@ def cli(
                 console.print(f"Session path: {agent.path}", soft_wrap=True)
         return
 
-    commands = "/model, /reset, /help, /exit" if no_session else "/model, /new, /reset, /help, /exit"
+    commands = (
+        "/model, /reset, /status, /context, /tools, /help, /exit"
+        if no_session
+        else "/model, /new, /reset, /status, /context, /tools, /help, /exit"
+    )
     render_banner(console, enabled=not no_banner)
     if (
         agent is None
@@ -433,6 +441,23 @@ def cli(
             break
         if stripped == "/help":
             console.print(_HELP_TEXT, markup=False)
+            continue
+        if stripped in {"/status", "/status full"}:
+            render_status(
+                console,
+                agent=agent,
+                provider=provider,
+                model=model,
+                cwd=workspace.root,
+                renderer=renderer,
+                full=stripped.endswith(" full"),
+            )
+            continue
+        if stripped == "/context":
+            render_context(console, agent=agent, model=model, renderer=renderer)
+            continue
+        if stripped == "/tools":
+            render_tools(console, agent=agent, cwd=workspace.root)
             continue
         if stripped == "/new":
             if isinstance(agent, AgentSession):

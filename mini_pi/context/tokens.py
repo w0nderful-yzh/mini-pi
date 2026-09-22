@@ -57,6 +57,11 @@ def _estimate_message(message: Message) -> int:
     return _ceil_div(len(_message_text(message)), _CHARS_PER_TOKEN)
 
 
+def estimate_message_tokens(message: Message) -> int:
+    """供当前投影的分类统计复用同一字符估算规则。"""
+    return _estimate_message(message)
+
+
 def _ceil_div(value: int, divisor: int) -> int:
     """整数向上取整，避免浮点在极长文本上丢精度。"""
     return -(-value // divisor)
