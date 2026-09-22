@@ -22,6 +22,16 @@ from tests.conftest import FakeLLMClient, assistant
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def isolate_auth(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Banner 测试不读写用户认证文件。"""
+    monkeypatch.setattr("mini_pi.cli.app.load_last_connection", lambda: None)
+    monkeypatch.setattr(
+        "mini_pi.cli.app.save_last_connection",
+        lambda provider, model: tmp_path / "auth.json",
+    )
+
+
 def make_console(*, width: int = 80, terminal: bool = True, color: bool = False) -> Console:
     """构造可断言的 Console；默认关色，便于匹配纯文本。"""
     return Console(file=io.StringIO(), force_terminal=terminal, width=width, no_color=not color)

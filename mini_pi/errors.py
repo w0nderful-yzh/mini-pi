@@ -32,3 +32,7 @@ class LLMError(MiniPiError):
 
 class SessionError(MiniPiError):
     """Session 文件或 entry 不符合持久化协议。"""
+
+
+class MissingAPIKeyError(MiniPiError):
+    """当前 provider 没有可用的 API Key；交互式入口可据此提示输入。"""

@@ -12,6 +12,7 @@ from rich.prompt import Prompt
 
 from mini_pi.agent.agent import Agent
 from mini_pi.auth import (
+    ConnectionPreference,
     load_last_connection,
     resolve_api_key,
     save_connection,
@@ -19,7 +20,7 @@ from mini_pi.auth import (
 )
 from mini_pi.cli.banner import render_banner
 from mini_pi.cli.console import ConsoleRenderer
-from mini_pi.errors import MiniPiError, SessionError
+from mini_pi.errors import MiniPiError, MissingAPIKeyError, SessionError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
 from mini_pi.llm.openai_client import OpenAIClient
@@ -36,11 +37,13 @@ DEFAULT_MODELS = {"openai": "gpt-5.6-terra", "deepseek": "deepseek-flash"}
 API_KEY_ENV = {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
 
 _HELP_TEXT = """Available commands:
-  /connect  configure provider, API key and model
-  /new      start a new session (saved sessions only)
-  /reset    clear in-memory context (memory-only sessions)
-  /help     show this help
-  /exit     quit mini-pi"""
+  /model [provider] [model]  switch provider/model (reuse saved key; ask only if missing)
+  /new                       start a new session (saved sessions only)
+  /reset                     clear in-memory context (memory-only sessions)
+  /help                      show this help
+  /exit                      quit mini-pi
+
+/connect is kept as an alias of /model."""
 
 
 def _version() -> str:
@@ -58,8 +61,8 @@ def create_llm(provider: str, model: str | None = None, *, api_key: str | None =
     env_var = API_KEY_ENV[provider]
     resolved_key = api_key if api_key is not None else resolve_api_key(provider, env_var=env_var)
     if not resolved_key:
-        raise MiniPiError(
-            f"{provider} API key is not configured; set {env_var} or run mini-pi and use /connect"
+        raise MissingAPIKeyError(
+            f"{provider} API key is not configured; set {env_var} or use /model (/connect)"
         )
     resolved_model = model or DEFAULT_MODELS[provider]
     if provider == "openai":
@@ -67,15 +70,39 @@ def create_llm(provider: str, model: str | None = None, *, api_key: str | None =
     return DeepSeekClient(model=resolved_model, api_key=resolved_key)
 
 
-def ask_credentials(console: Console, default_provider: str) -> tuple[str, str] | None:
-    """交互式询问 provider 与 Key；空 Key 视为取消。"""
-    provider = Prompt.ask(
-        "Provider", choices=list(PROVIDERS), default=default_provider, console=console
+def _has_key(provider: str) -> bool:
+    """环境变量或 auth.json 中存在该 provider 的可用 Key。"""
+    return resolve_api_key(provider, env_var=API_KEY_ENV[provider]) is not None
+
+
+def _detect_provider(previous: ConnectionPreference | None) -> str:
+    """无显式参数时选 provider：上次连接有 Key 才认，否则选第一个已配 Key 的。"""
+    if previous is not None and _has_key(previous.provider):
+        return previous.provider
+    for candidate in PROVIDERS:
+        if _has_key(candidate):
+            return candidate
+    return previous.provider if previous is not None else "openai"
+
+
+def ask_api_key(console: Console, provider: str) -> str | None:
+    """隐藏输入 API Key；空输入视为取消。"""
+    value = Prompt.ask(f"{provider} API key", password=True, console=console).strip()
+    return value or None
+
+
+def ask_model_choice(
+    console: Console, *, provider: str, model: str
+) -> tuple[str, str] | None:
+    """询问目标 provider/model；模型为空视为取消。"""
+    chosen_provider = Prompt.ask(
+        "Provider", choices=list(PROVIDERS), default=provider, console=console
     )
-    api_key = Prompt.ask(f"{provider} API key", password=True, console=console).strip()
-    if not api_key:
+    default_model = model if chosen_provider == provider else DEFAULT_MODELS[chosen_provider]
+    chosen_model = Prompt.ask("Model", default=default_model, console=console).strip()
+    if not chosen_model:
         return None
-    return provider, api_key
+    return chosen_provider, chosen_model
 
 
 def verify_credentials(provider: str, api_key: str, model: str | None) -> None:
@@ -87,9 +114,9 @@ def verify_credentials(provider: str, api_key: str, model: str | None) -> None:
 def _resolve_connection(
     provider: str | None, model: str | None
 ) -> tuple[str, str]:
-    """按显式参数、上次选择、内置默认值的顺序解析启动配置。"""
+    """按显式参数、可用凭据、上次选择、内置默认值的顺序解析启动配置。"""
     previous = load_last_connection()
-    resolved_provider = provider or (previous.provider if previous is not None else "openai")
+    resolved_provider = provider or _detect_provider(previous)
     if resolved_provider not in PROVIDERS:
         if provider is None:
             raise MiniPiError(
@@ -104,6 +131,37 @@ def _resolve_connection(
         else None
     )
     return resolved_provider, model or previous_model or DEFAULT_MODELS[resolved_provider]
+
+
+def _prompt_and_build(
+    *,
+    console: Console,
+    workspace: Workspace,
+    max_steps: int,
+    renderer: ConsoleRenderer,
+    provider: str,
+    model: str,
+    no_session: bool,
+) -> Agent | AgentSession | None:
+    """启动阶段补 Key：隐藏输入 → 单次验证 → 原子保存 → 装配 Runtime。"""
+    api_key = ask_api_key(console, provider)
+    if api_key is None:
+        return None
+    try:
+        verify_credentials(provider, api_key, model)
+    except MiniPiError as exc:
+        console.print(f"key verification failed: {exc}", style="red", markup=False)
+        return None
+    save_connection(provider, api_key, model)
+    return _build_runtime(
+        llm=create_llm(provider, model, api_key=api_key),
+        workspace=workspace,
+        max_steps=max_steps,
+        renderer=renderer,
+        provider=provider,
+        model=model,
+        no_session=no_session,
+    )
 
 
 def _build_agent(
@@ -142,6 +200,98 @@ def _build_runtime(
     )
 
 
+def _is_model_command(command: str) -> bool:
+    """`/model` 与兼容别名 `/connect`；两者都支持 provider/model 参数。"""
+    return command.split(maxsplit=1)[0] in {"/model", "/connect"}
+
+
+def _switch_connection(
+    *,
+    console: Console,
+    agent: Agent | AgentSession | None,
+    provider: str,
+    model: str,
+    workspace: Workspace,
+    max_steps: int,
+    renderer: ConsoleRenderer,
+    no_session: bool,
+    arguments: list[str],
+) -> tuple[Agent | AgentSession, str, str] | None:
+    """切换 provider/model：已有 Key 直接复用，缺失时才隐藏输入并验证。"""
+    if arguments:
+        if len(arguments) == 1:
+            chosen_provider = arguments[0]
+            # 同 provider 只换模型名时沿用当前模型，避免悄悄切回内置默认
+            chosen_model = model if chosen_provider == provider else DEFAULT_MODELS.get(chosen_provider, "")
+        elif len(arguments) == 2:
+            chosen_provider, chosen_model = arguments
+        else:
+            console.print("usage: /model [provider] [model]", style="yellow", markup=False)
+            return None
+        if chosen_provider not in PROVIDERS:
+            console.print(
+                f"unsupported provider: {chosen_provider}", style="red", markup=False
+            )
+            return None
+        if not chosen_model:
+            console.print("model must not be empty", style="red", markup=False)
+            return None
+    else:
+        choice = ask_model_choice(console, provider=provider, model=model)
+        if choice is None:
+            console.print("model switch cancelled", style="yellow", markup=False)
+            return None
+        chosen_provider, chosen_model = choice
+
+    api_key = resolve_api_key(chosen_provider, env_var=API_KEY_ENV[chosen_provider])
+    entered_key: str | None = None
+    if api_key is None:
+        entered_key = ask_api_key(console, chosen_provider)
+        if entered_key is None:
+            console.print(
+                "model switch cancelled: no API key provided", style="yellow", markup=False
+            )
+            return None
+        api_key = entered_key
+
+    try:
+        if entered_key is not None:
+            # 只有新输入的 Key 需要真实请求验证；已保存的 Key 直接复用
+            verify_credentials(chosen_provider, api_key, chosen_model)
+        new_llm = create_llm(chosen_provider, chosen_model, api_key=api_key)
+        if agent is None:
+            new_agent: Agent | AgentSession = _build_runtime(
+                llm=new_llm,
+                workspace=workspace,
+                max_steps=max_steps,
+                renderer=renderer,
+                provider=chosen_provider,
+                model=chosen_model,
+                no_session=no_session,
+            )
+            if isinstance(new_agent, AgentSession):
+                console.print(f"Session storage: {new_agent.path.parent}", soft_wrap=True)
+        else:
+            new_agent = agent
+            if isinstance(new_agent, AgentSession):
+                new_agent.set_llm(new_llm, provider=chosen_provider, model=chosen_model)
+            else:
+                new_agent.set_llm(new_llm)
+    except MiniPiError as exc:
+        console.print(f"model switch failed: {exc}", style="red", markup=False)
+        return None
+
+    if entered_key is not None:
+        auth_path = save_connection(chosen_provider, entered_key, chosen_model)
+        console.print(f"saved key to {auth_path}", soft_wrap=True)
+    else:
+        save_last_connection(chosen_provider, chosen_model)
+    console.print(
+        f"model: {chosen_provider}/{chosen_model}", style="green", markup=False, soft_wrap=True
+    )
+    return new_agent, chosen_provider, chosen_model
+
+
 @app.command()
 def cli(
     prompt: str | None = typer.Argument(
@@ -168,8 +318,7 @@ def cli(
     renderer = ConsoleRenderer(console)
     agent: Agent | AgentSession | None = None
     startup_error: str | None = None
-    provider_override = provider
-    model_override = model
+    config_error: MiniPiError | None = None
     if resume is not None or continue_session:
         try:
             path = resume if resume is not None else latest_session_path(workspace.root)
@@ -198,11 +347,11 @@ def cli(
                 model=model,
                 no_session=no_session,
             )
-            # 显式选择代表用户更新默认项；从已保存配置启动时无需重复写盘。
-            if provider_override is not None or model_override is not None:
-                save_last_connection(provider, model)
             agent = new_agent
+            # 记住本次成功使用的 provider/model，下次启动优先复用
+            save_last_connection(provider, model)
         except MiniPiError as exc:
+            config_error = exc
             startup_error = (
                 f"session creation failed: {exc}"
                 if not no_session and isinstance(exc, SessionError)
@@ -232,8 +381,25 @@ def cli(
                 console.print(f"Session path: {agent.path}", soft_wrap=True)
         return
 
-    commands = "/connect, /reset, /help, /exit" if no_session else "/connect, /new, /reset, /help, /exit"
+    commands = "/model, /reset, /help, /exit" if no_session else "/model, /new, /reset, /help, /exit"
     render_banner(console, enabled=not no_banner)
+    if (
+        agent is None
+        and isinstance(config_error, MissingAPIKeyError)
+        and sys.stdin.isatty()
+    ):
+        # 交互启动缺 Key：直接提示输入，免去用户记命令的成本
+        agent = _prompt_and_build(
+            console=console,
+            workspace=workspace,
+            max_steps=max_steps,
+            renderer=renderer,
+            provider=provider,
+            model=model,
+            no_session=no_session,
+        )
+        if agent is not None:
+            startup_error = None
     console.print(
         f"  mini-pi {_version()} · {provider}/{model} · {workspace.root}",
         style="dim",
@@ -277,7 +443,7 @@ def cli(
                     agent = new_agent
                     console.print(f"new session: {agent.path}", soft_wrap=True)
             elif agent is None:
-                console.print("configure a provider first with /connect", style="yellow")
+                console.print("configure a provider first with /model", style="yellow")
             else:
                 console.print("/new requires a saved session; use /reset", style="yellow")
             continue
@@ -291,45 +457,20 @@ def cli(
                 agent.reset()
                 console.print("context cleared")
             continue
-        if stripped == "/connect":
-            credentials = ask_credentials(console, provider)
-            if credentials is None:
-                console.print("connect cancelled", style="yellow")
-                continue
-            new_provider, api_key = credentials
-            new_model = model if new_provider == provider else DEFAULT_MODELS[new_provider]
-            try:
-                verify_credentials(new_provider, api_key, new_model)
-                # 验证成功后先构造客户端，避免配置已保存但当前进程无法切换。
-                new_llm = create_llm(new_provider, new_model, api_key=api_key)
-            except MiniPiError as exc:
-                console.print(f"key verification failed: {exc}", style="red")
-                continue
-            auth_path = save_connection(new_provider, api_key, new_model)
-            provider = new_provider
-            model = new_model
-            # 当前进程继续使用刚验证的 Key；环境变量优先级在下次启动时再生效。
-            if agent is None:
-                try:
-                    agent = _build_runtime(
-                        llm=new_llm,
-                        workspace=workspace,
-                        max_steps=max_steps,
-                        renderer=renderer,
-                        provider=provider,
-                        model=model,
-                        no_session=no_session,
-                    )
-                except SessionError as exc:
-                    console.print(f"session creation failed: {exc}", style="red")
-                    continue
-                if isinstance(agent, AgentSession):
-                    console.print(f"Session storage: {agent.path.parent}", soft_wrap=True)
-            elif isinstance(agent, AgentSession):
-                agent.set_llm(new_llm, provider=provider, model=model)
-            else:
-                agent.set_llm(new_llm)
-            console.print(f"saved to {auth_path}")
+        if _is_model_command(stripped):
+            switched = _switch_connection(
+                console=console,
+                agent=agent,
+                provider=provider,
+                model=model,
+                workspace=workspace,
+                max_steps=max_steps,
+                renderer=renderer,
+                no_session=no_session,
+                arguments=stripped.split()[1:],
+            )
+            if switched is not None:
+                agent, provider, model = switched
             continue
         if not stripped:
             continue
@@ -340,7 +481,7 @@ def cli(
             )
             continue
         if agent is None:
-            console.print("configure a provider first with /connect", style="yellow")
+            console.print("configure a provider first with /model", style="yellow")
             continue
         try:
             agent.run(stripped)

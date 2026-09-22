@@ -18,6 +18,11 @@ runner = CliRunner()
 def isolate_cli(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """隔离真实认证与 Session 目录，测试不得写入用户主目录。"""
     monkeypatch.setattr("mini_pi.cli.app.load_last_connection", lambda: None)
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "mini_pi.cli.app.save_last_connection",
+        lambda provider, model: tmp_path / "auth.json",
+    )
     monkeypatch.setattr("mini_pi.session.jsonl._sessions_root", lambda path: tmp_path / "sessions")
 
 
@@ -101,25 +106,32 @@ def test_interactive_exit_leaves_loadable_file(
     assert f"Session path: {files[0]}" in result.output
 
 
-def test_first_connect_creates_default_session(
+def test_first_model_switch_creates_default_session(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """启动时缺 Key 仍允许首次 /connect，并从那一刻开始持久化。"""
+    """启动时缺 Key 仍允许首次 /model 配置，并从那一刻开始持久化。"""
 
-    def create_llm(provider: str, model: str | None = None, *, api_key: str | None = None) -> FakeLLMClient:
+    def create_llm(
+        provider: str, model: str | None = None, *, api_key: str | None = None
+    ) -> FakeLLMClient:
         if api_key is None:
             raise MiniPiError("openai API key is not configured")
         assert api_key == "sk-test"
         return FakeLLMClient([assistant("done")])
 
     monkeypatch.setattr("mini_pi.cli.app.create_llm", create_llm)
-    monkeypatch.setattr("mini_pi.cli.app.ask_credentials", lambda console, default: ("openai", "sk-test"))
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: None)
+    monkeypatch.setattr("mini_pi.cli.app.ask_api_key", lambda console, provider: "sk-test")
     monkeypatch.setattr("mini_pi.cli.app.verify_credentials", lambda provider, key, model: None)
     monkeypatch.setattr(
         "mini_pi.cli.app.save_connection", lambda provider, key, model: tmp_path / "auth.json"
     )
 
-    result = runner.invoke(app, ["--cwd", str(tmp_path)], input="/connect\nhello\n/exit\n")
+    result = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "--no-banner"],
+        input="/model openai gpt-5.6-terra\nhello\n/exit\n",
+    )
 
     assert result.exit_code == 0, result.output
     files = list((tmp_path / "sessions").rglob("*.jsonl"))

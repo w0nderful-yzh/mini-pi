@@ -17,6 +17,7 @@ runner = CliRunner()
 def isolate_connection_preferences(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """CLI 测试不读取或改写用户真实的认证与 Session 文件。"""
     monkeypatch.setattr("mini_pi.cli.app.load_last_connection", lambda: None)
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         "mini_pi.cli.app.save_last_connection",
         lambda provider, model: Path("/tmp/fake-auth.json"),
@@ -74,28 +75,32 @@ def test_interactive_without_key_hints_connect(
     assert "/connect" in result.output
 
 
-def test_connect_saves_verified_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """验证通过后保存凭据与模型选择，并替换 Agent 的 LLM 客户端。"""
+def test_model_switch_prompts_and_saves_new_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """缺 Key 时 /model 隐藏输入并验证，通过后保存到 auth。"""
     saved: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
         "mini_pi.cli.app.create_llm", lambda provider, model=None, **kwargs: FakeLLMClient([])
     )
-    monkeypatch.setattr(
-        "mini_pi.cli.app.ask_credentials", lambda console, default: ("deepseek", "sk-test")
-    )
+    monkeypatch.setattr("mini_pi.cli.app.ask_api_key", lambda console, provider: "sk-test")
     monkeypatch.setattr("mini_pi.cli.app.verify_credentials", lambda provider, key, model: None)
     monkeypatch.setattr(
         "mini_pi.cli.app.save_connection",
         lambda provider, key, model: saved.append((provider, key, model))
         or Path("/tmp/fake-auth.json"),
     )
-    result = runner.invoke(app, ["--cwd", str(tmp_path), "--no-session"], input="/connect\n/exit\n")
-    assert result.exit_code == 0
+    result = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "--no-session", "--no-banner"],
+        input="/model deepseek deepseek-flash\n/exit\n",
+    )
+    assert result.exit_code == 0, result.output
     assert saved == [("deepseek", "sk-test", "deepseek-flash")]
-    assert "saved to" in result.output
+    assert "model: deepseek/deepseek-flash" in result.output
 
 
-def test_connect_verification_failure_does_not_save(
+def test_model_switch_verification_failure_does_not_save(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Key 验证失败时不落盘，并提示失败原因。"""
@@ -103,9 +108,7 @@ def test_connect_verification_failure_does_not_save(
     monkeypatch.setattr(
         "mini_pi.cli.app.create_llm", lambda provider, model=None, **kwargs: FakeLLMClient([])
     )
-    monkeypatch.setattr(
-        "mini_pi.cli.app.ask_credentials", lambda console, default: ("openai", "bad-key")
-    )
+    monkeypatch.setattr("mini_pi.cli.app.ask_api_key", lambda console, provider: "bad-key")
 
     def fail_verify(provider: str, key: str, model: str | None) -> None:
         raise LLMError("401 unauthorized", retryable=False)
@@ -116,10 +119,14 @@ def test_connect_verification_failure_does_not_save(
         lambda provider, key, model: saved.append((provider, key, model))
         or Path("/tmp/fake-auth.json"),
     )
-    result = runner.invoke(app, ["--cwd", str(tmp_path), "--no-session"], input="/connect\n/exit\n")
-    assert result.exit_code == 0
+    result = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "--no-session", "--no-banner"],
+        input="/model openai gpt-5.6-terra\n/exit\n",
+    )
+    assert result.exit_code == 0, result.output
     assert saved == []
-    assert "verification failed" in result.output
+    assert "model switch failed" in result.output
 
 
 def test_startup_restores_last_provider_and_model(
@@ -283,3 +290,128 @@ def test_unknown_command_is_not_sent_to_model(
     assert result.exit_code == 0
     assert "unknown command" in result.output
     assert llm.calls == []
+
+
+def test_startup_prefers_provider_with_saved_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """上次连接 provider 没有 Key 时，改用已保存 Key 的 provider 而不是卡住。"""
+    monkeypatch.setattr(
+        "mini_pi.cli.app.load_last_connection",
+        lambda: ConnectionPreference(provider="openai", model="gpt-5.6-terra"),
+    )
+    monkeypatch.setattr(
+        "mini_pi.cli.app.resolve_api_key",
+        lambda provider, **kwargs: "sk-x" if provider == "deepseek" else None,
+    )
+    calls: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        "mini_pi.cli.app.create_llm",
+        lambda provider, model=None, **kwargs: calls.append((provider, model))
+        or FakeLLMClient([]),
+    )
+
+    result = runner.invoke(
+        app, ["--cwd", str(tmp_path), "--no-session", "--no-banner"], input="/exit\n"
+    )
+
+    assert result.exit_code == 0, result.output
+    assert calls == [("deepseek", "deepseek-flash")]
+    assert "deepseek/deepseek-flash" in result.output
+
+
+def test_connect_alias_still_switches_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """/connect 作为 /model 的兼容别名保留。"""
+    calls: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        "mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: "sk-test"
+    )
+    monkeypatch.setattr(
+        "mini_pi.cli.app.create_llm",
+        lambda provider, model=None, **kwargs: calls.append((provider, model))
+        or FakeLLMClient([]),
+    )
+
+    result = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "--no-session", "--no-banner"],
+        input="/connect deepseek deepseek-v4-pro\n/exit\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert ("deepseek", "deepseek-v4-pro") in calls
+
+
+def test_prompt_and_build_saves_key_and_returns_agent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """启动补 Key 助手：验证通过即落盘并返回可运行 Agent。"""
+    import io
+
+    from rich.console import Console
+
+    from mini_pi.cli.app import _prompt_and_build
+    from mini_pi.cli.console import ConsoleRenderer
+    from mini_pi.workspace.workspace import Workspace
+
+    saved: list[tuple[str, str, str]] = []
+    monkeypatch.setattr("mini_pi.cli.app.ask_api_key", lambda console, provider: "sk-test")
+    monkeypatch.setattr(
+        "mini_pi.cli.app.verify_credentials", lambda provider, key, model: None
+    )
+    monkeypatch.setattr(
+        "mini_pi.cli.app.save_connection",
+        lambda provider, key, model: saved.append((provider, key, model))
+        or Path("/tmp/fake-auth.json"),
+    )
+    monkeypatch.setattr(
+        "mini_pi.cli.app.create_llm", lambda provider, model=None, **kwargs: FakeLLMClient([])
+    )
+    console = Console(file=io.StringIO(), width=200, no_color=True)
+
+    agent = _prompt_and_build(
+        console=console,
+        workspace=Workspace(tmp_path),
+        max_steps=5,
+        renderer=ConsoleRenderer(console),
+        provider="openai",
+        model="gpt-5.6-terra",
+        no_session=True,
+    )
+
+    assert agent is not None
+    assert saved == [("openai", "sk-test", "gpt-5.6-terra")]
+
+
+def test_prompt_and_build_cancels_on_empty_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """空 Key 视为取消，不验证也不落盘。"""
+    import io
+
+    from rich.console import Console
+
+    from mini_pi.cli.app import _prompt_and_build
+    from mini_pi.cli.console import ConsoleRenderer
+    from mini_pi.workspace.workspace import Workspace
+
+    monkeypatch.setattr("mini_pi.cli.app.ask_api_key", lambda console, provider: None)
+    monkeypatch.setattr(
+        "mini_pi.cli.app.save_connection",
+        lambda provider, key, model: pytest.fail("must not save without a key"),
+    )
+    console = Console(file=io.StringIO(), width=200, no_color=True)
+
+    agent = _prompt_and_build(
+        console=console,
+        workspace=Workspace(tmp_path),
+        max_steps=5,
+        renderer=ConsoleRenderer(console),
+        provider="openai",
+        model="gpt-5.6-terra",
+        no_session=True,
+    )
+
+    assert agent is None

@@ -82,7 +82,7 @@ Python Coding Agent Harness
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
-| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3 已完成 CLI 新建、恢复、`/new` 与同链 `/connect`；compaction 投影仍待后续任务 |
+| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3 已完成 CLI 新建、恢复、`/new` 与同链 `/model` 切换；compaction 投影仍待后续任务 |
 
 ---
 
@@ -306,20 +306,21 @@ symlink 指向外部     → 报错
 mini-pi "修复某个 bug"          # 一次性执行
 mini-pi                         # 交互式 REPL，默认创建 JSONL Session
 mini-pi --provider deepseek --model deepseek-flash
-mini-pi --no-session            # 保留纯内存模式（/connect /reset /exit）
+mini-pi --no-session            # 保留纯内存模式（/model /reset /exit）
 mini-pi --resume <session.jsonl> # 恢复指定会话
 mini-pi --continue              # 继续当前 workspace 最近的会话
 mini-pi --no-banner             # 交互启动时不打印 ASCII Banner
-# 持久化 REPL 支持 /new、/connect、/help、/exit；纯内存模式支持 /reset
+# 持久化 REPL 支持 /new、/model、/help、/exit；纯内存模式支持 /reset
 ```
 
-- 新建会话时的模型选择顺序：显式 `--provider/--model` > 上次成功使用的 provider/model > OpenAI 内置默认值；恢复时默认使用会话活动路径最后的 provider/model，显式参数仅覆盖后续新消息
+- 新建会话时的模型选择顺序：显式 `--provider/--model` > 上次连接（其 provider 有可用 Key 时）> 第一个已配 Key 的 provider > 内置默认值；恢复时默认使用会话活动路径最后的 provider/model，显式参数仅覆盖后续新消息
 - API Key 解析顺序：环境变量（`OPENAI_API_KEY` / `DEEPSEEK_API_KEY`）> `~/.mini-pi/auth.json`（目录 0700、文件 0600）
-- 交互式首次使用：输入 `/connect` → 选择 provider → 隐藏输入 Key → 真实请求验证；通过后原子保存 Key 与 provider/model，下次启动自动恢复
-- 一次性模式缺少 Key 时明确报错，并提示环境变量与 `/connect` 两种方式
+- 启动时若已保存 Key 直接复用；当前 provider 缺 Key 时优先切到已配 Key 的 provider，交互式（tty）缺 Key 则直接隐藏输入并单次验证后原子保存，无需先记住命令
+- `/model [provider] [model]` 切换 provider/model：已有 Key 直接复用、不重复落盘，仅缺 Key 时输入并验证；`/connect` 为兼容别名
+- 一次性模式缺少 Key 时明确报错，并提示环境变量与 `/model`（`/connect`）两种方式
 - 默认在 `~/.mini-pi/sessions/` 下按 workspace 保存 JSONL；启动显示存储目录，退出显示实际文件路径；创建失败不会静默回退到内存模式
 - `--resume <path>` 严格加载指定会话；`--continue` 严格校验当前 workspace 的所有候选，按最后 entry 的活动时间选最新（空会话用 header 时间）。候选损坏、cwd 不匹配或最新时间并列会报错，不静默退回旧会话；两者不可并用，也不可与 `--no-session` 并用
-- `--no-session` 不创建持久化文件，保留原有 `/reset` 与 `/connect` 行为；持久化模式用 `/new` 开启独立会话，`/connect` 在当前链切换模型且仅让后续 entry 使用新配置；`/reset` 在持久化模式下提示改用 `/new`
+- `--no-session` 不创建持久化文件，保留原有 `/reset` 与 `/model` 行为；持久化模式用 `/new` 开启独立会话，`/model` 在当前链切换模型且仅让后续 entry 使用新配置；`/reset` 在持久化模式下提示改用 `/new`
 - 交互启动显示 ASCII Banner 与标语（`mini_pi/assets/banner.txt` 原样输出）；终端宽度不足或非 tty 时降级为单行；`--no-banner` 可关闭
 - `/help` 列出可用命令；未知 `/命令` 只提示且不会作为任务发给模型
 - 流式打印模型正文，工具调用与结果以简洁格式展示；有改动文件时追加 `· N file(s) changed`，有 provider usage 时显示每轮 token 用量
@@ -332,7 +333,7 @@ mini-pi --no-banner             # 交互启动时不打印 ASCII Banner
 ```bash
 uv sync
 export OPENAI_API_KEY=sk-...        # 或 DEEPSEEK_API_KEY
-# 也可以先 `uv run mini-pi`，在交互模式输入 /connect 配置 Key
+# 也可以先 `uv run mini-pi`，按提示输入 Key 或用 /model 切换 provider/model
 
 uv run mini-pi "介绍一下这个仓库"
 uv run mini-pi --provider deepseek "运行 pytest 并修复失败用例"

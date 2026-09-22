@@ -473,9 +473,9 @@ DeepSeek 差异只允许出现在 DeepSeekClient：base_url、API Key 环境变�
 凭据管理：
 
 ```text
-启动选择顺序：显式 --provider/--model > auth.json 中上次成功连接 > 内置默认值
+启动选择顺序：显式 --provider/--model > 上次连接（仅当其 provider 有可用 Key）> 第一个已配 Key 的 provider > 内置默认值
 解析顺序：环境变量 > ~/.mini-pi/auth.json（目录 0700 / 文件 0600）
-交互式通过 /connect 选择 provider、隐藏输入 Key、真实请求验证后原子保存 Key 与 provider/model
+交互启动缺 Key 时在 tty 下直接隐藏输入并单次真实验证后原子保存；`/model`（`/connect` 为兼容别名）切换 provider/model，已有 Key 直接复用，仅在缺失时才输入并验证
 禁止把 Key 写入项目目录、日志或提交到 git
 ```
 
