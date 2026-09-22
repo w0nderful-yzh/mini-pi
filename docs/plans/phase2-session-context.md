@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.3 已完成，下一任务为 M7.4a。
+> 状态：实施中；M7.1-M7.4a 已完成，下一任务为 M7.4b。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -459,14 +459,18 @@ M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 →
 
 ### M7.4 Context 投影、Token 与安全切点
 
-#### M7.4a：活动 Entry 路径投影
+#### M7.4a：活动 Entry 路径投影（已完成）
 
-- [ ] 新增 `context/projection.py`，将 Session 活动分支投影为有序 entry path。
-- 投影输入不可变；孤儿、循环和非法 leaf 明确报错。
-- 与 M7.3c 的 Session 读取逻辑去重，但本任务不改变 Agent resume 行为。
-- 不做：compaction 解释、token、切点。
+提交：本任务提交（`feat: 增加活动 Entry 路径投影`）。
 
-验收命令：`uv run pytest tests/context/test_projection_path.py -q`。
+交付物：
+
+- `context/projection.py`：`project_entry_path(entries, leaf_id=...)` 纯函数，沿 parent 链返回 root → leaf 有序路径，不改写也不复制入参。
+- 未知 leaf、孤儿 parent、parent 环、重复 id 均按损坏状态抛出 `SessionError`；`leaf_id=None`（空会话）返回空路径。
+- `JsonlSession.active_entries()` 改为复用投影并保留深拷贝，与 M7.3c 读取逻辑去重，Agent resume 行为不变。
+- 明确未做：compaction 解释、token 估算、切点。
+
+验收：专项 `uv run pytest tests/context/test_projection_path.py -q` → 8 passed；全量 `288 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.4b：Message Entry 投影
 

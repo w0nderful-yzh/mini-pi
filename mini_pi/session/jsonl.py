@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 from pydantic import TypeAdapter, ValidationError
 
+from mini_pi.context.projection import project_entry_path
 from mini_pi.errors import SessionError
 from mini_pi.llm.types import AssistantMessage, Message, SystemMessage, ToolMessage, Usage
 from mini_pi.session.models import CompactionEntry, MessageEntry, SessionEntry, SessionHeader
@@ -248,20 +249,12 @@ class JsonlSession:
 
     def active_entries(self, *, leaf_id: UUID | None = None) -> tuple[SessionEntry, ...]:
         """从指定或当前 leaf 沿 parent 回溯，返回根到 leaf 的独立副本。"""
-        current_id = self._leaf_id if leaf_id is None else leaf_id
-        path: list[SessionEntry] = []
-        seen: set[UUID] = set()
-        while current_id is not None:
-            if current_id in seen:
-                raise SessionError(f"cycle in session parent chain: {current_id}")
-            seen.add(current_id)
-            entry = self._by_id.get(current_id)
-            if entry is None:
-                raise SessionError(f"unknown leaf or parentId in session: {current_id}")
-            path.append(entry)
-            current_id = entry.parent_id
+        target = self._leaf_id if leaf_id is None else leaf_id
         # SessionEntry 的 message 可变；深拷贝避免调用方改写内部索引中的事实。
-        return tuple(entry.model_copy(deep=True) for entry in reversed(path))
+        return tuple(
+            entry.model_copy(deep=True)
+            for entry in project_entry_path(self._entries, leaf_id=target)
+        )
 
     def replay(self, *, leaf_id: UUID | None = None) -> SessionReplay:
         """仅从消息 entry 恢复基础状态；compaction 留给 M7.4 投影。"""
