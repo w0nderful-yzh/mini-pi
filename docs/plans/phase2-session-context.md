@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1、M7.2a-M7.2d 已完成，下一任务为 M7.2e。
+> 状态：实施中；M7.1、M7.2 已完成，下一任务为 M7.3a。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -21,7 +21,7 @@ Phase 1 已稳定完成以下闭环：
 当前实际限制：
 
 - `AgentState.messages` 只在内存中，进程退出后 transcript 丢失。
-- system prompt 是启动时生成的一段固定字符串，没有加载项目 `AGENTS.md`。
+- M7.2 已使项目 `AGENTS.md` 生效并支持跨 run 刷新；规则仍只在内存 transcript 中，退出后无法恢复。
 - 上下文无限增长；当前 `Usage` 已记录 token，但没有阈值、切点与压缩。
 - `Agent` 同时承担“持续持有 transcript”的隐含会话职责，CLI 无法恢复一次历史任务。
 - `run_loop()` 内部没有 turn 边界 hook，Context 无法在工具结果后、下一次 LLM 请求前安全替换投影。
@@ -193,7 +193,7 @@ project_context
 - 同一目录只认精确文件名 `AGENTS.md`；不兼容 `CLAUDE.md`、override 或大小写变体。
 - 文件读取失败、非 UTF-8，或 symlink 逃出“git root → workspace”发现区间时显式报错。
 - 内容包在带 workspace 相对来源路径的 `<project_instructions>` 中，便于模型区分层级。
-- 启动时加载，不扫描整个仓库；本阶段不根据每次工具目标动态切换子目录规则。
+- 每次 `Agent.run()` 前重新加载 root → workspace 祖先链，不扫描整个仓库；本阶段不根据每次工具目标动态切换子目录规则。
 
 ### 4.5 Context 投影
 
@@ -349,17 +349,20 @@ M7.2 之后不再按整个子里程碑一次实现，默认以一个任务编号
 
 验收：Provider 专项 6 passed；`uv run pytest tests/llm -q` 10 passed；全量 `211 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.2e：Agent 注入并刷新项目规则
+#### M7.2e：Agent 注入并刷新项目规则（已完成）
 
-- [ ] Agent 每次 `run()` 前构建目标 sections：首次追加完整快照，内容变化时仅追加 patch，无变化时不追加消息。
-- 项目规则 section 展示来源路径，并按 M7.2a 的父子顺序渲染。
-- prompt refresh 只改变 `AgentState.messages`，持久化留给 M7.3。
-- 针对性测试覆盖：首次运行、规则未变化、文件修改、文件删除和连续两次运行。
-- 不做：resume、CLI Session 参数、compaction。
+提交：本任务提交（`feat: 注入并刷新项目规则`）。
 
-验收命令：`uv run pytest tests/agent -q`。
+交付物：
 
-M7.2 总验收：同一段历史重放后 Provider 得到唯一、确定的 system prompt；项目规则来源路径可见。
+- `Agent.run()` 前经 Context/Workspace 重新发现规则；首次追加完整 sections 快照，后续只在变化时追加 `set/delete` patch。
+- `project_context` 依 git root → workspace 顺序包裹各级规则与相对来源路径；文件内容原样保留，XML 路径属性安全转义。
+- 规则修改、增加、删除与 reset 后重建均有测试；读取失败发生在追加本轮 user 消息和调用 LLM 之前。
+- 明确未做：Session 持久化、resume、CLI Session 参数和 compaction。
+
+验收：`uv run pytest tests/agent -q` 12 passed；Agent 回归 19 passed；全量 `219 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
+
+M7.2 总验收（已完成）：同一段历史重放后 Provider 得到唯一、确定的 system prompt；项目规则来源路径可见。
 
 ### M7.3 AgentSession、持久化与 Resume
 
@@ -741,4 +744,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.2e`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.3a`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

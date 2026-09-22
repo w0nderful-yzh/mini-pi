@@ -7,15 +7,18 @@ from pathlib import Path
 
 from mini_pi.agent.events import AgentEvent
 from mini_pi.agent.loop import run_loop
-from mini_pi.agent.prompt import build_system_prompt
+from mini_pi.agent.prompt import build_sections
 from mini_pi.agent.state import AgentState
+from mini_pi.context.project import load_project_instructions
+from mini_pi.context.sections import diff_sections, replay_system_messages
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.types import AssistantMessage, SystemMessage, UserMessage
 from mini_pi.tools.registry import ToolRegistry
+from mini_pi.workspace.workspace import Workspace
 
 
 class Agent:
-    """只持有 cwd 与工具注册表；文件与 Shell 能力全部来自 Tool 层。"""
+    """协调状态与项目上下文；文件读取由 Context 通过 Workspace 完成。"""
 
     def __init__(
         self,
@@ -32,15 +35,14 @@ class Agent:
         self._registry = registry
         self._max_steps = max_steps
         self._on_event = on_event
-        self._system_prompt = build_system_prompt(cwd=cwd, tools=registry.schemas())
+        self._workspace = Workspace(cwd)
         self.state = AgentState()
 
     def run(self, task: str) -> AssistantMessage:
         """执行一次用户任务；transcript 与步数在多次 run 之间保留。"""
         if not task.strip():
             raise ValueError("task must not be empty")
-        if not self.state.messages:
-            self.state.messages.append(SystemMessage(content=self._system_prompt))
+        self._refresh_system_prompt()
         self.state.messages.append(UserMessage(content=task))
         return run_loop(
             self.state,
@@ -49,6 +51,29 @@ class Agent:
             max_steps=self._max_steps,
             on_event=self._on_event,
         )
+
+    def _refresh_system_prompt(self) -> None:
+        """只在目标 sections 变化时向 transcript 追加快照或 patch。"""
+        desired = {
+            section.id: section.content
+            for section in build_sections(
+                cwd=self._workspace.root,
+                tools=self._registry.schemas(),
+                project_instructions=load_project_instructions(self._workspace),
+            )
+        }
+        current = replay_system_messages(
+            message
+            for message in self.state.messages
+            if isinstance(message, SystemMessage)
+        )
+        if current is None or current.sections is None:
+            # 旧 content 无法安全拆分；追加完整结构化快照而非猜测差异。
+            self.state.messages.append(SystemMessage(sections=desired))
+            return
+        patch = diff_sections(current.sections, desired)
+        if patch is not None:
+            self.state.messages.append(SystemMessage(section_patch=list(patch)))
 
     def reset(self) -> None:
         """清空会话状态，system prompt 会在下次 run 时重新注入。"""

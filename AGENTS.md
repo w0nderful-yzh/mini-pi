@@ -541,6 +541,8 @@ M7 的详细设计、子里程碑与验收标准见 [`docs/plans/phase2-session-
 
 不要启动时扫描并把整个仓库塞进模型。
 
+M7.2 起每次 `Agent.run()` 前只读取 git root 到 workspace 祖先链上的 `AGENTS.md`；首次记录完整 prompt sections，内容变化时仅追加 patch，无变化不追加。读取失败应在提交本轮用户消息前报错。
+
 优先：
 
 ```text

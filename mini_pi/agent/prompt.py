@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import platform
+from collections.abc import Sequence
 from pathlib import Path
+from xml.sax.saxutils import quoteattr
 
+from mini_pi.context.project import ProjectInstruction
 from mini_pi.context.sections import PromptSection, render_sections
 from mini_pi.llm.types import ToolSchema
 
@@ -17,10 +20,17 @@ _RULES = (
     "- Tool errors are returned to you as error observations; read them and adjust instead of repeating the same call.",
     "- When the task is complete, stop calling tools and summarize what changed and how it was verified.",
 )
-def build_sections(*, cwd: Path, tools: list[ToolSchema]) -> tuple[PromptSection, ...]:
-    """以固定顺序构建当前静态 system prompt sections。"""
+
+
+def build_sections(
+    *,
+    cwd: Path,
+    tools: list[ToolSchema],
+    project_instructions: Sequence[ProjectInstruction] = (),
+) -> tuple[PromptSection, ...]:
+    """按固定顺序构建 system prompt，并可追加已加载的项目规则。"""
     tool_lines = "\n".join(f"- {tool.name}: {tool.description}" for tool in tools)
-    return (
+    sections = (
         PromptSection(id="preamble", content=_PREAMBLE),
         PromptSection(
             id="environment",
@@ -31,6 +41,24 @@ def build_sections(*, cwd: Path, tools: list[ToolSchema]) -> tuple[PromptSection
         ),
         PromptSection(id="rules", content="\n".join(_RULES)),
         PromptSection(id="tools", content=tool_lines),
+    )
+    if not project_instructions:
+        return sections
+    return sections + (
+        PromptSection(
+            id="project_context",
+            content="\n\n".join(_render_project_instruction(item) for item in project_instructions),
+        ),
+    )
+
+
+def _render_project_instruction(item: ProjectInstruction) -> str:
+    """保留规则原文，并给缺少末尾换行的文件补齐 XML 边界。"""
+    content = item.content if item.content.endswith("\n") else item.content + "\n"
+    # 来源路径进入 XML 属性，必须加引号并转义特殊字符。
+    return (
+        f"<project_instructions path={quoteattr(item.path)}>\n"
+        f"{content}</project_instructions>"
     )
 
 

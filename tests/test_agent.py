@@ -6,6 +6,7 @@ import pytest
 
 from mini_pi.agent.agent import Agent
 from mini_pi.agent.prompt import build_system_prompt
+from mini_pi.llm.openai_client import to_openai_messages
 from mini_pi.llm.types import AssistantMessage, SystemMessage, UserMessage
 from mini_pi.tools.registry import ToolRegistry
 from tests.conftest import EchoTool, FakeLLMClient, assistant
@@ -23,14 +24,20 @@ def make_agent(tmp_path: Path, registry: ToolRegistry, script: list) -> Agent:
 
 
 def test_run_injects_system_and_user_messages(tmp_path: Path, registry: ToolRegistry) -> None:
-    """首次 run 注入 system prompt，并把用户任务追加为 user 消息。"""
+    """首次 run 注入完整 sections 快照，并把用户任务追加为 user 消息。"""
     agent = make_agent(tmp_path, registry, [assistant("ok")])
     result = agent.run("do something")
     assert result.content == "ok"
     assert isinstance(agent.state.messages[0], SystemMessage)
-    tools_section = agent.state.messages[0].content.split("# Tools")[1]
+    assert agent.state.messages[0].content is None
+    assert agent.state.messages[0].sections is not None
+    tools_section = agent.state.messages[0].sections["tools"]
     assert "- echo:" in tools_section
     assert "read" not in tools_section
+    # 没有项目规则时，结构化快照渲染结果仍与 Phase 1 prompt 完全一致。
+    assert to_openai_messages(agent.state.messages)[0]["content"] == build_system_prompt(
+        cwd=tmp_path, tools=registry.schemas()
+    )
     assert isinstance(agent.state.messages[1], UserMessage)
     assert agent.state.messages[1].content == "do something"
 
