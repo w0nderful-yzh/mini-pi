@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4、M7.C1-C3 已完成，下一任务为 M7.C4。
+> 状态：实施中；M7.1-M7.4、M7.C1-C4 已完成，下一任务为 M7.C5。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载、上下文压缩和可长期使用的 CLI，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -599,11 +599,11 @@ M7.4 总验收：`tests/context/test_m7_4_projection_pipeline.py` 表驱动覆�
 
 验收：`tests/context/test_stats.py`、`tests/cli/test_status_commands.py` → 4 passed；全量离线 383 passed, 3 deselected。
 
-#### M7.C4：工具事件摘要与 `--verbose`
+#### M7.C4：工具事件摘要与 `--verbose`（已完成）
 
-- [ ] 默认将 tool start/end 渲染成可读的操作、完成/失败摘要；保留非零 exit code、错误与改动文件数量等关键结果，不输出整段 JSON 参数或长日志。
-- [ ] `--verbose` 显示完整可见命令/参数和 Tool 层已截断的 stdout/stderr；不得声称获得了进程层已丢弃的原始日志，且不得输出凭据。
-- [ ] tty 工具执行时刷新状态，不重复打印思考图；非 tty 输出稳定的一行事件，便于重定向与测试。
+交付物：默认工具事件展示操作及完成/失败摘要，保留 shell 非零退出码、超时、截断和修改数量；`--verbose` 展示完整参数与 Tool 层已截断内容，并对已配置 Key 和常见凭据形式脱敏。tty 工具开始前清理思考状态；非 tty 默认事件各占一行。提交：本任务提交。
+
+验收：`tests/test_console.py` → 15 passed；全量离线 386 passed, 3 deselected。
 
 #### M7.C5：减少无效探索的软约束
 
@@ -870,4 +870,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.C4`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.C5`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

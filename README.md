@@ -322,6 +322,7 @@ mini-pi --no-session            # 保留纯内存模式（/model /reset /exit）
 mini-pi --resume <session.jsonl> # 恢复指定会话
 mini-pi --continue              # 继续当前 workspace 最近的会话
 mini-pi --no-banner             # 交互启动时不打印 ASCII Banner
+mini-pi --verbose               # 显示工具参数与有界日志
 # 持久化 REPL 支持 /new、/model、/status、/context、/tools、/help、/exit；纯内存模式支持 /reset
 ```
 
@@ -336,7 +337,7 @@ mini-pi --no-banner             # 交互启动时不打印 ASCII Banner
 - 交互启动显示 ASCII Banner 与标语（`mini_pi/assets/banner.txt` 原样输出）；终端宽度不足或非 tty 时降级为单行；`--no-banner` 可关闭
 - `/help` 列出可用命令；未知 `/命令` 只提示且不会作为任务发给模型
 - `/status` 显示模型、短会话 id、最近工具调用数与估算占用；`/status full` 才显示完整路径；`/context` 列出当前投影分类估算与已知窗口；`/tools` 列出工具
-- 流式打印模型正文，工具调用与结果以简洁格式展示；有改动文件时追加 `· N file(s) changed`，有 provider usage 时在任务结束处汇总本次 run 的 token 用量
+- 流式打印模型正文，默认工具事件展示简洁操作与结果摘要；`--verbose` 展示参数及 Tool 层已截断日志并脱敏已知凭据；有 provider usage 时在任务结束处汇总本次 run 的 token 用量
 - `--max-steps` 控制单次任务的最大循环步数（默认 50）
 
 ---
@@ -371,7 +372,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C3 已完成；下一项 M7.C4） |
+| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C4 已完成；下一项 M7.C5） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

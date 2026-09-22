@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from importlib import resources
 
 from rich.console import Console
@@ -28,21 +29,66 @@ def _preview(content: str, *, limit: int = 200) -> str:
     return "(empty)"
 
 
-def _format_arguments(arguments: dict[str, object], *, limit: int = 120) -> str:
+def _format_arguments(arguments: dict[str, object], *, limit: int | None = 120) -> str:
     """把参数压成单行 JSON；过长截断，避免一行刷屏。"""
     rendered = json.dumps(arguments, ensure_ascii=False)
-    if len(rendered) > limit:
+    if limit is not None and len(rendered) > limit:
         return rendered[: limit - 1] + "…"
     return rendered
+
+
+def _tool_action(name: str, arguments: dict[str, object]) -> str:
+    """默认展示工具意图，不输出整段参数或文件内容。"""
+    path = arguments.get("path")
+    if name in {"read", "write", "edit"} and isinstance(path, str):
+        return f"{name.capitalize()} {path}"
+    if name == "search":
+        return "Search workspace"
+    if name == "bash":
+        return "Run shell command"
+    if name == "git_diff":
+        return "Inspect git diff"
+    return name
+
+
+def _tool_result(event: ToolExecutionEndEvent) -> str:
+    """摘要保留退出码、超时、截断和改动数量等关键结果。"""
+    details = event.result.details or {}
+    if event.is_error:
+        line = f"failed: {_preview(event.result.content)}"
+    elif event.tool_call.name == "bash":
+        code = details.get("exit_code")
+        line = f"shell exited {code}" if isinstance(code, int) else _preview(event.result.content)
+        if details.get("timed_out"):
+            line += " (timed out)"
+        if details.get("stdout_truncated") or details.get("stderr_truncated"):
+            line += " (output truncated)"
+    elif event.tool_call.name == "search" and isinstance(details.get("count"), int):
+        line = f"{details['count']} matches"
+    elif event.tool_call.name in {"read", "write", "edit", "git_diff"}:
+        line = "completed"
+    else:
+        line = _preview(event.result.content)
+    if event.result.modified_files:
+        line += f" · {len(event.result.modified_files)} file(s) changed"
+    return line
 
 
 class ConsoleRenderer:
     """on_event 消费者：只做渲染，不参与任何决策。"""
 
-    def __init__(self, console: Console | None = None, *, show_thinking: bool = True) -> None:
+    def __init__(
+        self,
+        console: Console | None = None,
+        *,
+        show_thinking: bool = True,
+        verbose: bool = False,
+    ) -> None:
         self.console = console or Console()
         self._printing_text = False
         self._show_thinking = show_thinking
+        self._verbose = verbose
+        self._secrets: tuple[str, ...] = ()
         self._thinking: Live | None = None
         self._input_tokens = 0
         self._output_tokens = 0
@@ -70,6 +116,26 @@ class ConsoleRenderer:
     def close(self) -> None:
         """运行中断或抛错时清理终端状态。"""
         self._stop_thinking()
+
+    def set_secrets(self, values: list[str]) -> None:
+        """登记已配置凭据，避免 verbose 输出中直接出现其值。"""
+        self._secrets = tuple(value for value in values if value)
+
+    def _redact(self, value: str) -> str:
+        """屏蔽已知凭据与常见 API Key 赋值形式。"""
+        for secret in self._secrets:
+            value = value.replace(secret, "[REDACTED]")
+        value = re.sub(
+            r"(?i)\b(OPENAI_API_KEY|DEEPSEEK_API_KEY)\s*=\s*([^\s,;]+)",
+            r"\1=[REDACTED]",
+            value,
+        )
+        value = re.sub(
+            r"(?i)(\b--api-key\s+|\bBearer\s+)([^\s,;]+)",
+            r"\1[REDACTED]",
+            value,
+        )
+        return value
 
     @property
     def last_provider_usage(self) -> tuple[int, int] | None:
@@ -103,20 +169,38 @@ class ConsoleRenderer:
                 self._has_usage = True
         elif isinstance(event, ToolExecutionStartEvent):
             self._stop_thinking()
-            arguments = _format_arguments(event.tool_call.arguments)
+            action = _tool_action(event.tool_call.name, event.tool_call.arguments)
+            if self._verbose:
+                action += f" {_format_arguments(event.tool_call.arguments, limit=None)}"
             self.console.print(
-                f"→ {event.tool_call.name} {arguments}",
+                self._redact(f"● {action}"),
                 style="cyan",
                 markup=False,
                 highlight=False,
             )
         elif isinstance(event, ToolExecutionEndEvent):
             self.last_tool_count += 1
-            line = f"  {_preview(event.result.content)}"
-            if event.result.modified_files:
-                line += f" · {len(event.result.modified_files)} file(s) changed"
-            style = "red" if event.is_error else "green"
-            self.console.print(line, style=style, markup=False, highlight=False)
+            details = event.result.details or {}
+            failed = event.is_error or (
+                event.tool_call.name == "bash"
+                and isinstance(details.get("exit_code"), int)
+                and details["exit_code"] != 0
+            )
+            line = self._redact(_tool_result(event))
+            self.console.print(
+                f"{'✗' if failed else '✓'} {line}",
+                style="red" if failed else "green",
+                markup=False,
+                highlight=False,
+            )
+            if self._verbose:
+                # Tool 层已做有界截断；进程层丢弃的内容无法恢复。
+                self.console.print(
+                    self._redact(event.result.content),
+                    style="dim",
+                    markup=False,
+                    highlight=False,
+                )
         elif isinstance(event, AgentEndEvent):
             self._stop_thinking()
             self._render_end(event)

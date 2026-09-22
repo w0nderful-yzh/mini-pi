@@ -54,6 +54,7 @@ def test_help_lists_options() -> None:
     assert "--no-session" in result.output
     assert "--resume" in result.output
     assert "--continue" in result.output
+    assert "--verbose" in result.output
 
 
 def test_missing_api_key_raises_minipi_error(monkeypatch: pytest.MonkeyPatch) -> None:

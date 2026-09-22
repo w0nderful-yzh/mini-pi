@@ -79,6 +79,15 @@ def _has_key(provider: str) -> bool:
     return resolve_api_key(provider, env_var=API_KEY_ENV[provider]) is not None
 
 
+def _configured_keys() -> list[str]:
+    """收集当前可用的 Provider 凭据，仅供终端输出脱敏。"""
+    return [
+        value
+        for candidate in PROVIDERS
+        if (value := resolve_api_key(candidate, env_var=API_KEY_ENV[candidate])) is not None
+    ]
+
+
 def _detect_provider(previous: ConnectionPreference | None) -> str:
     """无显式参数时选 provider：上次连接有 Key 才认，否则选第一个已配 Key 的。"""
     if previous is not None and _has_key(previous.provider):
@@ -307,6 +316,7 @@ def cli(
     max_steps: int = typer.Option(50, "--max-steps", min=1),
     no_session: bool = typer.Option(False, "--no-session", help="Keep history in memory only."),
     no_banner: bool = typer.Option(False, "--no-banner", help="Do not print the startup banner."),
+    verbose: bool = typer.Option(False, "--verbose", help="Show tool arguments and bounded logs."),
     resume: Path | None = typer.Option(None, "--resume", help="Resume a Session JSONL file."),
     continue_session: bool = typer.Option(
         False, "--continue", help="Resume the latest Session for this workspace."
@@ -319,7 +329,7 @@ def cli(
 
     workspace = Workspace(cwd)
     console = Console()
-    renderer = ConsoleRenderer(console, show_thinking=not no_banner)
+    renderer = ConsoleRenderer(console, show_thinking=not no_banner, verbose=verbose)
     agent: Agent | AgentSession | None = None
     startup_error: str | None = None
     config_error: MiniPiError | None = None
@@ -367,6 +377,8 @@ def cli(
     model = model or DEFAULT_MODELS.get(provider, DEFAULT_MODELS["openai"])
     if isinstance(agent, AgentSession):
         provider, model = agent.provider, agent.model
+    if agent is not None:
+        renderer.set_secrets(_configured_keys())
 
     if prompt is not None:
         if agent is None:
@@ -409,6 +421,7 @@ def cli(
         )
         if agent is not None:
             startup_error = None
+            renderer.set_secrets(_configured_keys())
     console.print(
         f"  mini-pi {_version()} · {provider}/{model} · {workspace.root}",
         style="dim",
@@ -497,6 +510,7 @@ def cli(
             )
             if switched is not None:
                 agent, provider, model = switched
+                renderer.set_secrets(_configured_keys())
             continue
         if not stripped:
             continue

@@ -67,19 +67,21 @@ def test_thinking_status_is_silent_without_tty_or_banner() -> None:
 
 
 def test_renders_tool_starts_and_results() -> None:
-    """工具调用展示名称+参数，结束后展示结果首行。"""
+    """默认工具事件展示意图和结果，不倾倒 JSON 参数。"""
     renderer, stream = make_renderer()
     call = ToolCall(id="c1", name="bash", arguments={"command": "pytest"})
     renderer.handle(ToolExecutionStartEvent(tool_call=call))
     renderer.handle(
         ToolExecutionEndEvent(
-            tool_call=call, result=ToolResult(content="exit_code: 0"), is_error=False
+            tool_call=call,
+            result=ToolResult(content="exit_code: 0", details={"exit_code": 0}),
+            is_error=False,
         )
     )
     output = stream.getvalue()
-    assert "bash" in output
-    assert "pytest" in output
-    assert "exit_code: 0" in output
+    assert "Run shell command" in output
+    assert "pytest" not in output
+    assert "shell exited 0" in output
 
 
 def test_renders_errors() -> None:
@@ -92,7 +94,7 @@ def test_renders_errors() -> None:
 def test_preview_skips_blank_lines() -> None:
     """首行为空行时展示首个非空行；全空白内容显示 (empty)。"""
     renderer, stream = make_renderer()
-    call = ToolCall(id="c1", name="read", arguments={})
+    call = ToolCall(id="c1", name="custom", arguments={})
     renderer.handle(
         ToolExecutionEndEvent(
             tool_call=call, result=ToolResult(content="\n  \nsecond line"), is_error=False
@@ -170,10 +172,69 @@ def test_renders_modified_files_summary() -> None:
 
 
 def test_tool_arguments_stay_on_one_line() -> None:
-    """超长参数要截断，工具调用块保持单行。"""
+    """默认摘要不展示整文件内容或长参数。"""
     renderer, stream = make_renderer()
     call = ToolCall(id="c1", name="write", arguments={"path": "a.txt", "content": "x" * 500})
     renderer.handle(ToolExecutionStartEvent(tool_call=call))
     output = stream.getvalue()
-    assert "…" in output
+    assert "● Write a.txt" in output
+    assert "x" * 500 not in output
     assert output.count("\n") == 1
+
+
+def test_verbose_shows_bounded_result_and_redacts_configured_key() -> None:
+    """详细模式保留可见命令与 Tool 内容，但屏蔽已知凭据。"""
+    stream = io.StringIO()
+    renderer = ConsoleRenderer(Console(file=stream, width=200, no_color=True), verbose=True)
+    renderer.set_secrets(["sk-long-secret"])
+    call = ToolCall(
+        id="c1",
+        name="bash",
+        arguments={"command": "echo sk-long-secret"},
+    )
+    renderer.handle(ToolExecutionStartEvent(tool_call=call))
+    renderer.handle(
+        ToolExecutionEndEvent(
+            tool_call=call,
+            result=ToolResult(
+                content="exit_code: 2\nstdout:\n(empty)\nstderr:\nsk-long-secret failed",
+                details={"exit_code": 2, "stderr_truncated": True},
+            ),
+            is_error=False,
+        )
+    )
+    output = stream.getvalue()
+    assert "echo [REDACTED]" in output
+    assert "shell exited 2 (output truncated)" in output
+    assert "stderr:" in output
+    assert "sk-long-secret" not in output
+
+
+def test_default_bash_nonzero_is_failure() -> None:
+    """Shell 非零码是正常 observation，但终端必须清楚标记失败。"""
+    renderer, stream = make_renderer()
+    call = ToolCall(id="c1", name="bash", arguments={"command": "false"})
+    renderer.handle(
+        ToolExecutionEndEvent(
+            tool_call=call,
+            result=ToolResult(content="exit_code: 3", details={"exit_code": 3}),
+            is_error=False,
+        )
+    )
+    assert "✗ shell exited 3" in stream.getvalue()
+
+
+def test_verbose_redacts_common_credential_forms() -> None:
+    """环境变量赋值和 Authorization 参数即使未预先登记也应脱敏。"""
+    stream = io.StringIO()
+    renderer = ConsoleRenderer(Console(file=stream, width=200, no_color=True), verbose=True)
+    call = ToolCall(
+        id="c1",
+        name="bash",
+        arguments={"command": "OPENAI_API_KEY=abc123 curl -H 'Authorization: Bearer token123'"},
+    )
+    renderer.handle(ToolExecutionStartEvent(tool_call=call))
+    output = stream.getvalue()
+    assert "abc123" not in output
+    assert "token123" not in output
+    assert "[REDACTED]" in output
