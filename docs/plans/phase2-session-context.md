@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1、M7.2、M7.3a-M7.3f 已完成，下一任务为 M7.3g。
+> 状态：实施中；M7.1-M7.3 已完成，下一任务为 M7.4a。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -365,7 +365,7 @@ M7.2 之后不再按整个子里程碑一次实现，默认以一个任务编号
 
 M7.2 总验收（已完成）：同一段历史重放后 Provider 得到唯一、确定的 system prompt；项目规则来源路径可见。
 
-### M7.3 AgentSession、持久化与 Resume
+### M7.3 AgentSession、持久化与 Resume（已完成）
 
 #### M7.3a：完整消息提交 Hook（已完成）
 
@@ -443,17 +443,19 @@ M7.2 总验收（已完成）：同一段历史重放后 Provider 得到唯一�
 
 验收：`uv run pytest tests/cli/test_session_resume.py -q` → 13 passed；全量 `268 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.3g：`/new` 与 `/connect` 会话连续性
+#### M7.3g：`/new` 与 `/connect` 会话连续性（已完成）
 
-- [ ] `/new` 结束当前 Session 并创建新 Session；旧文件保持可恢复。
-- `/connect` 只替换运行时 LLM，并在下一条 message entry 记录新的 provider / model。
-- API Key 不进入消息、details、Session header 或 entry。
-- 针对性测试覆盖：新会话 id/parent 重置、旧会话不变、切换模型后继续同一链和敏感信息不落盘。
-- 不做：`/compact`。
+提交：本任务提交（`feat: 完成会话新建与模型切换`）。
 
-验收命令：`uv run pytest tests/cli/test_session_commands.py -q`。
+交付物：
 
-M7.3 总验收：运行一轮 → 退出进程 → resume → 继续提问；第二轮 LLM 收到第一轮历史，JSONL parent 链连续。
+- `AgentSession.new()` 用当前运行依赖创建独立 JSONL；CLI `/new` 切换到新文件、保留旧文件可回放，创建失败仍留在旧会话。纯内存模式继续使用 `/reset`。
+- 活动会话的 `/connect` 验证 Key 后只替换运行时 LLM；后续 message entry 记录新 provider/model，旧 entry 与 header 不改写。Key 仅保存于用户认证文件，不进入 Session 或 CLI 输出。
+- 从 Session 恢复后 `/connect` 沿用活动链实际模型；验证失败保持原客户端和历史。未做 `/compact` 或压缩感知恢复。
+
+验收：`uv run pytest tests/cli/test_session_commands.py -q` → 8 passed；全量 `276 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
+
+M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 → resume → 继续提问”；第二轮 FakeLLM 收到第一轮历史，新增 JSONL entry 沿原 leaf 追加，原文件未另建副本。
 
 ### M7.4 Context 投影、Token 与安全切点
 
@@ -762,4 +764,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.3g`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.4a`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

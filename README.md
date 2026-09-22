@@ -82,7 +82,7 @@ Python Coding Agent Harness
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
-| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3f 已接入 CLI 新建、指定文件恢复与继续最近会话；compaction 投影仍待后续任务 |
+| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3 已完成 CLI 新建、恢复、`/new` 与同链 `/connect`；compaction 投影仍待后续任务 |
 
 ---
 
@@ -165,7 +165,7 @@ Agent Runtime 自己实现。
 
 ## 5. 目录结构
 
-当前实现范围（M1-M6 + M7.1-M7.2 + M7.3a-M7.3f）：
+当前实现范围（M1-M6 + M7.1-M7.3）：
 
 ```text
 mini-pi/
@@ -215,7 +215,7 @@ mini-pi/
 │   ├── session/
 │   │   ├── models.py                 # Header / MessageEntry / CompactionEntry
 │   │   ├── jsonl.py                  # create / load / append / leaf / 路径发现
-│   │   └── runtime.py                # AgentSession 创建模式与消息提交
+│   │   └── runtime.py                # AgentSession 创建 / 恢复 / 新会话 / 模型切换
 │   │
 │   ├── context/
 │   │   ├── project.py                # 项目 AGENTS.md 发现与读取
@@ -309,6 +309,7 @@ mini-pi --provider deepseek --model deepseek-chat
 mini-pi --no-session            # 保留纯内存模式（/connect /reset /exit）
 mini-pi --resume <session.jsonl> # 恢复指定会话
 mini-pi --continue              # 继续当前 workspace 最近的会话
+# 持久化 REPL 支持 /new、/connect、/exit；纯内存模式支持 /reset
 ```
 
 - 新建会话时的模型选择顺序：显式 `--provider/--model` > 上次成功使用的 provider/model > OpenAI 内置默认值；恢复时默认使用会话活动路径最后的 provider/model，显式参数仅覆盖后续新消息
@@ -317,7 +318,7 @@ mini-pi --continue              # 继续当前 workspace 最近的会话
 - 一次性模式缺少 Key 时明确报错，并提示环境变量与 `/connect` 两种方式
 - 默认在 `~/.mini-pi/sessions/` 下按 workspace 保存 JSONL；启动显示存储目录，退出显示实际文件路径；创建失败不会静默回退到内存模式
 - `--resume <path>` 严格加载指定会话；`--continue` 严格校验当前 workspace 的所有候选，按最后 entry 的活动时间选最新（空会话用 header 时间）。候选损坏、cwd 不匹配或最新时间并列会报错，不静默退回旧会话；两者不可并用，也不可与 `--no-session` 并用
-- `--no-session` 不创建持久化文件，保留原有 `/reset` 与 `/connect` 行为；持久化会话中 `/reset` 和已连接后的 `/connect` 暂不可用，待 M7.3g 完成会话切换语义
+- `--no-session` 不创建持久化文件，保留原有 `/reset` 与 `/connect` 行为；持久化模式用 `/new` 开启独立会话，`/connect` 在当前链切换模型且仅让后续 entry 使用新配置；`/reset` 在持久化模式下提示改用 `/new`
 - 流式打印模型正文，工具调用与结果以简洁格式展示
 - `--max-steps` 控制单次任务的最大循环步数（默认 50）
 
@@ -353,7 +354,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context：JSONL entry 树、AGENTS.md、resume、compaction | 进行中（M7.1、M7.2、M7.3a-M7.3f 已完成） |
+| M7 | Session / Context：JSONL entry 树、AGENTS.md、resume、compaction | 进行中（M7.1-M7.3 已完成；下一项 M7.4a） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
@@ -426,7 +427,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行；`bash` 无危险命令确认机制
-- CLI 已可新建或恢复会话，但 `/new` 与活动会话中的 `/connect` 切换仍待 M7.3g；Context Compaction 尚未实现
+- CLI 已可创建、恢复和切换会话；Context Compaction 尚未实现，包含 compaction entry 的 Session 暂不能恢复
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
 - 进程组与文件权限语义依赖 POSIX，未适配 Windows
 - LSP / MCP / Task / Memory / Multi-Agent 属于后续阶段

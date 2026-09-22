@@ -53,6 +53,10 @@ class AgentSession:
         model: str,
     ) -> None:
         self._session = session
+        self._llm = llm
+        self._registry = registry
+        self._max_steps = max_steps
+        self._on_event = on_event
         self._provider = provider
         self._model = model
         self._agent = Agent(
@@ -148,6 +152,38 @@ class AgentSession:
     def state(self) -> AgentState:
         """暴露当前 Agent 的内存投影供调用方检查。"""
         return self._agent.state
+
+    @property
+    def provider(self) -> str:
+        """返回后续消息将记录的 Provider。"""
+        return self._provider
+
+    @property
+    def model(self) -> str:
+        """返回后续消息将记录的模型。"""
+        return self._model
+
+    def new(self, *, sessions_root: str | Path | None = None) -> AgentSession:
+        """用当前模型和工具创建独立会话，保留旧 JSONL 以供恢复。"""
+        return self.create(
+            cwd=self._session.header.cwd,
+            llm=self._llm,
+            registry=self._registry,
+            provider=self._provider,
+            model=self._model,
+            sessions_root=sessions_root,
+            max_steps=self._max_steps,
+            on_event=self._on_event,
+        )
+
+    def set_llm(self, llm: LLMClient, *, provider: str, model: str) -> None:
+        """替换运行时客户端，仅让后续提交消息使用新的模型元数据。"""
+        if provider not in {"openai", "deepseek"} or not model.strip():
+            raise SessionError("provider or model is invalid for this session")
+        self._agent.set_llm(llm)
+        self._llm = llm
+        self._provider = provider
+        self._model = model
 
     def run(self, task: str) -> AssistantMessage:
         """执行一轮任务，完整消息由提交回调立即持久化。"""

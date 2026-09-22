@@ -190,9 +190,11 @@ def cli(
                 else str(exc)
             )
 
-    # 解析失败时仍给 /connect 一个确定默认值，避免交互层处理 Optional。
+    # 解析失败时仍给 /connect 一个确定默认值；恢复成功则以活动链的模型为准。
     provider = provider or "openai"
     model = model or DEFAULT_MODELS.get(provider, DEFAULT_MODELS["openai"])
+    if isinstance(agent, AgentSession):
+        provider, model = agent.provider, agent.model
 
     if prompt is not None:
         if agent is None:
@@ -207,7 +209,7 @@ def cli(
                 console.print(f"Session path: {agent.path}", soft_wrap=True)
         return
 
-    commands = "/connect, /reset, /exit" if no_session else "/connect (if unconfigured), /exit"
+    commands = "/connect, /reset, /exit" if no_session else "/connect, /new, /exit"
     console.print(f"mini-pi interactive mode. Commands: {commands}")
     if isinstance(agent, AgentSession):
         console.print(f"Session storage: {agent.path.parent}", soft_wrap=True)
@@ -225,11 +227,24 @@ def cli(
         stripped = line.strip()
         if stripped in {"/exit", "/quit"}:
             break
+        if stripped == "/new":
+            if isinstance(agent, AgentSession):
+                try:
+                    new_agent = agent.new()
+                except SessionError as exc:
+                    console.print(f"session creation failed: {exc}", style="red")
+                else:
+                    agent = new_agent
+                    console.print(f"new session: {agent.path}", soft_wrap=True)
+            elif agent is None:
+                console.print("configure a provider first with /connect", style="yellow")
+            else:
+                console.print("/new requires a saved session; use /reset", style="yellow")
+            continue
         if stripped == "/reset":
             if isinstance(agent, AgentSession):
-                # 已落盘的历史不能只清内存；/new 将在后续任务处理持久化会话切换。
                 console.print(
-                    "/reset is unavailable for saved sessions; use --no-session",
+                    "/reset is unavailable for saved sessions; use /new",
                     style="yellow",
                 )
             elif agent is not None:
@@ -237,12 +252,6 @@ def cli(
                 console.print("context cleared")
             continue
         if stripped == "/connect":
-            if isinstance(agent, AgentSession):
-                console.print(
-                    "/connect for an active session is not yet available; use --no-session",
-                    style="yellow",
-                )
-                continue
             credentials = ask_credentials(console, provider)
             if credentials is None:
                 console.print("connect cancelled", style="yellow")
@@ -251,6 +260,8 @@ def cli(
             new_model = model if new_provider == provider else DEFAULT_MODELS[new_provider]
             try:
                 verify_credentials(new_provider, api_key, new_model)
+                # 验证成功后先构造客户端，避免配置已保存但当前进程无法切换。
+                new_llm = create_llm(new_provider, new_model, api_key=api_key)
             except MiniPiError as exc:
                 console.print(f"key verification failed: {exc}", style="red")
                 continue
@@ -258,7 +269,6 @@ def cli(
             provider = new_provider
             model = new_model
             # 当前进程继续使用刚验证的 Key；环境变量优先级在下次启动时再生效。
-            new_llm = create_llm(provider, model, api_key=api_key)
             if agent is None:
                 try:
                     agent = _build_runtime(
@@ -275,6 +285,8 @@ def cli(
                     continue
                 if isinstance(agent, AgentSession):
                     console.print(f"Session storage: {agent.path.parent}", soft_wrap=True)
+            elif isinstance(agent, AgentSession):
+                agent.set_llm(new_llm, provider=provider, model=model)
             else:
                 agent.set_llm(new_llm)
             console.print(f"saved to {auth_path}")
