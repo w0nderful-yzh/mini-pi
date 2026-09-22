@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4、M7.C1 已完成，下一任务为 M7.C2。
+> 状态：实施中；M7.1-M7.4、M7.C1-C2 已完成，下一任务为 M7.C3。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载、上下文压缩和可长期使用的 CLI，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -587,11 +587,11 @@ M7.4 总验收：`tests/context/test_m7_4_projection_pipeline.py` 表驱动覆�
 
 验收：`tests/test_console.py`、`tests/test_deepseek_client.py`、`tests/cli/test_banner.py` → 23 passed；全量离线 377 passed, 3 deselected（测试时取消本机 `NO_COLOR=1` 并设置 `TERM=xterm`）。
 
-#### M7.C2：展示元数据与模型消息隔离
+#### M7.C2：展示元数据与模型消息隔离（已完成）
 
-- [ ] 审计 CLI 渲染、Session 提交、Provider wire 三条路径；用测试确认 banner、状态图、token 文案、session 路径、`ToolResult.details` 不进入模型消息或 JSONL message。
-- [ ] 将当前插在 `MessageEndEvent` 后的 `tokens: in ... / out ...` 移到任务结束摘要或 `/status`；只标记实际 usage，不把多轮累计误写成“本轮新增上下文”。
-- [ ] 保持 tool result 的模型 observation、`is_error` 和 `modified_files` 完整语义；输出规模通过现有工具截断与后续 compaction 控制，不在 Renderer 中偷偷缩短模型上下文。
+交付物：Provider 实际 usage 改为每次 run 结束后汇总，不插入模型正文；离线测试核对 Renderer、Session 和 Provider wire，确认状态图、用量、路径和 `ToolResult.details` 不进入消息，而 tool observation 保留。提交：本任务提交。
+
+验收：`tests/test_console.py` 与 `tests/cli/test_display_context_boundary.py` → 13 passed；全量离线 379 passed, 3 deselected。
 
 #### M7.C3：`/status` 与 `/context`
 
@@ -871,4 +871,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.C2`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.C3`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

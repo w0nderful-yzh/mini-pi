@@ -11,6 +11,7 @@ from rich.live import Live
 from mini_pi.agent.events import (
     AgentEndEvent,
     AgentEvent,
+    AgentStartEvent,
     MessageDeltaEvent,
     MessageEndEvent,
     MessageStartEvent,
@@ -43,6 +44,9 @@ class ConsoleRenderer:
         self._printing_text = False
         self._show_thinking = show_thinking
         self._thinking: Live | None = None
+        self._input_tokens = 0
+        self._output_tokens = 0
+        self._has_usage = False
 
     def _start_thinking(self) -> None:
         """只在足够宽的交互终端显示瞬时状态，不把图案写进日志。"""
@@ -67,7 +71,11 @@ class ConsoleRenderer:
         self._stop_thinking()
 
     def handle(self, event: AgentEvent) -> None:
-        if isinstance(event, MessageStartEvent):
+        if isinstance(event, AgentStartEvent):
+            self._input_tokens = 0
+            self._output_tokens = 0
+            self._has_usage = False
+        elif isinstance(event, MessageStartEvent):
             self._start_thinking()
         elif isinstance(event, MessageDeltaEvent):
             if event.kind == "thinking":
@@ -82,12 +90,10 @@ class ConsoleRenderer:
                 self._printing_text = False
             usage = event.message.usage
             if usage is not None and usage.total_tokens > 0:
-                # provider 精确用量；无 usage 时保持安静，不伪装估算
-                self.console.print(
-                    f"  tokens: in {usage.input_tokens} / out {usage.output_tokens}",
-                    style="dim",
-                    markup=False,
-                )
+                # 只累计 Provider 返回的真实请求用量；最终统一放在任务摘要。
+                self._input_tokens += usage.input_tokens
+                self._output_tokens += usage.output_tokens
+                self._has_usage = True
         elif isinstance(event, ToolExecutionStartEvent):
             self._stop_thinking()
             arguments = _format_arguments(event.tool_call.arguments)
@@ -106,6 +112,12 @@ class ConsoleRenderer:
         elif isinstance(event, AgentEndEvent):
             self._stop_thinking()
             self._render_end(event)
+            if self._has_usage:
+                self.console.print(
+                    f"  provider tokens: in {self._input_tokens} / out {self._output_tokens}",
+                    style="dim",
+                    markup=False,
+                )
 
     def _render_end(self, event: AgentEndEvent) -> None:
         if event.reason == "step_limit":

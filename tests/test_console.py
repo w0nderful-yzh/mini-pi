@@ -6,6 +6,7 @@ from rich.console import Console
 
 from mini_pi.agent.events import (
     AgentEndEvent,
+    AgentStartEvent,
     MessageDeltaEvent,
     MessageEndEvent,
     MessageStartEvent,
@@ -113,8 +114,9 @@ def test_renders_step_limit() -> None:
 
 
 def test_renders_usage_when_present() -> None:
-    """有 provider usage 时显示本轮 token 用量。"""
+    """Provider 用量只在 run 结束后显示，不插入正文流。"""
     renderer, stream = make_renderer()
+    renderer.handle(AgentStartEvent())
     renderer.handle(
         MessageEndEvent(
             message=AssistantMessage(
@@ -122,7 +124,28 @@ def test_renders_usage_when_present() -> None:
             )
         )
     )
-    assert "tokens: in 10 / out 5" in stream.getvalue()
+    assert "tokens:" not in stream.getvalue()
+    renderer.handle(AgentEndEvent(reason="completed"))
+    assert "provider tokens: in 10 / out 5" in stream.getvalue()
+
+
+def test_usage_sums_only_current_run() -> None:
+    """多次模型调用累计实际 usage，新 run 重置，不称作上下文新增量。"""
+    renderer, stream = make_renderer()
+    renderer.handle(AgentStartEvent())
+    for amount in (10, 20):
+        renderer.handle(
+            MessageEndEvent(
+                message=AssistantMessage(
+                    content="x", usage=Usage(input_tokens=amount, output_tokens=2, total_tokens=amount + 2)
+                )
+            )
+        )
+    renderer.handle(AgentEndEvent(reason="completed"))
+    assert "provider tokens: in 30 / out 4" in stream.getvalue()
+    renderer.handle(AgentStartEvent())
+    renderer.handle(AgentEndEvent(reason="completed"))
+    assert stream.getvalue().count("provider tokens:") == 1
 
 
 def test_omits_usage_line_without_usage() -> None:
