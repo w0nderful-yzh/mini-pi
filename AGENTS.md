@@ -257,6 +257,7 @@ turn_end / agent_end(reason: completed | step_limit | error)
 - Loop 不做渲染、不读 stdin
 - CLI 不参与决策、不直接调用 Tool
 - M7.C 起 CLI 默认只显示 thinking 状态图标，不显示 raw `thinking_delta`；图标、spinner、token 文案、Session 路径不进入模型消息或 JSONL message。DeepSeek `reasoning_content` 按 Provider 协议保留回放，不为隐藏终端内容改写持久化历史
+- M7.C7 起 CLI 仅按工具名、结构化参数和明确命令形态生成确定性操作标题；非零退出码、超时、截断和 stderr 只按实际结果展示。未知/组合/含凭据命令不推断执行意图或任务最终成败；默认工具事件单行有界且脱敏，`--verbose` 仍限于工具已捕获内容。展示不改 ToolMessage 或 Agent 决策
 - `on_event` 为可选参数，测试时传 None 或列表收集器
 - `on_message_commit` 仅在完整 system / user / assistant / tool 消息上触发；回调成功后才追加内存历史，失败直接冒泡；tool 改动文件随已提交的 ToolMessage 记录
 

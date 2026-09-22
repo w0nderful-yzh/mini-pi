@@ -1,6 +1,6 @@
 # Phase 2：Session、Context 与 CLI 成本控制
 
-> 状态：实施中。M7.1–M7.4、M7.C1–C6 已完成；下一任务是 **M7.C7：语义化工具事件与失败说明**。本文件先列待开发任务，已完成交付放在末尾。
+> 状态：实施中。M7.1–M7.4、M7.C1–C7 已完成；下一任务是 **M7.C8：单次任务成本预算与安全停止**。本文件先列待开发任务，已完成交付放在末尾。
 
 **目标：** 在已有 Coding Agent 闭环上，控制单次任务的重复探索和累计模型输入，完成安全的手动/自动上下文压缩，并让终端清楚展示进度、失败和真实用量。只支持 OpenAI、DeepSeek；不引入 Agent 框架、额外规划模型或并行工具执行。
 
@@ -10,7 +10,7 @@
 
 ## 1. 当前基线与优先级
 
-M7.1–M7.4 已交付 JSONL Session、项目 `AGENTS.md`、恢复、Context 投影、token 估算和安全切点。M7.C1–C6 已交付 thinking 状态图、展示边界、基础 `/status` `/context` `/tools`、工具事件摘要、软性停止提示，以及任务累计用量与当前上下文分离。**尚未交付**：任务级成本预算、语义化工具标题、手动/自动 compaction、会话列表和增强输入。
+M7.1–M7.4 已交付 JSONL Session、项目 `AGENTS.md`、恢复、Context 投影、token 估算和安全切点。M7.C1–C7 已交付 thinking 状态图、展示边界、基础 `/status` `/context` `/tools`、语义化工具事件、软性停止提示，以及任务累计用量与当前上下文分离。**尚未交付**：任务级成本预算、手动/自动 compaction、会话列表和增强输入。
 
 ### 1.1 真实成本样本
 
@@ -34,7 +34,7 @@ M7.1–M7.4 已交付 JSONL Session、项目 `AGENTS.md`、恢复、Context 投�
 - `157k / 1M = 15.7%` 是把累计消耗误当窗口占用。上述样本最后一次输入约 21k，对 1M 窗口约 2.1%；自动压缩即使按 70% 触发，也无法解决这次的主要浪费。
 - Provider usage 是请求用量，缓存命中与实际计费不在当前模型协议中；没有对应字段和验证前不显示“节省费用”。
 
-**近期顺序：M7.C7 → C8 → M7.5 → M7.6 → M7.D → M7.7。** 基准见 [M7.C6 用量记录](../benchmarks/m7-c6-usage-baseline.md)；先改善事件可读性并实现任务预算，再做压缩。UI 小修不冒充成本下降。
+**近期顺序：M7.C8 → M7.5 → M7.6 → M7.D → M7.7。** 基准见 [M7.C6 用量记录](../benchmarks/m7-c6-usage-baseline.md)；先完成任务预算，再做压缩。UI 小修不冒充成本下降。
 
 ---
 
@@ -68,14 +68,6 @@ CLI → AgentSession → Agent → run_loop → (LLM, ToolRegistry) → Tool →
 ## 3. 下一批：用量、工具可读性与任务预算
 
 每个编号单独提交代码、测试、README 与本计划状态；先做针对性离线验证，再做全量回归和必要的真实模型验收。真实样本只记录非敏感指标，不提交 Session 原文或 API Key。
-
-### M7.C7：语义化工具事件与失败说明
-
-- [ ] 根据工具名、结构化参数和已知命令形态生成确定性标题：例如 `read` 文件、`git status`、`rg` 搜索、`uv run pytest`、前端构建；未知 shell 命令给出脱敏的有限摘要，不调用额外 LLM 生成标题。
-- [ ] Tool 结果只写可证实的状态：成功/非零退出码、匹配数、超时、截断、改动文件数；失败时显示必要且有界的 stderr。默认非 tty 每个事件稳定一行，`--verbose` 保留完整**已捕获、已截断**内容并屏蔽已配置凭据。
-- [ ] 连续多个 shell 调用应能区分意图；未知命令、管道、组合命令和含凭据命令不猜测“测试通过”。Agent 是否继续或最终失败以随后事件为准。
-
-验收：`tests/cli/test_tool_events.py` 覆盖真实工具形态、失败等级边界、tty/非 tty、脱敏；全量回归。**本任务只改展示，不改 ToolMessage 或 Agent 决策。**
 
 ### M7.C8：单次任务成本预算与安全停止
 
@@ -227,11 +219,12 @@ M7 完成标准：会话可恢复；项目规则生效；单任务累计成本�
 | M7.3a–g | 消息提交 Hook、AgentSession 创建/恢复、CLI 默认持久化、`--resume`/`--continue`/`/new`/模型切换 | M7.3g 全量 276 passed, 3 deselected；`4afd28b`、`f4e7e87`、`0824695`、`261d84c`、`97d213e`、`c54be2a`、`885ccf5` |
 | M7.4a–h | 活动路径与 compaction 投影、tool pair 校验、token 估算、安全切点和窗口策略 | M7.4h 全量 356 passed, 3 deselected；`6926bd0`、`e078196`、`817fc47`、`c191d87`、`86a2839`、`3aab07a`、`0a2a566`、`10eee89` |
 | M7.C1–C5 | 隐藏 raw thinking、小牛状态、展示/消息隔离、基础 status/context/tools、简洁工具事件与软提示 | C5 全量 387 passed, 3 deselected；`c8ec231`、`5da4848`、`5ebcc25`、`eb61481`、`1d28651`；真实简单只读 A/B 均为 1 Tool，不声称成本已下降 |
-| M7.C6 | 最近任务请求/Tool/Provider usage 从活动链重建，CLI 分开显示累计用量与当前投影；[脱敏基准与 C8 决策](../benchmarks/m7-c6-usage-baseline.md) | 全量 392 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；本提交；没有额外真实模型调用，复杂排障样本待补 |
+| M7.C6 | 最近任务请求/Tool/Provider usage 从活动链重建，CLI 分开显示累计用量与当前投影；[脱敏基准与 C8 决策](../benchmarks/m7-c6-usage-baseline.md) | 全量 392 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`b4cf0d0`；没有额外真实模型调用，复杂排障样本待补 |
+| M7.C7 | CLI 为已知工具/命令生成确定性标题，展示实际退出码、超时、截断和有界 stderr；默认单行，详细模式脱敏，Session/ToolMessage 不变 | `tests/cli/test_tool_events.py` 20 passed；全量 412 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；本提交 |
 
 ### 实施与审查规则
 
 1. 每个新编号是一批可审查的最小行为；不提前创建后续编号的接口或占位实现。代码、必要测试、README 与本计划状态在**同一提交**；中文 `feat/fix/docs` 消息。
 2. 每批运行针对性测试、全量离线测试和 `git diff --check`，再更新状态；真实模型测试只有执行过才能记“通过”。文件测试用 `tmp_path`，默认测试不联网。
 3. 若设计改变 Session/Context/CLI 边界，同步 README 第 2 节与 AGENTS.md。发现文档与代码不一致，先修文档再继续实现。
-4. 下一批只做 **M7.C7**；C8 再实现成本预算，不跨编号合并工具渲染与 compaction。
+4. 下一批只做 **M7.C8**；任务预算与 compaction 分批交付。

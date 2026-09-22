@@ -79,8 +79,8 @@ def test_renders_tool_starts_and_results() -> None:
         )
     )
     output = stream.getvalue()
-    assert "Run shell command" in output
-    assert "pytest" not in output
+    assert "Run pytest" in output
+    assert '{"command":' not in output
     assert "shell exited 0" in output
 
 
