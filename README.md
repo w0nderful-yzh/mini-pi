@@ -73,6 +73,8 @@ Python Coding Agent Harness
 | 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 第一阶段单层循环，只处理 tool batch；队列、steering 留到 Session 阶段 |
 | 事件驱动 | `AgentEvent` 事件流驱动 TUI/print/RPC，UI 是纯消费者 | 复刻：Loop 发 `AgentEvent`，CLI 只做渲染，不做决策 |
 | 思考与终端展示 | thinking 事件可供 UI 展示，Provider 保留必要回放字段 | M7.C 默认只显示思考状态图标；CLI 元数据不进入消息历史，DeepSeek 的 `reasoning_content` 回放保持协议兼容 |
+| 用量与上下文 | 模型请求返回 usage，compaction 缩短后续模型投影 | M7.C6 起区分单次任务累计 Provider 用量和当前上下文估算；任务预算在请求边界控制累计成本，窗口阈值只负责压缩安全，不把多次请求之和当窗口占用 |
+| 工具结果生命周期 | Session 保留完整消息，compaction 生成摘要投影 | 当前工具轮使用真实且有界的 observation；JSONL 原始消息不改写，后续投影只在安全切点压缩，展示摘要不替代 ToolMessage |
 | LLM 流式 | provider 无关的 `AssistantMessageEvent` 事件流，错误编码进流 | 复刻：同步 SDK + `stream=True`，`ErrorEvent` 不裸抛给 Loop |
 | Tool Call 拼装 | 按 `index` 聚合 SSE 增量，结束后解析 JSON | 复刻：`_AssistantAccumulator`，解析失败显式报错（不静默返回 `{}`） |
 | 工具错误 | 所有异常转成 `isError` ToolResult 回传模型 | ToolError 转 `is_error` observation；非预期异常直接冒泡（Fail Fast） |
@@ -372,7 +374,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C5 已完成；下一项 M7.5a） |
+| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C5 已完成；下一项 M7.C6） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

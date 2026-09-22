@@ -575,6 +575,10 @@ Context Compaction 放在第二阶段：
 时机：turn 边界
 ```
 
+M7.C6 起将两种 token 口径分开：一次 `run()` 多次请求的 Provider input/output 之和是任务累计消耗；下一次请求的活动投影估算才是当前上下文。`/context` 只分解当前投影，不把累计消耗当窗口占用。任务预算在完整工具批次后、下一次模型请求前检查；窗口阈值仍只用于 Context Compaction。Provider usage 缺失时明确标注估算，不伪称实测。
+
+原始 `ToolMessage` 和 JSONL 记录保留真实、有界的 observation；展示摘要不写入模型消息。旧工具结果只在安全切点后通过 compaction 投影压缩，保持 tool call/result 配对和 `modified_files`；提前摘要需验证净成本收益。
+
 ---
 
 ## 15. MCP / LSP
