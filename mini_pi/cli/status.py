@@ -11,6 +11,7 @@ from mini_pi.cli.console import ConsoleRenderer
 from mini_pi.context.policy import resolve_policy
 from mini_pi.context.stats import ContextStats, context_stats
 from mini_pi.session.runtime import AgentSession
+from mini_pi.session.usage import RunUsage, recent_run_usage
 from mini_pi.tools import build_default_registry
 from mini_pi.workspace.workspace import Workspace
 
@@ -32,6 +33,29 @@ def _usage_label(total: int, model: str) -> str:
     return f"~{total} / {policy.context_window} tokens ({percentage:.1f}%)"
 
 
+def _run_usage(agent: Agent | AgentSession | None, renderer: ConsoleRenderer) -> RunUsage | None:
+    """持久化模式重放活动链；纯内存模式使用消息与运行时耗时。"""
+    if isinstance(agent, AgentSession):
+        return agent.last_run_usage
+    if isinstance(agent, Agent):
+        return recent_run_usage(
+            agent.state.messages, duration_seconds=renderer.last_run_seconds
+        )
+    return None
+
+
+def _provider_label(usage: RunUsage | None) -> str:
+    """缺 usage 时显示覆盖率，不能把部分实测称为任务总成本。"""
+    if usage is None or usage.requests == 0:
+        return "unavailable (no model requests)"
+    if usage.measured_requests == 0:
+        return f"unavailable (0/{usage.requests} requests reported usage)"
+    amount = f"in {usage.input_tokens} / out {usage.output_tokens} tokens"
+    coverage = f"{usage.measured_requests}/{usage.requests} requests reported usage"
+    qualifier = "partial measured: " if usage.measured_requests < usage.requests else ""
+    return f"{qualifier}{amount} ({coverage})"
+
+
 def render_status(
     console: Console,
     *,
@@ -42,15 +66,22 @@ def render_status(
     renderer: ConsoleRenderer,
     full: bool = False,
 ) -> None:
-    """展示模型、目录、会话和最近任务工具次数。"""
+    """分开展示最近任务累计消耗与当前模型投影。"""
     session = agent.session_id[:8] if isinstance(agent, AgentSession) else "memory only"
     console.print(f"Model: {provider}/{model}", markup=False)
     console.print(f"Workspace: {cwd if full else cwd.name}", markup=False)
     console.print(f"Session: {session}", markup=False)
     if full and isinstance(agent, AgentSession):
         console.print(f"Session path: {agent.path}", markup=False, soft_wrap=True)
-    console.print(f"Context: {_usage_label(_stats(agent).total, model)}", markup=False)
-    console.print(f"Last run tools: {renderer.last_tool_count}", markup=False)
+    console.print(f"Current context (estimated): {_usage_label(_stats(agent).total, model)}", markup=False)
+    usage = _run_usage(agent, renderer)
+    console.print(f"Last run Provider usage: {_provider_label(usage)}", markup=False)
+    if usage is not None:
+        console.print(f"Last run requests: {usage.requests}", markup=False)
+        console.print(f"Last run tools: {usage.tool_calls}", markup=False)
+        if usage.duration_seconds is not None:
+            label = "recorded span" if isinstance(agent, AgentSession) else "elapsed"
+            console.print(f"Last run {label}: {usage.duration_seconds:.1f}s", markup=False)
 
 
 def render_context(
@@ -71,9 +102,14 @@ def render_context(
     ):
         console.print(f"{label}: ~{amount} tokens", markup=False)
     console.print(f"Total (estimated): {_usage_label(stats.total, model)}", markup=False)
-    usage = renderer.last_provider_usage
-    if usage is not None:
-        console.print(f"Last run Provider usage: in {usage[0]} / out {usage[1]}", markup=False)
+    usage = _run_usage(agent, renderer)
+    console.print(f"Last run Provider usage: {_provider_label(usage)}", markup=False)
+    latest = usage.latest_input_tokens if usage is not None else None
+    console.print(
+        f"Last request Provider input: {latest if latest is not None else 'unavailable'}"
+        + (" tokens" if latest is not None else ""),
+        markup=False,
+    )
     if resolve_policy(model) is None:
         console.print("Auto-compaction: unavailable (context window unknown)", markup=False)
     else:

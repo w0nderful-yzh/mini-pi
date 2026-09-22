@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from importlib import resources
+from time import perf_counter
 
 from rich.console import Console
 from rich.live import Live
@@ -93,6 +94,10 @@ class ConsoleRenderer:
         self._input_tokens = 0
         self._output_tokens = 0
         self._has_usage = False
+        self._requests = 0
+        self._measured_requests = 0
+        self._started_at: float | None = None
+        self.last_run_seconds: float | None = None
         self.last_tool_count = 0
 
     def _start_thinking(self) -> None:
@@ -147,6 +152,10 @@ class ConsoleRenderer:
             self._input_tokens = 0
             self._output_tokens = 0
             self._has_usage = False
+            self._requests = 0
+            self._measured_requests = 0
+            self._started_at = perf_counter()
+            self.last_run_seconds = None
             self.last_tool_count = 0
         elif isinstance(event, MessageStartEvent):
             self._start_thinking()
@@ -162,11 +171,13 @@ class ConsoleRenderer:
                 self.console.print()
                 self._printing_text = False
             usage = event.message.usage
-            if usage is not None and usage.total_tokens > 0:
-                # 只累计 Provider 返回的真实请求用量；最终统一放在任务摘要。
+            self._requests += 1
+            if usage is not None:
+                # usage 是否存在与数值是否大于零是两件事；零值也属于已报告。
                 self._input_tokens += usage.input_tokens
                 self._output_tokens += usage.output_tokens
                 self._has_usage = True
+                self._measured_requests += 1
         elif isinstance(event, ToolExecutionStartEvent):
             self._stop_thinking()
             action = _tool_action(event.tool_call.name, event.tool_call.arguments)
@@ -203,13 +214,24 @@ class ConsoleRenderer:
                 )
         elif isinstance(event, AgentEndEvent):
             self._stop_thinking()
+            if self._started_at is not None:
+                self.last_run_seconds = perf_counter() - self._started_at
             self._render_end(event)
-            if self._has_usage:
-                self.console.print(
-                    f"  provider tokens: in {self._input_tokens} / out {self._output_tokens}",
-                    style="dim",
-                    markup=False,
-                )
+            usage = (
+                f"in {self._input_tokens} / out {self._output_tokens}"
+                if self._has_usage
+                else "unavailable"
+            )
+            if 0 < self._measured_requests < self._requests:
+                usage = f"partial {usage}"
+            coverage = f"{self._measured_requests}/{self._requests} usage"
+            elapsed = f" · {self.last_run_seconds:.1f}s" if self.last_run_seconds is not None else ""
+            self.console.print(
+                f"  requests {self._requests} · provider {usage} ({coverage})"
+                f" · tools {self.last_tool_count}{elapsed}",
+                style="dim",
+                markup=False,
+            )
 
     def _render_end(self, event: AgentEndEvent) -> None:
         if event.reason == "step_limit":

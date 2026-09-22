@@ -16,6 +16,7 @@ from mini_pi.llm.deepseek_client import DeepSeekClient
 from mini_pi.llm.openai_client import OpenAIClient
 from mini_pi.llm.types import AssistantMessage, Message, ToolSchema
 from mini_pi.session.jsonl import JsonlSession
+from mini_pi.session.usage import RunUsage, recent_session_run_usage
 from mini_pi.tools.registry import ToolRegistry
 
 LLMFactory = Callable[[str, str], LLMClient]
@@ -179,6 +180,11 @@ class AgentSession:
         """当前投影含有效 compaction 时，摘要固定在 system 快照之后。"""
         path = project_entry_path(self._session.entries, leaf_id=self._session.leaf_id)
         return 1 if project_compaction(path) is not None else None
+
+    @property
+    def last_run_usage(self) -> RunUsage | None:
+        """只读活动链中的最近任务；resume 后仍可回看原始 usage。"""
+        return recent_session_run_usage(self._session.active_entries())
 
     def new(self, *, sessions_root: str | Path | None = None) -> AgentSession:
         """用当前模型和工具创建独立会话，保留旧 JSONL 以供恢复。"""

@@ -128,7 +128,7 @@ def test_renders_usage_when_present() -> None:
     )
     assert "tokens:" not in stream.getvalue()
     renderer.handle(AgentEndEvent(reason="completed"))
-    assert "provider tokens: in 10 / out 5" in stream.getvalue()
+    assert "requests 1 · provider in 10 / out 5 (1/1 usage)" in stream.getvalue()
 
 
 def test_usage_sums_only_current_run() -> None:
@@ -144,10 +144,10 @@ def test_usage_sums_only_current_run() -> None:
             )
         )
     renderer.handle(AgentEndEvent(reason="completed"))
-    assert "provider tokens: in 30 / out 4" in stream.getvalue()
+    assert "requests 2 · provider in 30 / out 4 (2/2 usage)" in stream.getvalue()
     renderer.handle(AgentStartEvent())
     renderer.handle(AgentEndEvent(reason="completed"))
-    assert stream.getvalue().count("provider tokens:") == 1
+    assert stream.getvalue().count("requests 2 · provider") == 1
 
 
 def test_omits_usage_line_without_usage() -> None:
