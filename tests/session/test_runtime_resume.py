@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from mini_pi.auth import save_api_key
+from mini_pi.context.projection import project_messages
 from mini_pi.errors import MiniPiError, SessionError
 from mini_pi.llm.types import AssistantMessage, SystemMessage, UserMessage
 from mini_pi.session.jsonl import JsonlSession
@@ -199,8 +200,8 @@ def test_resume_uses_saved_credentials_without_persisting_key(
     assert "test-secret" not in first.path.read_text(encoding="utf-8")
 
 
-def test_resume_rejects_compaction_before_client_creation(tmp_path: Path) -> None:
-    """M7.3d 不解释压缩 entry，不能跳过它继续运行。"""
+def test_resume_applies_compaction_projection(tmp_path: Path) -> None:
+    """M7.4h：一轮压缩后可直接恢复，state 与统一投影一致。"""
     session = JsonlSession.create(
         cwd=tmp_path,
         provider="deepseek",
@@ -211,19 +212,109 @@ def test_resume_rejects_compaction_before_client_creation(tmp_path: Path) -> Non
         UserMessage(content="old"), provider="deepseek", model="deepseek-chat"
     )
     session.append_compaction(
-        summary="summary",
+        summary="summary of old",
         first_kept_entry_id=first.id,
         tokens_before=100,
         system_message=SystemMessage(content="system"),
     )
-    called = False
+    session.append_message(
+        AssistantMessage(content="after"), provider="deepseek", model="deepseek-chat"
+    )
+    called: list[tuple[str, str]] = []
 
     def make_llm(provider: str, model: str) -> FakeLLMClient:
-        """压缩检查应早于客户端构造。"""
-        nonlocal called
-        called = True
+        called.append((provider, model))
         return FakeLLMClient([])
 
-    with pytest.raises(SessionError, match="compaction.*M7.4"):
-        AgentSession.resume(session.path, registry=ToolRegistry(), llm_factory=make_llm)
-    assert called is False
+    resumed = AgentSession.resume(session.path, registry=ToolRegistry(), llm_factory=make_llm)
+
+    assert called == [("deepseek", "deepseek-chat")]
+    assert resumed.state.messages == list(JsonlSession.load(session.path).replay().messages)
+    assert [message.role for message in resumed.state.messages] == [
+        "system",
+        "user",
+        "user",
+        "assistant",
+    ]
+    assert resumed.state.messages[0] == SystemMessage(content="system")
+    assert "summary of old" in resumed.state.messages[1].content
+    assert resumed.state.messages[-1] == AssistantMessage(content="after")
+
+
+def test_resume_uses_latest_compaction(tmp_path: Path) -> None:
+    """M7.4h：重复压缩时只恢复最新一份投影。"""
+    session = JsonlSession.create(
+        cwd=tmp_path,
+        provider="deepseek",
+        model="deepseek-chat",
+        sessions_root=tmp_path / "sessions",
+    )
+    first = session.append_message(
+        UserMessage(content="first"), provider="deepseek", model="deepseek-chat"
+    )
+    session.append_compaction(
+        summary="first summary",
+        first_kept_entry_id=first.id,
+        tokens_before=10,
+        system_message=SystemMessage(content="first system"),
+    )
+    second = session.append_message(
+        UserMessage(content="second"), provider="deepseek", model="deepseek-chat"
+    )
+    session.append_compaction(
+        summary="second summary",
+        first_kept_entry_id=second.id,
+        tokens_before=20,
+        system_message=SystemMessage(content="second system"),
+    )
+    session.append_message(
+        AssistantMessage(content="tail"), provider="deepseek", model="deepseek-chat"
+    )
+
+    resumed = AgentSession.resume(
+        session.path, registry=ToolRegistry(), llm_factory=lambda p, m: FakeLLMClient([])
+    )
+
+    messages = resumed.state.messages
+    assert messages[0] == SystemMessage(content="second system")
+    assert "second summary" in messages[1].content
+    assert messages[2] == UserMessage(content="second")
+    assert messages[3] == AssistantMessage(content="tail")
+    assert messages == list(JsonlSession.load(session.path).replay().messages)
+
+
+def test_resume_replays_prompt_patch(tmp_path: Path) -> None:
+    """M7.4h：含 system section patch 的恢复与直接投影一致。"""
+    session = JsonlSession.create(
+        cwd=tmp_path,
+        provider="deepseek",
+        model="deepseek-chat",
+        sessions_root=tmp_path / "sessions",
+    )
+    session.append_message(
+        SystemMessage(sections={"preamble": "p", "rules": "old"}),
+        provider="deepseek",
+        model="deepseek-chat",
+    )
+    session.append_message(
+        SystemMessage(section_patch=[{"op": "set", "id": "rules", "content": "new"}]),
+        provider="deepseek",
+        model="deepseek-chat",
+    )
+    session.append_message(
+        UserMessage(content="task"), provider="deepseek", model="deepseek-chat"
+    )
+    session.append_message(
+        AssistantMessage(content="done"), provider="deepseek", model="deepseek-chat"
+    )
+
+    resumed = AgentSession.resume(
+        session.path, registry=ToolRegistry(), llm_factory=lambda p, m: FakeLLMClient([])
+    )
+
+    projection = JsonlSession.load(session.path).replay()
+    assert resumed.state.messages == list(projection.messages)
+    # 消息按原样回放（patch 单独成条），结构化解析在投影的 system_prompt 上验证
+    resolved = project_messages(JsonlSession.load(session.path).active_entries()).system_prompt
+    assert resolved is not None
+    assert resolved.sections == {"preamble": "p", "rules": "new"}

@@ -148,14 +148,14 @@ def test_legacy_steps_and_duplicate_modified_files(tmp_path: Path) -> None:
     assert (replay.provider, replay.model) == ("openai", "final-model")
 
 
-def test_compaction_requires_later_projection(tmp_path: Path) -> None:
-    """M7.3c 不解释 compaction，必须显式拒绝而不是丢弃该 entry。"""
+def test_compaction_projects_snapshot_summary_and_kept(tmp_path: Path) -> None:
+    """M7.4h：含 compaction 的 replay 返回 system 快照 + 摘要 + 保留消息。"""
     session = create_jsonl(tmp_path)
     first = session.append_message(
         UserMessage(content="task"), provider="openai", model="m"
     )
     checkpoint = session.append_compaction(
-        summary="summary",
+        summary="goal kept",
         first_kept_entry_id=first.id,
         tokens_before=100,
         system_message=SystemMessage(content="system"),
@@ -163,8 +163,13 @@ def test_compaction_requires_later_projection(tmp_path: Path) -> None:
     loaded = JsonlSession.load(session.path)
 
     assert [entry.id for entry in loaded.active_entries()] == [first.id, checkpoint.id]
-    with pytest.raises(SessionError, match="compaction.*M7.4"):
-        loaded.replay()
+    replay = loaded.replay()
+
+    assert [message.role for message in replay.messages] == ["system", "user", "user"]
+    assert replay.messages[0] == SystemMessage(content="system")
+    assert "goal kept" in replay.messages[1].content
+    assert replay.messages[2] == UserMessage(content="task")
+    assert (replay.provider, replay.model) == ("openai", "m")
 
 
 def test_unknown_leaf_fails_without_moving_current_leaf(tmp_path: Path) -> None:

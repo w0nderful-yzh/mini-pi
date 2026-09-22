@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4g 已完成，下一任务为 M7.4h。
+> 状态：实施中；M7.1-M7.4 已完成，下一任务为 M7.5a。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -457,7 +457,7 @@ M7.2 总验收（已完成）：同一段历史重放后 Provider 得到唯一�
 
 M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 → resume → 继续提问”；第二轮 FakeLLM 收到第一轮历史，新增 JSONL entry 沿原 leaf 追加，原文件未另建副本。
 
-### M7.4 Context 投影、Token 与安全切点
+### M7.4 Context 投影、Token 与安全切点（已完成）
 
 #### M7.4a：活动 Entry 路径投影（已完成）
 
@@ -552,16 +552,20 @@ M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 →
 
 验收：专项 `uv run pytest tests/context/test_policy.py -q` → 14 passed；全量 `348 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.4h：Resume 使用统一 Context 投影
+#### M7.4h：Resume 使用统一 Context 投影（已完成）
 
-- [ ] `AgentSession.resume()` 切换为 M7.4a-c 的统一投影，解除 M7.3c 对 compaction 的临时拒绝。
-- 恢复后的 state 与直接对同一 Session 投影的结果完全一致。
-- 针对性测试覆盖：无压缩、一轮压缩、重复压缩和含 prompt patch 的恢复。
-- 不做：创建新的 compaction entry。
+提交：本任务提交（`feat: Resume 使用统一 Context 投影`）。
 
-验收命令：`uv run pytest tests/session/test_runtime_resume.py tests/context -q`。
+交付物：
 
-M7.4 总验收：表驱动测试覆盖无 usage、尾随消息、连续工具调用、单 turn 超长、找不到安全切点、重复 compaction。
+- `JsonlSession.replay()` 改为 M7.4a-c 统一投影：有 compaction 走 M7.4c（system 快照 + 摘要 + 保留消息），否则走 M7.4b；移除 M7.3c 对 compaction 的临时拒绝。
+- 元数据（stepCount / modifiedFiles / provider / model）仍按活动路径回放，摘要不回滚历史累计值。
+- `latest_session_path()` 的候选校验随之接受压缩会话，不再误判损坏。
+- 明确未做：创建新 compaction entry、自动触发。
+
+验收：专项 `uv run pytest tests/session/test_runtime_resume.py tests/context -q` → 98 passed；全量 `356 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
+
+M7.4 总验收：`tests/context/test_m7_4_projection_pipeline.py` 表驱动覆盖无 usage、tail 追加估算、连续工具调用、单 turn 超长、全部在预算内、重复 compaction，共 6 场景通过。
 
 ### M7.5 手动 Compaction
 

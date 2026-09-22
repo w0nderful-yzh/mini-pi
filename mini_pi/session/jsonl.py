@@ -11,7 +11,11 @@ from uuid import UUID, uuid4
 
 from pydantic import TypeAdapter, ValidationError
 
-from mini_pi.context.projection import project_entry_path
+from mini_pi.context.projection import (
+    project_compaction,
+    project_entry_path,
+    project_messages,
+)
 from mini_pi.errors import SessionError
 from mini_pi.llm.types import AssistantMessage, Message, SystemMessage, ToolMessage, Usage
 from mini_pi.session.models import CompactionEntry, MessageEntry, SessionEntry, SessionHeader
@@ -257,17 +261,28 @@ class JsonlSession:
         )
 
     def replay(self, *, leaf_id: UUID | None = None) -> SessionReplay:
-        """仅从消息 entry 恢复基础状态；compaction 留给 M7.4 投影。"""
-        messages: list[Message] = []
+        """用 M7.4 统一投影恢复消息，并回放步骤与改动等元数据。
+
+        - 有 compaction 时走 M7.4c 投影（system 快照 + 摘要 + 保留消息）
+        - 无 compaction 时走 M7.4b 消息投影
+        - 元数据（stepCount / modifiedFiles / provider / model）始终按活动路径回放，
+          摘要不会回滚历史累计值
+        """
+        path = self.active_entries(leaf_id=leaf_id)
+        compaction = project_compaction(path)
+        if compaction is not None:
+            messages = compaction.messages
+        else:
+            messages = project_messages(path).messages
+
         modified_files: set[str] = set()
         step_count = 0
         provider = self._header.provider
         model = self._header.model
-        for entry in self.active_entries(leaf_id=leaf_id):
-            if isinstance(entry, CompactionEntry):
-                raise SessionError("compaction entry requires M7.4 projection")
+        for entry in path:
+            if not isinstance(entry, MessageEntry):
+                continue
             message = entry.message
-            messages.append(message)
             provider, model = entry.provider, entry.model
             if entry.step_count is not None:
                 step_count = entry.step_count
