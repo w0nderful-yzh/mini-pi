@@ -82,7 +82,7 @@ Python Coding Agent Harness
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
-| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | 第二阶段复刻最小子集：`message + compaction` entry |
+| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3a 已接入完整消息提交 Hook（先提交再入内存）；Session 接线、恢复与 compaction 仍待后续任务 |
 
 ---
 
@@ -165,7 +165,7 @@ Agent Runtime 自己实现。
 
 ## 5. 目录结构
 
-当前实现范围（M1-M6 + M7.1-M7.2）：
+当前实现范围（M1-M6 + M7.1-M7.2 + M7.3a）：
 
 ```text
 mini-pi/
@@ -346,7 +346,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context：JSONL entry 树、AGENTS.md、resume、compaction | 进行中（M7.1、M7.2 已完成） |
+| M7 | Session / Context：JSONL entry 树、AGENTS.md、resume、compaction | 进行中（M7.1、M7.2、M7.3a 已完成） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

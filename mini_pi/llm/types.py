@@ -109,13 +109,14 @@ class AssistantMessage(BaseModel):
 
 
 class ToolMessage(BaseModel):
-    """工具执行结果，作为下一轮对话的 observation。"""
+    """工具执行结果及本次改动文件，作为下一轮对话的 observation。"""
 
     role: Literal["tool"] = "tool"
     tool_call_id: str
     name: str
     content: str
     is_error: bool = False
+    modified_files: list[str] = Field(default_factory=list)
 
 
 # 以 role 为判别字段的消息联合类型，用于 transcript 与持久化

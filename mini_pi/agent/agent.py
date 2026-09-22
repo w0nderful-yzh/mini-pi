@@ -8,7 +8,7 @@ from pathlib import Path
 from mini_pi.agent.events import AgentEvent
 from mini_pi.agent.loop import run_loop
 from mini_pi.agent.prompt import build_sections
-from mini_pi.agent.state import AgentState
+from mini_pi.agent.state import AgentState, MessageCommit, commit_message
 from mini_pi.context.project import load_project_instructions
 from mini_pi.context.sections import diff_sections, replay_system_messages
 from mini_pi.llm.base import LLMClient
@@ -28,6 +28,7 @@ class Agent:
         cwd: Path,
         max_steps: int = 50,
         on_event: Callable[[AgentEvent], None] | None = None,
+        on_message_commit: MessageCommit | None = None,
     ) -> None:
         if max_steps <= 0:
             raise ValueError("max_steps must be > 0")
@@ -35,6 +36,7 @@ class Agent:
         self._registry = registry
         self._max_steps = max_steps
         self._on_event = on_event
+        self._on_message_commit = on_message_commit
         self._workspace = Workspace(cwd)
         self.state = AgentState()
 
@@ -43,13 +45,14 @@ class Agent:
         if not task.strip():
             raise ValueError("task must not be empty")
         self._refresh_system_prompt()
-        self.state.messages.append(UserMessage(content=task))
+        commit_message(self.state, UserMessage(content=task), self._on_message_commit)
         return run_loop(
             self.state,
             self._llm,
             self._registry,
             max_steps=self._max_steps,
             on_event=self._on_event,
+            on_message_commit=self._on_message_commit,
         )
 
     def _refresh_system_prompt(self) -> None:
@@ -69,11 +72,17 @@ class Agent:
         )
         if current is None or current.sections is None:
             # 旧 content 无法安全拆分；追加完整结构化快照而非猜测差异。
-            self.state.messages.append(SystemMessage(sections=desired))
+            commit_message(
+                self.state, SystemMessage(sections=desired), self._on_message_commit
+            )
             return
         patch = diff_sections(current.sections, desired)
         if patch is not None:
-            self.state.messages.append(SystemMessage(section_patch=list(patch)))
+            commit_message(
+                self.state,
+                SystemMessage(section_patch=list(patch)),
+                self._on_message_commit,
+            )
 
     def reset(self) -> None:
         """清空会话状态，system prompt 会在下次 run 时重新注入。"""

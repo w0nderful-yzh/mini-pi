@@ -16,14 +16,13 @@ from mini_pi.agent.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
-from mini_pi.agent.state import AgentState
+from mini_pi.agent.state import AgentState, MessageCommit, commit_message
 from mini_pi.errors import MiniPiError, ToolError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.types import (
     AssistantMessage,
     DoneEvent,
     ErrorEvent,
-    Message,
     TextDeltaEvent,
     ThinkingDeltaEvent,
     ToolCall,
@@ -47,6 +46,7 @@ def run_loop(
     *,
     max_steps: int = 50,
     on_event: EventSink | None = None,
+    on_message_commit: MessageCommit | None = None,
 ) -> AssistantMessage:
     """执行 LLM → Tool → Observation 循环，返回最后一条 assistant 消息。"""
     if max_steps <= 0:
@@ -60,7 +60,7 @@ def run_loop(
         state.step_count += 1
         step = state.step_count
         emit(TurnStartEvent(step=step))
-        assistant = _stream_assistant(state, llm, registry, emit)
+        assistant = _stream_assistant(state, llm, registry, emit, on_message_commit)
         last = assistant
         if assistant.stop_reason == "error":
             # 每轮 turn_start 都要有对应的 turn_end
@@ -69,7 +69,7 @@ def run_loop(
             return assistant
         if assistant.stop_reason == "length":
             # 输出被截断时 tool call 参数不完整，执行会产生脏操作
-            _record_truncated_calls(state, assistant.tool_calls, emit)
+            _record_truncated_calls(state, assistant.tool_calls, emit, on_message_commit)
             emit(TurnEndEvent(step=step))
             continue
         if not assistant.tool_calls:
@@ -77,7 +77,7 @@ def run_loop(
             emit(TurnEndEvent(step=step))
             emit(AgentEndEvent(reason="completed", message=assistant))
             return assistant
-        _execute_tool_calls(state, registry, assistant.tool_calls, emit)
+        _execute_tool_calls(state, registry, assistant.tool_calls, emit, on_message_commit)
         emit(TurnEndEvent(step=step))
     # 循环由 max_steps 截断：保留最后消息供调用方检查
     assert last is not None
@@ -90,8 +90,9 @@ def _stream_assistant(
     llm: LLMClient,
     registry: ToolRegistry,
     emit: EventSink,
+    on_message_commit: MessageCommit | None,
 ) -> AssistantMessage:
-    """消费一次流式回复：转发增量事件，结束后追加到 transcript。"""
+    """消费一次流式回复：转发增量事件，完整消息提交后加入 transcript。"""
     emit(MessageStartEvent())
     final: AssistantMessage | None = None
     for event in llm.stream(state.messages, registry.schemas()):
@@ -107,7 +108,7 @@ def _stream_assistant(
     if final is None:
         # 协议要求流必须以 done 结束；缺失说明 Client 实现有缺陷
         raise MiniPiError("LLM stream ended without a done event")
-    state.messages.append(final)
+    commit_message(state, final, on_message_commit)
     emit(MessageEndEvent(message=final))
     return final
 
@@ -117,6 +118,7 @@ def _execute_tool_calls(
     registry: ToolRegistry,
     calls: list[ToolCall],
     emit: EventSink,
+    on_message_commit: MessageCommit | None,
 ) -> None:
     """顺序执行工具调用；ToolError 转 observation，其他异常冒泡。"""
     for call in calls:
@@ -127,34 +129,43 @@ def _execute_tool_calls(
         except ToolError as exc:
             result = ToolResult(content=f"{type(exc).__name__}: {exc}")
             is_error = True
-        # 只有工具显式声明 modified_files 时才记录，避免只读工具误入改动列表
-        if not is_error and result.modified_files:
-            state.modified_files.update(result.modified_files)
-        _append_tool_message(state, call, result, is_error)
+        _append_tool_message(state, call, result, is_error, on_message_commit)
         emit(ToolExecutionEndEvent(tool_call=call, result=result, is_error=is_error))
 
 
 def _record_truncated_calls(
-    state: AgentState, calls: list[ToolCall], emit: EventSink
+    state: AgentState,
+    calls: list[ToolCall],
+    emit: EventSink,
+    on_message_commit: MessageCommit | None,
 ) -> None:
     """截断的 tool call 一律转 error observation，不进入工具执行。"""
     for call in calls:
         emit(ToolExecutionStartEvent(tool_call=call))
         result = ToolResult(content=_TRUNCATED_MESSAGE)
-        _append_tool_message(state, call, result, is_error=True)
+        _append_tool_message(
+            state, call, result, is_error=True, on_message_commit=on_message_commit
+        )
         emit(ToolExecutionEndEvent(tool_call=call, result=result, is_error=True))
 
 
 def _append_tool_message(
-    state: AgentState, call: ToolCall, result: ToolResult, is_error: bool
+    state: AgentState,
+    call: ToolCall,
+    result: ToolResult,
+    is_error: bool,
+    on_message_commit: MessageCommit | None,
 ) -> None:
-    message: Message = ToolMessage(
+    message = ToolMessage(
         tool_call_id=call.id,
         name=call.name,
         content=result.content,
         is_error=is_error,
+        modified_files=result.modified_files if not is_error else [],
     )
-    state.messages.append(message)
+    commit_message(state, message, on_message_commit)
+    # 改动集合只反映已提交的 observation；写盘失败不能留下旁路内存状态。
+    state.modified_files.update(message.modified_files)
 
 
 def _noop(event: AgentEvent) -> None:

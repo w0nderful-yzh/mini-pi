@@ -110,8 +110,8 @@ Agent (mini_pi/agent/agent.py)
 → 持有 AgentState，调用 run_loop，禁止直接读写文件 / 执行 Shell
 
 Agent Loop (mini_pi/agent/loop.py)
-→ 纯函数 run_loop(state, llm, registry, max_steps, on_event)
-→ 控制 LLM / Tool 循环，发出 AgentEvent
+→ 纯函数 run_loop(state, llm, registry, max_steps, on_event, on_message_commit)
+→ 控制 LLM / Tool 循环，发出 AgentEvent；完整消息走可选提交回调
 
 LLM Client (mini_pi/llm)
 → 调用模型，统一消息与流式事件，错误编码进事件流
@@ -257,6 +257,7 @@ turn_end / agent_end(reason: completed | step_limit | error)
 - Loop 不做渲染、不读 stdin
 - CLI 不参与决策、不直接调用 Tool
 - `on_event` 为可选参数，测试时传 None 或列表收集器
+- `on_message_commit` 仅在完整 system / user / assistant / tool 消息上触发；回调成功后才追加内存历史，失败直接冒泡；tool 改动文件随已提交的 ToolMessage 记录
 
 ---
 

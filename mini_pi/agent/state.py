@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from mini_pi.llm.types import Message
+
+MessageCommit = Callable[[Message], None]
 
 
 @dataclass
@@ -15,3 +18,12 @@ class AgentState:
     # step_count 为会话累计值，max_steps 是单次 run 的限制
     step_count: int = 0
     modified_files: set[str] = field(default_factory=set)
+
+
+def commit_message(
+    state: AgentState, message: Message, on_message_commit: MessageCommit | None
+) -> None:
+    """先提交完整消息，成功后才更新内存 transcript。"""
+    if on_message_commit is not None:
+        on_message_commit(message)
+    state.messages.append(message)

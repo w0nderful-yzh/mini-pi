@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1、M7.2 已完成，下一任务为 M7.3a。
+> 状态：实施中；M7.1、M7.2、M7.3a 已完成，下一任务为 M7.3b。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -366,15 +366,18 @@ M7.2 总验收（已完成）：同一段历史重放后 Provider 得到唯一�
 
 ### M7.3 AgentSession、持久化与 Resume
 
-#### M7.3a：完整消息提交 Hook
+#### M7.3a：完整消息提交 Hook（已完成）
 
-- [ ] 为 Agent / Loop 增加单一消息提交回调，覆盖 system、user、assistant、tool 四种完整消息。
-- 回调只在消息完成后触发；流式 delta 不落盘，tool result 必须在执行完成后提交。
-- 持久化模式采用 durable-first：写入失败时消息不得进入内存历史，循环立即失败。
-- `ToolMessage` 显式携带本次工具的 `modified_files`，供 Session entry 保存。
-- 不做：创建 Session、resume、CLI 接线。
+提交：本任务提交（`feat: 增加完整消息提交 Hook`）。
 
-验收命令：`uv run pytest tests/agent/test_agent.py tests/agent/test_loop.py -q`。
+交付物：
+
+- `Agent` / `run_loop` 共用可选 `MessageCommit` 回调；system、user、assistant、tool 完整消息均先提交、成功后才加入内存历史。
+- 流式 delta 不触发提交；工具执行完成后才提交 observation；回调失败直接冒泡，不追加失败消息、不继续模型循环。
+- `ToolMessage.modified_files` 只记录本次工具明确声明的改动，Provider wire 忽略；内存改动集合在工具消息提交成功后更新。
+- 明确未做：创建 Session、JSONL 接线、resume、CLI 参数与 compaction。
+
+验收：专项 `11 passed`；全量 `230 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.3b：创建模式 `AgentSession`
 
@@ -744,4 +747,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.3a`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.3b`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
