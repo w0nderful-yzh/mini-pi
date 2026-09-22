@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4f 已完成，下一任务为 M7.4g。
+> 状态：实施中；M7.1-M7.4g 已完成，下一任务为 M7.4h。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -539,15 +539,18 @@ M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 →
 
 验收：专项 `uv run pytest tests/context/test_cut_points_tools.py -q` → 6 passed；M7.4e 既有切点测试仍全绿；全量 `334 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.4g：Context Window 配置与阈值策略
+#### M7.4g：Context Window 配置与阈值策略（已完成）
 
-- [ ] 定义模型 context window、reserve 与 auto-compaction threshold 配置。
-- 已知模型可使用显式内置表；未知模型必须由用户配置，否则关闭自动压缩并给出明确提示。
-- 纯函数返回“无需压缩 / 应压缩 / 无法判断”，不直接修改状态。
-- 针对性测试覆盖：已知模型、未知模型、非法 reserve、临界值和估算来源。
-- 不做：自动调用 compact。
+提交：本任务提交（`feat: 增加上下文窗口与阈值策略`）。
 
-验收命令：`uv run pytest tests/context/test_policy.py -q`。
+交付物：
+
+- 新增 `context/policy.py`：`ContextPolicy(context_window, reserve_tokens)`（含 `threshold_tokens`），窗口/reserve 非法直接报错。
+- `KNOWN_CONTEXT_WINDOWS` 内置显式表（gpt-4o / gpt-4o-mini / deepseek-chat / deepseek-reasoner）；`resolve_policy()` 用户显式窗口优先，未知模型返回 None（关闭自动压缩）。
+- `evaluate_compaction(estimate, policy=...)` 纯函数返回 `CompactionDecision(status ∈ {not_needed, needed, unknown}, reason, source)`；严格大于阈值才触发，决策携带估算来源。
+- 明确未做：自动调用 compact、CLI 接线、启动信息渲染。
+
+验收：专项 `uv run pytest tests/context/test_policy.py -q` → 14 passed；全量 `348 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.4h：Resume 使用统一 Context 投影
 
