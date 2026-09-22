@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4a 已完成，下一任务为 M7.4b。
+> 状态：实施中；M7.1-M7.4b 已完成，下一任务为 M7.4c。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -472,14 +472,18 @@ M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 →
 
 验收：专项 `uv run pytest tests/context/test_projection_path.py -q` → 8 passed；全量 `288 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.4b：Message Entry 投影
+#### M7.4b：Message Entry 投影（已完成）
 
-- [ ] 将 message entry path 还原为模型 messages，并恢复结构化 system section 状态。
-- 校验 assistant tool call 与 tool result 的 id 配对；不完整配对 Fail Fast。
-- 针对性测试覆盖四种 role、连续工具调用、legacy system message 和坏配对。
-- 不做：compaction entry、运行时接线。
+提交：本任务提交（`feat: 增加 Message Entry 投影与工具配对校验`）。
 
-验收命令：`uv run pytest tests/context/test_projection_messages.py -q`。
+交付物：
+
+- `context/projection.py` 新增 `project_messages(entries)` → `MessageProjection(messages, system_prompt)`：按路径还原四种 role，并回放结构化 system section 快照/patch（legacy content 作为完整快照）。
+- 校验 assistant tool_calls 与 tool result：批次必须完整、call id 全局唯一、结果不得孤儿，不满足即 `SessionError`（覆盖连续工具轮与多工具批次）。
+- 路径含 compaction entry 时明确指向 M7.4c，不在本任务解释切点。
+- 明确未做：compaction 投影、token、运行时接线。
+
+验收：专项 `uv run pytest tests/context/test_projection_messages.py -q` → 11 passed；全量 `299 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.4c：Compaction Entry 投影
 
