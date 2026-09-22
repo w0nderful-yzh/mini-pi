@@ -72,6 +72,7 @@ Python Coding Agent Harness
 | --- | --- | --- |
 | 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 第一阶段单层循环，只处理 tool batch；队列、steering 留到 Session 阶段 |
 | 事件驱动 | `AgentEvent` 事件流驱动 TUI/print/RPC，UI 是纯消费者 | 复刻：Loop 发 `AgentEvent`，CLI 只做渲染，不做决策 |
+| 思考与终端展示 | thinking 事件可供 UI 展示，Provider 保留必要回放字段 | M7.C 计划默认只显示思考状态图标；CLI 元数据不进入消息历史，DeepSeek 的 `reasoning_content` 回放保持协议兼容 |
 | LLM 流式 | provider 无关的 `AssistantMessageEvent` 事件流，错误编码进流 | 复刻：同步 SDK + `stream=True`，`ErrorEvent` 不裸抛给 Loop |
 | Tool Call 拼装 | 按 `index` 聚合 SSE 增量，结束后解析 JSON | 复刻：`_AssistantAccumulator`，解析失败显式报错（不静默返回 `{}`） |
 | 工具错误 | 所有异常转成 `isError` ToolResult 回传模型 | ToolError 转 `is_error` observation；非预期异常直接冒泡（Fail Fast） |
@@ -82,7 +83,7 @@ Python Coding Agent Harness
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
-| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3 已完成 CLI 新建、恢复、`/new` 与同链 `/model` 切换；compaction 投影仍待后续任务 |
+| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3 已完成 CLI 新建、恢复、`/new` 与同链 `/model` 切换；M7.4 已完成 compaction 投影，生成与触发待 M7.5-M7.6 |
 
 ---
 
@@ -165,7 +166,7 @@ Agent Runtime 自己实现。
 
 ## 5. 目录结构
 
-当前实现范围（M1-M6 + M7.1-M7.3）：
+当前实现范围（M1-M6 + M7.1-M7.4）：
 
 ```text
 mini-pi/
@@ -185,7 +186,11 @@ mini-pi/
 │   │
 │   ├── cli/
 │   │   ├── app.py                     # Typer 入口：一次性 / 交互式
+│   │   ├── banner.py                  # 启动图案
 │   │   └── console.py                 # AgentEvent -> Rich 渲染
+│   │
+│   ├── assets/
+│   │   └── banner.txt                 # 启动图案资源
 │   │
 │   ├── agent/
 │   │   ├── agent.py                   # Agent：状态 + run / reset
@@ -219,7 +224,11 @@ mini-pi/
 │   │
 │   ├── context/
 │   │   ├── project.py                # 项目 AGENTS.md 发现与读取
-│   │   └── sections.py               # section diff / patch / replay / render
+│   │   ├── sections.py               # section diff / patch / replay / render
+│   │   ├── projection.py             # Session 活动路径的消息投影
+│   │   ├── tokens.py                 # token 估算
+│   │   ├── compaction.py             # 安全切点
+│   │   └── policy.py                 # context window 与阈值策略
 │   │
 │   └── workspace/
 │       └── workspace.py               # 路径解析与安全边界
@@ -358,7 +367,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context：JSONL entry 树、AGENTS.md、resume、compaction | 进行中（M7.1-M7.4 已完成；下一项 M7.5） |
+| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、compaction、可观测性 | 进行中（M7.1-M7.4 已完成；下一项 M7.C1） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

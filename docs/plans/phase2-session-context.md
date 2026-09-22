@@ -1,8 +1,8 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4 已完成，下一任务为 M7.5a。
+> 状态：实施中；M7.1-M7.4 已完成，下一任务为 M7.C1（CLI 展示与上下文边界），随后继续 M7.5a。
 
-**目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
+**目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载、上下文压缩和可长期使用的 CLI，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
 **设计依据：** 当前 `mini_pi` 的真实实现与测试；Pi 的生产路径 `packages/agent/src/agent-loop.ts`、`packages/coding-agent/src/core/session-manager.ts`、`agent-session.ts`、`resource-loader.ts`、`system-prompt.ts`、`compaction/`。详细源码链路见 [`../design/pi-production-architecture.md`](../design/pi-production-architecture.md)。借鉴数据模型和边界，不复制 Pi 的扩展、分支导航、队列、并发与新 harness 复杂度。
 
@@ -40,6 +40,7 @@ Phase 1 已稳定完成以下闭环：
 - 从 git 项目根到 workspace 的 `AGENTS.md` 加载。
 - token 估算、安全切点、手动压缩与自动压缩。
 - CLI 的 `--resume`、`--continue`、`--no-session`、`/new`、`/compact`。
+- CLI 的思考状态、工具事件摘要、用量与上下文可观测性；交互输入与会话列表的后续优化。
 - FakeLLM 单测、损坏文件与切点边界测试、真实长会话集成验收。
 
 ### 明确不做
@@ -50,6 +51,7 @@ Phase 1 已稳定完成以下闭环：
 - skills、prompt templates、extension/plugin runtime。
 - LSP、MCP、Task、Memory、Multi-Agent。
 - embedding、RAG、Vector DB。
+- 为“简单任务”写死读取次数、强制固定工具调用顺序，或为了展示而篡改模型事实。
 
 这些能力不为 M7 预建抽象；只保留 JSONL `parentId` 和清晰模块边界。
 
@@ -267,6 +269,14 @@ prepare_next_turn: Callable[[AgentState], list[Message] | None]
 只在本轮 assistant 与全部 tool results 已提交、下一次 LLM 请求尚未开始时调用。返回新投影时整体替换 `state.messages`；返回 `None` 保持原状。
 
 Loop 不知道 hook 做的是压缩、prompt refresh 或其他 Context 工作。M7 不借此加入 steering / follow-up 队列。
+
+### 4.9 CLI 展示与模型上下文边界
+
+CLI 只消费现有 `AgentEvent` 和 Session / Context 的只读状态。终端渲染、状态图标、`--verbose` 与统计信息不写入 `AgentState.messages`、JSONL message 或 Provider 请求。Assistant 正文、tool call / result 仍按原协议提交；不能为了让界面简洁而删掉模型所需的 observation。长工具输出继续由 Tool 层有界截断，历史缩短交给 M7.5 / M7.6 compaction。
+
+`thinking_delta` 与 `AssistantMessage.reasoning_content` 是不同边界：默认 CLI 不渲染原始思考内容；OpenAI wire 不回放它，DeepSeek 仍按现有协议在需要时回放。不得用 `I should` 等正文关键词猜测、删除普通 assistant 文本，也不得为隐藏终端内容改写已持久化的消息。若将来要取消持久化 reasoning，必须先证明 DeepSeek tool-call 回放和 resume 兼容，并单独修改协议与测试。
+
+上下文占用以 M7.4g 的 `context_window - reserve_tokens` 策略作为唯一自动压缩/停止依据。来源方案中的 70% / 85% / 95% 可作 `/context` 提示区间，不另造三套触发规则；窗口未知时显示“未知”，不伪造百分比或自动压缩。状态统计应区分 Provider 返回的实际 usage 与本地估算，分类只针对当前投影，避免重复计数。
 
 ---
 
@@ -567,6 +577,67 @@ M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 →
 
 M7.4 总验收：`tests/context/test_m7_4_projection_pipeline.py` 表驱动覆盖无 usage、tail 追加估算、连续工具调用、单 turn 超长、全部在预算内、重复 compaction，共 6 场景通过。
 
+### M7.C CLI 与对话健康度（M7.4 后，M7.5 前）
+
+依据用户提供的 `mini-pi-cli-optimization-plan.md` 安排；该文件是需求素材，以下边界以本计划和现有协议为准。M7.C1-C5 按顺序完成，不改动 M7.5 / M7.6 的既有任务编号。每个任务分别做针对性离线验证、全量回归和中文提交；完成后按本文件与 README 同步状态。
+
+#### M7.C1：隐藏 raw thinking，显示思考状态
+
+- [ ] `ConsoleRenderer` 默认不打印 `MessageDeltaEvent(kind="thinking")` 的内容；普通 `text` 继续流式展示，错误与最终答复可见。禁止按英文短语过滤正文。
+- [ ] 交互式 tty 在思考阶段显示用户指定的小牛图标；图案作为 `mini_pi/assets/thinking.txt` 资源，启动仍使用现有 `banner.txt`。图标只代表运行状态，不包含或暗示模型思考内容。
+- [ ] 思考、正文、工具执行与终止事件切换时原地刷新/清理状态，避免重复刷屏；窄终端、非 tty、`--no-banner` 下提供简洁文本状态或静默降级。图标及 spinner 不进入 Session 或模型上下文。
+- [ ] 使用 FakeLLM 事件与 Rich 捕获验证：thinking 增量不泄漏，正文不丢，状态结束后无残留；DeepSeek `reasoning_content` 的既有回放测试保持通过。
+
+参考图案（资源文件保留等宽布局；终端可按宽度降级）：
+
+```text
+      db         db
+    d88           88
+   888            888
+  d88             888b
+  888             d88P
+  Y888b  /``````\8888
+,----Y888        Y88P`````\
+|        ,'`\_/``\ |,,    |
+ \,,,,-| | o | o / |  ```'
+       |  """ """  |
+      /             \
+     |               \
+     |  ,,,,----'''```|
+     |``   @    @     |
+      \,,    ___    ,,/
+        \__|   |__/
+            | | |
+            \_|_/
+```
+
+#### M7.C2：展示元数据与模型消息隔离
+
+- [ ] 审计 CLI 渲染、Session 提交、Provider wire 三条路径；用测试确认 banner、状态图、token 文案、session 路径、`ToolResult.details` 不进入模型消息或 JSONL message。
+- [ ] 将当前插在 `MessageEndEvent` 后的 `tokens: in ... / out ...` 移到任务结束摘要或 `/status`；只标记实际 usage，不把多轮累计误写成“本轮新增上下文”。
+- [ ] 保持 tool result 的模型 observation、`is_error` 和 `modified_files` 完整语义；输出规模通过现有工具截断与后续 compaction 控制，不在 Renderer 中偷偷缩短模型上下文。
+
+#### M7.C3：`/status` 与 `/context`
+
+- [ ] `/status` 显示 provider/model、简短 cwd、session id（纯内存模式明确标识）、最近一次 run 的工具次数和 context 占用；详细路径仅显式请求时显示。
+- [ ] `/context` 按当前投影列出 system / AGENTS、conversation、tool results、summary、total 与 window 使用率；各分类只给估算值，Provider 返回的整体 usage 单独标示，不伪装成分类实测值，也不重复计数。
+- [ ] 未配置 context window 时显示未知及自动压缩关闭；压缩前后、resume 后从当前投影重算，不读旧 Session 全量原文冒充当前上下文。
+- [ ] `/tools` 列出当前 Registry 的工具名与简述；`/help` 同步命令可用条件，`/reset` 与 `/new` 原有模式约束保持不变。
+
+#### M7.C4：工具事件摘要与 `--verbose`
+
+- [ ] 默认将 tool start/end 渲染成可读的操作、完成/失败摘要；保留非零 exit code、错误与改动文件数量等关键结果，不输出整段 JSON 参数或长日志。
+- [ ] `--verbose` 显示完整可见命令/参数和 Tool 层已截断的 stdout/stderr；不得声称获得了进程层已丢弃的原始日志，且不得输出凭据。
+- [ ] tty 工具执行时刷新状态，不重复打印思考图；非 tty 输出稳定的一行事件，便于重定向与测试。
+
+#### M7.C5：减少无效探索的软约束
+
+- [ ] 在现有 system prompt 工作规则中加入“每次 observation 后判断是否已有充分证据，足够时直接回答”的短指引；简单只读问题建议少量关键读取，但不把 3-5 次设为硬上限。
+- [ ] `max_steps` 继续作为单次 run 的唯一硬步数上限；修复、测试或未知问题可继续搜索，不增加固定 workflow 或新的 Agent 状态机。
+- [ ] FakeLLM 验证 prompt 与 `max_steps` 行为，并用真实任务验收对比无效工具调用数；不能仅凭提示词宣称已降低调用量。
+
+M7.C1-C5 验收：默认终端不泄漏 thinking；图标只作状态提示；`/status`、`/context` 和工具摘要可用；上下文投影及 DeepSeek 回放行为保持正确。
+
 ### M7.5 手动 Compaction
 
 #### M7.5a：Transcript Serializer
@@ -673,6 +744,22 @@ M7.5 总验收：FakeLLM 生成摘要后，模型上下文缩短，JSONL 原始 
 
 M7.6 总验收：自动压缩后在同一次 run 中继续，工具不重复，失败时不破坏原 Session。
 
+### M7.D 会话导航与输入体验（M7.6 后）
+
+#### M7.D1：会话列表与恢复入口
+
+- [ ] `/sessions` 列出当前 workspace 的会话 id、最近活动时间、模型和短摘要；摘要只取已有 compaction summary 或有限长度的历史用户任务，不为列表额外请求模型。
+- [ ] 提供从列表恢复指定会话的入口；复用 `--resume` / `--continue` 的严格校验，损坏文件、cwd 不符或并列最新时间仍明确报错。
+- [ ] 启动页只显示版本、模型、项目名和短 session id；完整存储路径移到 `/status` 的详细视图或明确的诊断输出。保留 `--no-banner` 与非 tty 降级。
+
+#### M7.D2：交互输入与中断
+
+- [ ] 评估并接入 `prompt_toolkit`，支持历史命令、上下键浏览和多行输入；输入内容只在用户提交后进入 Session。
+- [ ] 先定义并验证取消语义，再支持 Ctrl+C 取消当前任务、连续两次 Ctrl+C 退出；已提交的工具结果与 JSONL entry 不回滚，不能在工具仍运行时假装已取消。
+- [ ] 输入库不可用或非 tty 时保留当前单行 REPL 路径；交互增强不改变 `AgentSession` / `run_loop` 的消息协议。
+
+M7.D 验收：会话列表与恢复可用，输入历史和中断行为有 tty 人工验收记录；离线测试覆盖非 tty 与恢复错误边界。
+
 ### M7.7 回归、真实验收与文档同步
 
 #### M7.7a：离线全量回归与不变量补强
@@ -694,7 +781,7 @@ M7.6 总验收：自动压缩后在同一次 run 中继续，工具不重复，�
 
 #### M7.7c：人工 CLI 场景验收
 
-- [ ] 按脚本人工验证 create → 工具调用 → exit → resume → `/compact` → continue → `/new`。
+- [ ] 按脚本人工验证 create → 工具调用 → exit → resume → `/compact` → continue → `/new`，以及 thinking 图标、`/status`、`/context`、`/tools`、`/sessions`、`--verbose`、窄终端/非 tty、输入历史与 Ctrl+C。
 - 保存可复核的命令、Session 路径与非敏感结果摘要，不提交真实 Session 文件。
 - 每个失败点先记录实际行为，再决定是否创建修复任务，禁止在验收任务里顺带大改。
 - 不做：文档宣称未执行的场景通过。
@@ -718,6 +805,8 @@ M7 完成标准：
 + context 超阈值可在 turn 边界压缩
 + 原始历史不丢失
 + 压缩后任务继续执行且工具不重复
++ CLI 默认隐藏 raw thinking，状态与上下文可观察
++ 会话列表、恢复和交互输入经人工验收
 ```
 
 ---
@@ -767,6 +856,9 @@ M7 完成标准：
 | 摘要丢失关键文件状态 | 固定 summary schema + modifiedFiles 结构字段 |
 | 压缩后重复执行工具 | hook 仅位于已提交 tool batch 与下一请求之间；端到端断言一次执行 |
 | 自定义模型窗口未知 | 不猜测；显式配置或明确关闭 auto-compaction |
+| 隐藏 thinking 破坏 DeepSeek 回放 | 只改 CLI 渲染；Provider wire 与 resume 回归单测 |
+| CLI 统计与实际请求不一致 | 按当前投影分组，标记估算与实际 usage；未知窗口不报百分比 |
+| 中断导致工具与 Session 分叉 | 先定义取消边界，保留已提交消息；真实 tty 与进程组场景验收 |
 | Pi 复杂度外溢 | M7 非目标清单作为 code review gate |
 
 每个子里程碑遵循：失败测试 → 最小实现 → 针对性测试 → 全量回归 → 中文提交。未执行真实命令不得记录“通过”。
@@ -786,15 +878,21 @@ M7.3a → 3b → 3c → 3d → 3e → 3f → 3g
   ↓ 首个完整用户可见闭环
 M7.4a → 4b → 4c → 4d → 4e → 4f → 4g → 4h
 路径投影   消息投影   压缩投影   Token   基础切点   工具切点   阈值策略   Resume 接入
+  ↓ 已完成；先处理用户可见的 CLI 与上下文边界
+M7.C1 → C2 → C3 → C4 → C5
+隐藏思考/状态图   展示隔离   状态/上下文   工具摘要   停止软约束
   ↓
 M7.5a → 5b → 5c → 5d → 5e → 5f
 序列化   摘要调用   压缩计划   生成结果   事务提交   手动命令
   ↓ 先把手动事务做对
 M7.6a → 6b → 6c → 6d → 6e
 Turn Hook   Prompt 前检查   工具轮检查   错误语义   离线端到端
-  ↓ 再启用自动压缩
+  ↓ 再扩展会话导航与终端输入
+M7.D1 → D2
+会话列表/恢复   历史输入/中断
+  ↓
 M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.4a`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.C1`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

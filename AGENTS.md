@@ -256,6 +256,7 @@ turn_end / agent_end(reason: completed | step_limit | error)
 
 - Loop 不做渲染、不读 stdin
 - CLI 不参与决策、不直接调用 Tool
+- M7.C 起 CLI 默认只显示 thinking 状态图标，不显示 raw `thinking_delta`；图标、spinner、token 文案、Session 路径不进入模型消息或 JSONL message。DeepSeek `reasoning_content` 按 Provider 协议保留回放，不为隐藏终端内容改写持久化历史
 - `on_event` 为可选参数，测试时传 None 或列表收集器
 - `on_message_commit` 仅在完整 system / user / assistant / tool 消息上触发；回调成功后才追加内存历史，失败直接冒泡；tool 改动文件随已提交的 ToolMessage 记录
 
@@ -530,8 +531,8 @@ type:   message | compaction
 
 - 追加即以当前 leaf 为 parent，再前移 leaf
 - M7.3b 创建模式由 `AgentSession` 装配 Agent 与 JsonlSession；完整消息先写 JSONL 再进内存，entry 记录 provider、model、stepCount，工具改动由 `ToolMessage.modified_files` 承载；旧 M7.1 entry 可缺少 stepCount
-- M7.3c 基础回放只沿指定 leaf 的 parent 链读取消息；旧 entry 缺少 stepCount 时按 assistant 数推导，活动路径含 compaction 时明确拒绝并等待 M7.4 投影
-- M7.3d `AgentSession.resume()` 恢复活动分支并沿原 leaf 追加；默认凭据仅从环境变量或用户认证文件解析，Key 不进入 Session；CLI 尚未接线
+- M7.3c 基础回放只沿指定 leaf 的 parent 链读取消息；旧 entry 缺少 stepCount 时按 assistant 数推导；M7.4 已用统一投影支持活动路径中的 compaction
+- M7.3d `AgentSession.resume()` 恢复活动分支并沿原 leaf 追加；默认凭据仅从环境变量或用户认证文件解析，Key 不进入 Session；CLI 已通过 M7.3f 接入 `--resume` / `--continue`
 - fork 留到后续
 
 M7 的详细设计、子里程碑与验收标准见 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)。
