@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import typer
@@ -204,6 +205,10 @@ def cli(
             console.print(f"Session storage: {agent.path.parent}", soft_wrap=True)
         try:
             agent.run(prompt)
+        except MiniPiError as exc:
+            # 一次性任务失败以非零码退出，避免把可预期错误伪装成成功
+            Console(stderr=True).print(f"error: {exc}", style="red", soft_wrap=True)
+            raise typer.Exit(code=1) from exc
         finally:
             if isinstance(agent, AgentSession):
                 console.print(f"Session path: {agent.path}", soft_wrap=True)
@@ -224,6 +229,13 @@ def cli(
             line = input("mini-pi> ")
         except (EOFError, KeyboardInterrupt):
             break
+        except UnicodeDecodeError as exc:
+            # 终端字节不是有效 UTF-8：拒绝并提示，避免代理项污染 Session
+            console.print(
+                f"invalid input encoding: {exc}; check terminal encoding (LANG/LC_CTYPE)",
+                style="red",
+            )
+            continue
         stripped = line.strip()
         if stripped in {"/exit", "/quit"}:
             break
@@ -310,5 +322,26 @@ def cli(
         console.print(f"Session path: {agent.path}", soft_wrap=True)
 
 
+def _force_utf8(stream: object, *, errors: str) -> None:
+    """把文本流重配为 UTF-8，使 stdio 不依赖进程 locale。"""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is None:
+        # 测试捕获流或管道可能不支持重配，保持现状
+        return
+    try:
+        reconfigure(encoding="utf-8", errors=errors)
+    except (ValueError, OSError):
+        # 已开始读写的流无法重配时退化为现状；业务错误不受影响
+        return
+
+
+def _configure_stdio() -> None:
+    """入口统一 stdio 编码：输入严格校验，输出转义保证展示不中断。"""
+    _force_utf8(sys.stdin, errors="strict")
+    _force_utf8(sys.stdout, errors="backslashreplace")
+    _force_utf8(sys.stderr, errors="backslashreplace")
+
+
 def main() -> None:
+    _configure_stdio()
     app()

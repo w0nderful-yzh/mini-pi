@@ -286,3 +286,22 @@ def test_compaction_first_kept_entry_must_be_on_current_branch(tmp_path: Path) -
             tokens_before=10,
             system_message=SystemMessage(content="system"),
         )
+
+
+def test_append_rejects_unpaired_surrogate_without_mutating_state(
+    tmp_path: Path, sessions_root: Path
+) -> None:
+    """终端送来非 UTF-8 字节会解出孤立代理项，必须在落盘前明确失败。"""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    session = create_session(workspace, sessions_root)
+    bad_text = b"\xe5".decode("utf-8", "surrogateescape")
+
+    with pytest.raises(SessionError, match="surrogate"):
+        session.append_message(
+            UserMessage(content=bad_text), provider="deepseek", model="deepseek-chat"
+        )
+
+    assert session.entries == ()
+    assert session.leaf_id is None
+    assert len(session.path.read_text(encoding="utf-8").splitlines()) == 1

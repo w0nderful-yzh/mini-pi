@@ -6,9 +6,9 @@ import pytest
 from typer.testing import CliRunner
 
 from mini_pi.auth import ConnectionPreference
-from mini_pi.cli.app import app, create_llm
+from mini_pi.cli.app import _force_utf8, app, create_llm
 from mini_pi.errors import LLMError, MiniPiError
-from tests.conftest import FakeLLMClient
+from tests.conftest import FakeLLMClient, assistant
 
 runner = CliRunner()
 
@@ -200,3 +200,51 @@ def test_repl_survives_unexpected_error(monkeypatch: pytest.MonkeyPatch, tmp_pat
     result = runner.invoke(app, ["--cwd", str(tmp_path)], input="do something\n/exit\n")
     assert result.exit_code == 0
     assert "unexpected error" in result.output
+
+
+def test_force_utf8_overrides_locale_encoding() -> None:
+    """stdio 编码不应由 locale 决定：ascii 流重配后仍可写中文。"""
+    import io
+
+    stream = io.TextIOWrapper(io.BytesIO(), encoding="ascii", errors="strict")
+    _force_utf8(stream, errors="strict")
+    assert stream.encoding.lower() == "utf-8"
+    stream.write("你好")
+    stream.flush()
+
+
+def test_repl_reports_invalid_input_encoding(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """输入字节不是 UTF-8 时给出可执行提示，而不是抛序列化异常。"""
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: None)
+    calls = {"count": 0}
+
+    def fake_input(prompt: str = "") -> str:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise UnicodeDecodeError("utf-8", b"\xe5", 0, 1, "invalid start byte")
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", fake_input)
+    result = runner.invoke(app, ["--cwd", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "invalid input" in result.output
+    assert calls["count"] == 2
+
+
+def test_one_shot_rejects_surrogate_task(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """argv 中的非法 UTF-8 文本以退出码 1 报错，而不是抛序列化异常。"""
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: "sk-test")
+    monkeypatch.setattr(
+        "mini_pi.cli.app.create_llm",
+        lambda provider, model=None, **kwargs: FakeLLMClient([assistant("ok")]),
+    )
+    surrogate_task = b"\xe5".decode("utf-8", "surrogateescape")
+    result = runner.invoke(
+        app, ["--provider", "openai", surrogate_task, "--cwd", str(tmp_path)]
+    )
+    assert result.exit_code == 1
+    assert "surrogate" in result.output

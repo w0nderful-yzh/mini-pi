@@ -18,6 +18,24 @@ from mini_pi.session.models import CompactionEntry, MessageEntry, SessionEntry, 
 _ENTRY_ADAPTER = TypeAdapter(SessionEntry)
 
 
+def _ensure_utf8_text(value: object, *, where: str) -> None:
+    """拒绝孤立代理项：它们无法编码为 UTF-8，必须在写盘前明确失败。"""
+    if isinstance(value, str):
+        if any(0xD800 <= ord(char) <= 0xDFFF for char in value):
+            raise SessionError(
+                f"{where} contains unpaired surrogate characters; "
+                "the text is not valid UTF-8 (check terminal encoding / LANG)"
+            )
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            _ensure_utf8_text(item, where=where)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _ensure_utf8_text(item, where=where)
+
+
 @dataclass(frozen=True, slots=True)
 class SessionReplay:
     """一条活动分支的基础消息状态与最后使用的模型。"""
@@ -106,6 +124,7 @@ class JsonlSession:
         timestamp = now.strftime("%Y%m%dT%H%M%S.%fZ")
         path = directory / f"{timestamp}_{header.id}.jsonl"
         session = cls(path=path, header=header, entries=[])
+        _ensure_utf8_text(header.model_dump(), where="session header")
         try:
             session._write_new_file(header.model_dump_json(by_alias=True))
         except OSError as exc:
@@ -339,6 +358,7 @@ class JsonlSession:
             raise SessionError(
                 f"entry parentId {entry.parent_id} does not match current leaf {self._leaf_id}"
             )
+        _ensure_utf8_text(entry.model_dump(), where="session entry")
         try:
             self._append_line(entry.model_dump_json(by_alias=True))
         except OSError as exc:
