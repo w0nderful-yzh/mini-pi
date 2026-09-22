@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1、M7.2a-M7.2c 已完成，下一任务为 M7.2d。
+> 状态：实施中；M7.1、M7.2a-M7.2d 已完成，下一任务为 M7.2e。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -176,7 +176,7 @@ tools
 project_context
 ```
 
-`SystemMessage` 的载荷严格三选一：Phase 1 的 opaque `content`、完整 `sections` 快照、或 `section_patch` 操作列表。Patch 中 `set` 必须携带文本，`delete` 不携带 content 并作为显式 tombstone；同一 patch 不允许重复 section id。发给 Provider 前重放完整快照与 patch，折叠为一条完整 system message。
+`SystemMessage` 的载荷严格三选一：Phase 1 的 opaque `content`、完整 `sections` 快照、或 `section_patch` 操作列表。Patch 中 `set` 必须携带文本，`delete` 不携带 content 并作为显式 tombstone；同一 patch 不允许重复 section id。Provider 请求前重放全部 system 消息，按固定 section 顺序渲染为请求首部唯一一条完整 system message；无 system 历史时不添加。
 
 收益：
 
@@ -336,14 +336,18 @@ M7.2 之后不再按整个子里程碑一次实现，默认以一个任务编号
 
 验收：专项 11 passed；LLM/Session 兼容回归 20 passed；全量 `205 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.2d：Provider 折叠为唯一 System Prompt
+#### M7.2d：Provider 折叠为唯一 System Prompt（已完成）
 
-- [ ] OpenAI / DeepSeek wire 层在请求前 replay 所有 `SystemMessage`，只发送一个完整 system prompt。
-- Provider-specific 差异仍留在各自 Client；Agent 与 Context 不感知请求体差异。
-- 针对性测试断言：快照、patch、删除混合历史最终只产生一个确定 system message。
-- 不做：加载 `AGENTS.md`、写 Session。
+提交：本任务提交（`feat: 折叠 Provider System Prompt`）。
 
-验收命令：`uv run pytest tests/llm -q`。
+交付物：
+
+- `context/sections.py` 统一渲染完整 section 状态；`agent/prompt.py` 保留原导出，避免 LLM → Agent 反向依赖。
+- OpenAI 与 DeepSeek 共用 wire 转换：请求首部最多一条 system 消息，历史快照、patch 与删除均先 replay；其他角色保持原顺序。
+- 旧版多条 `content` 取最后完整快照；非法 patch 在请求前失败；DeepSeek 的 `reasoning_content` 回放保持不变。
+- 明确未做：`AGENTS.md` 注入、Agent prompt refresh、Session 持久化。
+
+验收：Provider 专项 6 passed；`uv run pytest tests/llm -q` 10 passed；全量 `211 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.2e：Agent 注入并刷新项目规则
 
@@ -737,4 +741,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.2d`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.2e`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

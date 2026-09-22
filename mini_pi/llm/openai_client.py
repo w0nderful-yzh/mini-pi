@@ -11,6 +11,7 @@ from typing import Any
 import openai
 from openai import APIStatusError, OpenAI
 
+from mini_pi.context.sections import render_system_prompt, replay_system_messages
 from mini_pi.errors import LLMError, MiniPiError
 from mini_pi.llm.base import BaseLLMClient
 from mini_pi.llm.types import (
@@ -47,9 +48,13 @@ def to_openai_messages(
 ) -> list[dict[str, Any]]:
     """transcript 转 OpenAI wire 格式；DeepSeek 需要 include_reasoning=True。"""
     wire: list[dict[str, Any]] = []
+    system_messages = [message for message in messages if isinstance(message, SystemMessage)]
+    system_state = replay_system_messages(system_messages)
+    if system_state is not None:
+        wire.append({"role": "system", "content": render_system_prompt(system_state)})
     for message in messages:
         if isinstance(message, SystemMessage):
-            wire.append({"role": "system", "content": message.content})
+            continue
         elif isinstance(message, UserMessage):
             wire.append({"role": "user", "content": message.content})
         elif isinstance(message, AssistantMessage):

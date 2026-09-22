@@ -14,6 +14,36 @@ from mini_pi.llm.types import (
 
 SectionMapping = Mapping[SystemPromptSectionId, str]
 _VALID_SECTION_IDS = frozenset(SYSTEM_PROMPT_SECTION_IDS)
+_SECTION_TITLES: dict[SystemPromptSectionId, str | None] = {
+    "preamble": None,
+    "environment": "Environment",
+    "rules": "Working rules",
+    "tools": "Tools",
+    "project_context": "Project Context",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class PromptSection:
+    """一段可独立识别且顺序稳定的 system prompt 内容。"""
+
+    id: SystemPromptSectionId
+    content: str
+
+
+def render_sections(sections: Sequence[PromptSection]) -> str:
+    """用统一标题边界渲染 sections，保留既有 prompt 文本格式。"""
+    blocks: list[str] = []
+    for section in sections:
+        title = _SECTION_TITLES[section.id]
+        if title is None:
+            blocks.append(section.content)
+        else:
+            # 空 section 仍保留标题，确保工具为空时与旧 prompt 字节级兼容。
+            blocks.append(f"# {title}\n{section.content}")
+    if not blocks:
+        return ""
+    return "\n\n".join(blocks) + "\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +57,22 @@ class SystemPromptState:
         """回放结果必须且只能表示一种完整 prompt 形态。"""
         if (self.content is None) == (self.sections is None):
             raise ValueError("system prompt state requires exactly one payload")
+
+
+def render_system_prompt(state: SystemPromptState) -> str:
+    """把回放后的完整状态渲染为 Provider 唯一 system prompt。"""
+    if state.content is not None:
+        return state.content
+    if state.sections is None:
+        raise ValueError("system prompt state has no sections")
+    # 按协议固定顺序渲染，不依赖快照或 patch 的字典插入顺序。
+    return render_sections(
+        tuple(
+            PromptSection(id=section_id, content=state.sections[section_id])
+            for section_id in SYSTEM_PROMPT_SECTION_IDS
+            if section_id in state.sections
+        )
+    )
 
 
 def diff_sections(
