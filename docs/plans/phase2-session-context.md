@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4b 已完成，下一任务为 M7.4c。
+> 状态：实施中；M7.1-M7.4c 已完成，下一任务为 M7.4d。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -485,14 +485,19 @@ M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 →
 
 验收：专项 `uv run pytest tests/context/test_projection_messages.py -q` → 11 passed；全量 `299 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.4c：Compaction Entry 投影
+#### M7.4c：Compaction Entry 投影（已完成）
 
-- [ ] 选择活动路径上最新 compaction，投影为 system snapshot + summary + kept messages。
-- 重复 compaction 只使用最新有效投影；切点必须属于该 compaction 的祖先路径。
-- 针对性测试覆盖：无 compaction、一次、连续两次、旧分支 compaction 与非法切点。
-- 不做：生成摘要、自动触发。
+提交：本任务提交（`feat: 增加 Compaction Entry 投影`）。
 
-验收命令：`uv run pytest tests/context/test_projection_compaction.py -q`。
+交付物：
+
+- `context/projection.py` 新增 `project_compaction(entries)` → `CompactionProjection | None`：取活动路径最新 compaction，产出 `system_prompt` 快照 + user 级 `<compacted-conversation-summary>` 摘要 + `kept_messages`，`messages` 属性按 system → 摘要 → 保留消息组装。
+- 重复压缩只认最新一条；更早快照/摘要被吸收，兄弟分支 compaction 不参与。
+- 切点校验：必须在活动路径、必须指向 message entry、必须严格位于 compaction 之前；保留区间再做一次工具配对校验。
+- compaction 之后的 system patch 续接快照，摘要不提升为 system 权限。
+- 明确未做：生成摘要、自动触发、运行时接线。
+
+验收：专项 `uv run pytest tests/context/test_projection_compaction.py -q` → 9 passed；全量 `308 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.4d：Token 估算
 

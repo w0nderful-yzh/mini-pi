@@ -9,7 +9,13 @@ from uuid import UUID
 
 from mini_pi.context.sections import SystemPromptState, replay_system_messages
 from mini_pi.errors import SessionError
-from mini_pi.llm.types import AssistantMessage, Message, SystemMessage, ToolMessage
+from mini_pi.llm.types import (
+    AssistantMessage,
+    Message,
+    SystemMessage,
+    ToolMessage,
+    UserMessage,
+)
 
 if TYPE_CHECKING:
     # 仅用于类型标注：运行时导入会触发 session 包与 jsonl 的循环依赖。
@@ -124,3 +130,98 @@ def _validate_tool_pairs(messages: Sequence[Message]) -> None:
 def _sorted(ids: set[str]) -> list[str]:
     """错误信息按 id 排序，保证测试与日志稳定。"""
     return sorted(ids)
+
+
+# 摘要以显式标签包装为 user 级上下文，避免被模型当作 system 指令
+SUMMARY_TAG = "compacted-conversation-summary"
+
+
+@dataclass(frozen=True, slots=True)
+class CompactionProjection:
+    """活动路径上最近一次 compaction 生效后的上下文投影。"""
+
+    system_prompt: SystemPromptState
+    summary_message: UserMessage
+    kept_messages: tuple[Message, ...]
+
+    @property
+    def messages(self) -> tuple[Message, ...]:
+        """system 快照 → 摘要 → 保留消息，顺序可直接替换 AgentState.messages。"""
+        return (
+            _system_message_from_state(self.system_prompt),
+            self.summary_message,
+            *self.kept_messages,
+        )
+
+
+def project_compaction(entries: Iterable[SessionEntry]) -> CompactionProjection | None:
+    """用活动路径上最新的 compaction 投影上下文；没有任何 compaction 返回 None。
+
+    - 重复压缩只认最新一条：更早的快照/摘要已被其吸收
+    - firstKeptEntryId 必须落在活动路径且严格位于该 compaction 之前
+    - 摘要保持 user 级；compaction 之后的 system patch 续接快照
+    """
+    # 运行时导入避免 session 包初始化期间与 jsonl 形成循环依赖
+    from mini_pi.session.models import CompactionEntry, MessageEntry
+
+    path = list(entries)
+    index = _index_entries(path)
+    positions: dict[UUID, int] = {}
+    latest: tuple[int, CompactionEntry] | None = None
+    for position, entry in enumerate(path):
+        positions[entry.id] = position
+        if isinstance(entry, CompactionEntry):
+            latest = (position, entry)
+    if latest is None:
+        return None
+    compaction_at, compaction = latest
+
+    cut_id = compaction.first_kept_entry_id
+    cut_at = positions.get(cut_id)
+    cut_entry = index.get(cut_id)
+    if cut_at is None or cut_entry is None:
+        raise SessionError(f"compaction firstKeptEntryId is not on the active path: {cut_id}")
+    if not isinstance(cut_entry, MessageEntry):
+        raise SessionError(
+            f"compaction firstKeptEntryId must reference a message entry: {cut_id}"
+        )
+    if cut_at >= compaction_at:
+        raise SessionError(f"compaction firstKeptEntryId must precede the compaction: {cut_id}")
+
+    kept_messages: list[Message] = []
+    trailing_system: list[SystemMessage] = []
+    for position in range(cut_at, len(path)):
+        entry = path[position]
+        if isinstance(entry, CompactionEntry):
+            continue
+        if isinstance(entry.message, SystemMessage):
+            # 切点与 compaction 之间的 system 已进入快照；之后的 patch 才续接
+            if position > compaction_at:
+                trailing_system.append(entry.message)
+            continue
+        kept_messages.append(entry.message)
+
+    _validate_tool_pairs(kept_messages)
+    try:
+        state = replay_system_messages([compaction.system_message, *trailing_system])
+    except ValueError as exc:
+        raise SessionError(f"invalid system prompt history: {exc}") from exc
+    if state is None:
+        # compaction.system_message 必有载荷，走到这里说明模型协议被破坏
+        raise SessionError("compaction entry has no system snapshot")
+
+    summary = compaction.summary
+    return CompactionProjection(
+        system_prompt=state,
+        summary_message=UserMessage(content=f"<{SUMMARY_TAG}>\n{summary}\n</{SUMMARY_TAG}>"),
+        kept_messages=tuple(kept_messages),
+    )
+
+
+def _system_message_from_state(state: SystemPromptState) -> SystemMessage:
+    """把回放后的 system 状态还原为唯一可折叠的 system message。"""
+    if state.content is not None:
+        return SystemMessage(content=state.content)
+    if state.sections is None:
+        raise SessionError("system prompt state has no payload")
+    return SystemMessage(sections=state.sections)
