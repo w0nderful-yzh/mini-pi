@@ -91,7 +91,7 @@ def test_connect_saves_verified_key(monkeypatch: pytest.MonkeyPatch, tmp_path: P
     )
     result = runner.invoke(app, ["--cwd", str(tmp_path), "--no-session"], input="/connect\n/exit\n")
     assert result.exit_code == 0
-    assert saved == [("deepseek", "sk-test", "deepseek-chat")]
+    assert saved == [("deepseek", "sk-test", "deepseek-flash")]
     assert "saved to" in result.output
 
 

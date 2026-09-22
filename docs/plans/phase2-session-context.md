@@ -125,7 +125,7 @@ mini_pi/
 第一行 header：
 
 ```json
-{"type":"session","version":1,"id":"uuid","timestamp":"ISO-8601","cwd":"/abs/workspace","provider":"deepseek","model":"deepseek-chat"}
+{"type":"session","version":1,"id":"uuid","timestamp":"ISO-8601","cwd":"/abs/workspace","provider":"deepseek","model":"deepseek-flash"}
 ```
 
 后续 entry 只支持两种：
@@ -546,7 +546,7 @@ M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 →
 交付物：
 
 - 新增 `context/policy.py`：`ContextPolicy(context_window, reserve_tokens)`（含 `threshold_tokens`），窗口/reserve 非法直接报错。
-- `KNOWN_CONTEXT_WINDOWS` 内置显式表（gpt-4o / gpt-4o-mini / deepseek-chat / deepseek-reasoner）；`resolve_policy()` 用户显式窗口优先，未知模型返回 None（关闭自动压缩）。
+- `KNOWN_CONTEXT_WINDOWS` 内置显式表（deepseek-flash / deepseek-v4-pro / gpt-6-astra / gpt-5.6-sol|terra|luna，来源 2026-09 官方文档，均为 1M 级）；`resolve_policy()` 用户显式窗口优先，未知模型返回 None（关闭自动压缩）。
 - `evaluate_compaction(estimate, policy=...)` 纯函数返回 `CompactionDecision(status ∈ {not_needed, needed, unknown}, reason, source)`；严格大于阈值才触发，决策携带估算来源。
 - 明确未做：自动调用 compact、CLI 接线、启动信息渲染。
 

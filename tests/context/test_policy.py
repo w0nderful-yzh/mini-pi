@@ -16,17 +16,17 @@ from mini_pi.context.tokens import TokenEstimate
 
 def test_known_model_uses_builtin_window() -> None:
     """内置表给出显式 context window 与默认 reserve。"""
-    policy = resolve_policy("gpt-4o-mini")
+    policy = resolve_policy("deepseek-flash")
 
-    assert policy == ContextPolicy(context_window=128_000, reserve_tokens=DEFAULT_RESERVE_TOKENS)
+    assert policy == ContextPolicy(context_window=1_000_000, reserve_tokens=DEFAULT_RESERVE_TOKENS)
     assert policy is not None
-    assert policy.threshold_tokens == 128_000 - DEFAULT_RESERVE_TOKENS
+    assert policy.threshold_tokens == 1_000_000 - DEFAULT_RESERVE_TOKENS
 
 
 def test_known_windows_are_explicit_constants() -> None:
     """内置窗口是明确常量，不做静默猜测。"""
-    assert KNOWN_CONTEXT_WINDOWS["gpt-4o-mini"] == 128_000
-    assert KNOWN_CONTEXT_WINDOWS["deepseek-chat"] == 65_536
+    assert KNOWN_CONTEXT_WINDOWS["deepseek-v4-pro"] == 1_000_000
+    assert KNOWN_CONTEXT_WINDOWS["gpt-5.6-terra"] == 1_050_000
 
 
 def test_unknown_model_without_override_is_disabled() -> None:

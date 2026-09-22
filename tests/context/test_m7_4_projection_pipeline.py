@@ -23,7 +23,7 @@ from mini_pi.llm.types import (
 from mini_pi.session.jsonl import JsonlSession
 
 ProviderModel = tuple[str, str]
-_DEFAULT_CONNECTION: ProviderModel = ("deepseek", "deepseek-chat")
+_DEFAULT_CONNECTION: ProviderModel = ("deepseek", "deepseek-flash")
 
 
 def create_session(tmp_path: Path) -> JsonlSession:
@@ -121,7 +121,7 @@ def build_repeated_compaction(tmp_path: Path) -> JsonlSession:
 def verify_no_usage(session: JsonlSession) -> None:
     """无 usage：全部按字符规则估算，来源不得伪装成 provider。"""
     estimate = estimate_tokens(projected(session))
-    decision = evaluate_compaction(estimate, policy=resolve_policy("deepseek-chat"))
+    decision = evaluate_compaction(estimate, policy=resolve_policy("deepseek-flash"))
     assert estimate.source == "estimated"
     assert decision.source == "estimated"
     assert decision.status in {"not_needed", "needed"}

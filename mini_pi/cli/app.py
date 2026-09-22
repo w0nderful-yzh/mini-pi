@@ -30,7 +30,7 @@ from mini_pi.workspace.workspace import Workspace
 app = typer.Typer(add_completion=False, help="mini-pi: a lightweight Python coding agent")
 
 PROVIDERS: tuple[str, ...] = ("openai", "deepseek")
-DEFAULT_MODELS = {"openai": "gpt-4o-mini", "deepseek": "deepseek-chat"}
+DEFAULT_MODELS = {"openai": "gpt-5.6-terra", "deepseek": "deepseek-flash"}
 API_KEY_ENV = {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
 
 

@@ -113,9 +113,9 @@ def test_connect_switches_model_on_same_chain_without_persisting_key(
         provider: str, model: str | None = None, *, api_key: str | None = None
     ) -> FakeLLMClient:
         if api_key is None:
-            assert (provider, model) == ("openai", "gpt-4o-mini")
+            assert (provider, model) == ("openai", "gpt-5.6-terra")
             return old_llm
-        assert (provider, model, api_key) == ("deepseek", "deepseek-chat", secret)
+        assert (provider, model, api_key) == ("deepseek", "deepseek-flash", secret)
         return new_llm
 
     monkeypatch.setattr("mini_pi.cli.app.create_llm", make_llm)
@@ -138,10 +138,10 @@ def test_connect_switches_model_on_same_chain_without_persisting_key(
     session = JsonlSession.load(files[0])
     assert user_contents(session) == ["first", "second"]
     assert [(entry.provider, entry.model) for entry in session.entries[:3]] == [
-        ("openai", "gpt-4o-mini")
+        ("openai", "gpt-5.6-terra")
     ] * 3
     assert all(
-        (entry.provider, entry.model) == ("deepseek", "deepseek-chat")
+        (entry.provider, entry.model) == ("deepseek", "deepseek-flash")
         for entry in session.entries[3:]
     )
     assert any(
@@ -246,8 +246,8 @@ def test_connect_then_new_uses_switched_model_in_new_header(
     assert len(sessions) == 2
     old = next(session for session in sessions if not session.entries)
     new = next(session for session in sessions if session.entries)
-    assert (old.header.provider, old.header.model) == ("openai", "gpt-4o-mini")
-    assert (new.header.provider, new.header.model) == ("deepseek", "deepseek-chat")
+    assert (old.header.provider, old.header.model) == ("openai", "gpt-5.6-terra")
+    assert (new.header.provider, new.header.model) == ("deepseek", "deepseek-flash")
 
 
 def test_m73_cross_process_resume_continues_original_parent_chain(

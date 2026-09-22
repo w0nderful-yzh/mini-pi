@@ -10,12 +10,16 @@ from mini_pi.context.tokens import TokenEstimate, TokenSource
 # 默认为输出留出的 reserve；可在创建 ContextPolicy 时覆盖
 DEFAULT_RESERVE_TOKENS = 8_192
 
-# 已知模型的显式上下文窗口；未知模型不猜值，必须由用户传入 context_window
+# 已知模型的显式上下文窗口；来源为 2026-09 官方文档，未知模型不猜值，
+# 必须由用户传入 context_window（如 deepseek-flash / gpt-5.6-* 均为 1M 级）。
 KNOWN_CONTEXT_WINDOWS: dict[str, int] = {
-    "gpt-4o": 128_000,
-    "gpt-4o-mini": 128_000,
-    "deepseek-chat": 65_536,
-    "deepseek-reasoner": 65_536,
+    "deepseek-flash": 1_000_000,
+    "deepseek-v4-pro": 1_000_000,
+    "gpt-6-astra": 1_050_000,
+    "gpt-5.6-sol": 1_050_000,
+    "gpt-5.6": 1_050_000,  # gpt-5.6-sol 的官方别名
+    "gpt-5.6-terra": 1_050_000,
+    "gpt-5.6-luna": 1_050_000,
 }
 
 CompactionStatus = Literal["not_needed", "needed", "unknown"]

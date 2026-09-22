@@ -23,7 +23,7 @@ pytestmark = pytest.mark.integration
 def test_openai_complete() -> None:
     """真实调用 OpenAI，验证流式聚合与基础对话可用。"""
     client = OpenAIClient(
-        model=os.environ.get("MINI_PI_OPENAI_MODEL", "gpt-4o-mini"),
+        model=os.environ.get("MINI_PI_OPENAI_MODEL", "gpt-5.6-terra"),
         api_key=resolve_api_key("openai", env_var="OPENAI_API_KEY"),
     )
     message = client.complete([UserMessage(content="Reply with exactly: ok")])
@@ -34,7 +34,7 @@ def test_openai_complete() -> None:
 def test_deepseek_complete() -> None:
     """真实调用 DeepSeek，验证 base_url 与 reasoning 回放不影响普通对话。"""
     client = DeepSeekClient(
-        model=os.environ.get("MINI_PI_DEEPSEEK_MODEL", "deepseek-chat"),
+        model=os.environ.get("MINI_PI_DEEPSEEK_MODEL", "deepseek-flash"),
         api_key=resolve_api_key("deepseek", env_var="DEEPSEEK_API_KEY"),
     )
     message = client.complete([UserMessage(content="Reply with exactly: ok")])

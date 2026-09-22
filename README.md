@@ -305,7 +305,7 @@ symlink 指向外部     → 报错
 ```bash
 mini-pi "修复某个 bug"          # 一次性执行
 mini-pi                         # 交互式 REPL，默认创建 JSONL Session
-mini-pi --provider deepseek --model deepseek-chat
+mini-pi --provider deepseek --model deepseek-flash
 mini-pi --no-session            # 保留纯内存模式（/connect /reset /exit）
 mini-pi --resume <session.jsonl> # 恢复指定会话
 mini-pi --continue              # 继续当前 workspace 最近的会话
