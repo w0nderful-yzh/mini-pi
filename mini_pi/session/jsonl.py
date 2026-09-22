@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -11,10 +12,21 @@ from uuid import UUID, uuid4
 from pydantic import TypeAdapter, ValidationError
 
 from mini_pi.errors import SessionError
-from mini_pi.llm.types import Message, SystemMessage, Usage
+from mini_pi.llm.types import AssistantMessage, Message, SystemMessage, ToolMessage, Usage
 from mini_pi.session.models import CompactionEntry, MessageEntry, SessionEntry, SessionHeader
 
 _ENTRY_ADAPTER = TypeAdapter(SessionEntry)
+
+
+@dataclass(frozen=True, slots=True)
+class SessionReplay:
+    """一条活动分支的基础消息状态与最后使用的模型。"""
+
+    messages: tuple[Message, ...]
+    step_count: int
+    modified_files: frozenset[str]
+    provider: str
+    model: str
 
 
 def _resolved_workspace(cwd: str | Path, *, require_directory: bool) -> Path:
@@ -214,6 +226,51 @@ class JsonlSession:
     def leaf_id(self) -> UUID | None:
         """当前路径 leaf；空 Session 为 None。"""
         return self._leaf_id
+
+    def active_entries(self, *, leaf_id: UUID | None = None) -> tuple[SessionEntry, ...]:
+        """从指定或当前 leaf 沿 parent 回溯，返回根到 leaf 的独立副本。"""
+        current_id = self._leaf_id if leaf_id is None else leaf_id
+        path: list[SessionEntry] = []
+        seen: set[UUID] = set()
+        while current_id is not None:
+            if current_id in seen:
+                raise SessionError(f"cycle in session parent chain: {current_id}")
+            seen.add(current_id)
+            entry = self._by_id.get(current_id)
+            if entry is None:
+                raise SessionError(f"unknown leaf or parentId in session: {current_id}")
+            path.append(entry)
+            current_id = entry.parent_id
+        # SessionEntry 的 message 可变；深拷贝避免调用方改写内部索引中的事实。
+        return tuple(entry.model_copy(deep=True) for entry in reversed(path))
+
+    def replay(self, *, leaf_id: UUID | None = None) -> SessionReplay:
+        """仅从消息 entry 恢复基础状态；compaction 留给 M7.4 投影。"""
+        messages: list[Message] = []
+        modified_files: set[str] = set()
+        step_count = 0
+        provider = self._header.provider
+        model = self._header.model
+        for entry in self.active_entries(leaf_id=leaf_id):
+            if isinstance(entry, CompactionEntry):
+                raise SessionError("compaction entry requires M7.4 projection")
+            message = entry.message
+            messages.append(message)
+            provider, model = entry.provider, entry.model
+            if entry.step_count is not None:
+                step_count = entry.step_count
+            elif isinstance(message, AssistantMessage):
+                # M7.1 旧记录没有 stepCount；每条完整 assistant 对应一次 Loop 步骤。
+                step_count += 1
+            if isinstance(message, ToolMessage):
+                modified_files.update(message.modified_files)
+        return SessionReplay(
+            messages=tuple(messages),
+            step_count=step_count,
+            modified_files=frozenset(modified_files),
+            provider=provider,
+            model=model,
+        )
 
     def append_message(
         self,

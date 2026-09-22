@@ -530,6 +530,7 @@ type:   message | compaction
 
 - 追加即以当前 leaf 为 parent，再前移 leaf
 - M7.3b 创建模式由 `AgentSession` 装配 Agent 与 JsonlSession；完整消息先写 JSONL 再进内存，entry 记录 provider、model、stepCount，工具改动由 `ToolMessage.modified_files` 承载；旧 M7.1 entry 可缺少 stepCount
+- M7.3c 基础回放只沿指定 leaf 的 parent 链读取消息；旧 entry 缺少 stepCount 时按 assistant 数推导，活动路径含 compaction 时明确拒绝并等待 M7.4 投影
 - resume = 读取 entries + 沿 parentId 回放
 - fork 留到后续
 
