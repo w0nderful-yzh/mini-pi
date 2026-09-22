@@ -1,4 +1,4 @@
-"""AgentSession 创建模式：装配 Agent 与追加式 JSONL Session。"""
+"""AgentSession：装配 Agent 与追加式 JSONL Session 的创建和恢复模式。"""
 
 from __future__ import annotations
 
@@ -8,14 +8,38 @@ from pathlib import Path
 from mini_pi.agent.agent import Agent
 from mini_pi.agent.events import AgentEvent
 from mini_pi.agent.state import AgentState
+from mini_pi.auth import resolve_api_key
+from mini_pi.errors import MiniPiError, SessionError
 from mini_pi.llm.base import LLMClient
+from mini_pi.llm.deepseek_client import DeepSeekClient
+from mini_pi.llm.openai_client import OpenAIClient
 from mini_pi.llm.types import AssistantMessage, Message
 from mini_pi.session.jsonl import JsonlSession
 from mini_pi.tools.registry import ToolRegistry
 
+LLMFactory = Callable[[str, str], LLMClient]
+
+
+def _create_auth_llm(provider: str, model: str) -> LLMClient:
+    """仅从环境变量或用户认证文件解析 Key，构造受支持的 Provider。"""
+    client_type: type[OpenAIClient]
+    if provider == "openai":
+        client_type = OpenAIClient
+    elif provider == "deepseek":
+        client_type = DeepSeekClient
+    else:
+        raise SessionError(f"unsupported session provider: {provider!r}")
+    api_key = resolve_api_key(provider, env_var=client_type.api_key_env)
+    if not api_key:
+        raise MiniPiError(
+            f"{provider} API key is not configured; "
+            f"set {client_type.api_key_env} or use /connect"
+        )
+    return client_type(model=model, api_key=api_key)
+
 
 class AgentSession:
-    """为一次新会话装配 Agent，并将完整消息同步追加到 JSONL。"""
+    """装配 Agent 和 JSONL 会话，创建或恢复后同步提交完整消息。"""
 
     def __init__(
         self,
@@ -25,8 +49,12 @@ class AgentSession:
         registry: ToolRegistry,
         max_steps: int,
         on_event: Callable[[AgentEvent], None] | None,
+        provider: str,
+        model: str,
     ) -> None:
         self._session = session
+        self._provider = provider
+        self._model = model
         self._agent = Agent(
             llm=llm,
             registry=registry,
@@ -64,7 +92,52 @@ class AgentSession:
             registry=registry,
             max_steps=max_steps,
             on_event=on_event,
+            provider=provider,
+            model=model,
         )
+
+    @classmethod
+    def resume(
+        cls,
+        path: str | Path,
+        *,
+        registry: ToolRegistry,
+        cwd: str | Path | None = None,
+        provider: str | None = None,
+        model: str | None = None,
+        llm_factory: LLMFactory | None = None,
+        max_steps: int = 50,
+        on_event: Callable[[AgentEvent], None] | None = None,
+    ) -> AgentSession:
+        """从活动 leaf 恢复状态和模型配置，后续消息沿原 leaf 追加。"""
+        if max_steps <= 0:
+            raise ValueError("max_steps must be > 0")
+        session = JsonlSession.load(path, expected_cwd=cwd)
+        if not session.header.cwd.is_dir():
+            raise SessionError(f"session cwd does not exist: {session.header.cwd}")
+        replay = session.replay()
+        resolved_provider = replay.provider if provider is None else provider
+        resolved_model = replay.model if model is None else model
+        if not resolved_provider.strip() or not resolved_model.strip():
+            raise ValueError("provider and model must not be empty")
+        if resolved_provider not in {"openai", "deepseek"}:
+            raise SessionError(f"unsupported session provider: {resolved_provider!r}")
+        # 真实运行只读认证配置；可注入离线构造函数以验证恢复行为。
+        factory = _create_auth_llm if llm_factory is None else llm_factory
+        llm = factory(resolved_provider, resolved_model)
+        runtime = cls(
+            session=session,
+            llm=llm,
+            registry=registry,
+            max_steps=max_steps,
+            on_event=on_event,
+            provider=resolved_provider,
+            model=resolved_model,
+        )
+        runtime.state.messages.extend(replay.messages)
+        runtime.state.step_count = replay.step_count
+        runtime.state.modified_files.update(replay.modified_files)
+        return runtime
 
     @property
     def path(self) -> Path:
@@ -85,7 +158,7 @@ class AgentSession:
         # system/user 位于下一轮开始前，assistant/tool 位于 Loop 步数递增后。
         self._session.append_message(
             message,
-            provider=self._session.header.provider,
-            model=self._session.header.model,
+            provider=self._provider,
+            model=self._model,
             step_count=self._agent.state.step_count,
         )

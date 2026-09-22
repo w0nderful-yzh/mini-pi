@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1、M7.2、M7.3a-M7.3c 已完成，下一任务为 M7.3d。
+> 状态：实施中；M7.1、M7.2、M7.3a-M7.3d 已完成，下一任务为 M7.3e。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -406,15 +406,18 @@ M7.2 总验收（已完成）：同一段历史重放后 Provider 得到唯一�
 
 验收：`uv run pytest tests/session/test_replay.py -q` → 6 passed；全量 `241 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.3d：Resume 模式 `AgentSession`
+#### M7.3d：Resume 模式 `AgentSession`（已完成）
 
-- [ ] `AgentSession.resume()` 加载 M7.3c 的状态并继续沿原 leaf 追加。
-- session cwd 不存在、显式 cwd 与 header 冲突时 Fail Fast。
-- 未显式覆盖 provider / model 时沿用最后记录值；凭据仍只从认证配置读取。
-- 针对性测试覆盖：跨实例恢复继续提问、leaf 连续、cwd 冲突与缺失凭据。
-- 不做：CLI 参数、compaction-aware resume。
+提交：本任务提交（`feat: 实现 AgentSession 恢复模式`）。
 
-验收命令：`uv run pytest tests/session/test_runtime_resume.py -q`。
+交付物：
+
+- `AgentSession.resume()` 加载 M7.3c 的活动分支状态，恢复消息、累计步骤与改动文件，后续完整消息沿原 leaf 追加。
+- 未覆盖时沿用活动路径最后的 provider/model，显式覆盖只影响新 entry；默认客户端只从环境变量或用户认证文件取 Key，Session 文件不保存凭据；离线测试可注入客户端构造函数。
+- session cwd 丢失、显式 cwd 不符、缺失凭据及 compaction entry 均在运行前显式失败；跨实例工具轮、模型元数据与 leaf 连续性均有测试。
+- 明确未做：CLI 参数、`/new`、compaction-aware resume。
+
+验收：`uv run pytest tests/session/test_runtime_resume.py -q` → 7 passed；全量 `248 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.3e：CLI 默认 Session 与 `--no-session`
 
@@ -754,4 +757,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.3d`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.3e`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

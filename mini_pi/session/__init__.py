@@ -1,4 +1,4 @@
-"""JSONL Session 数据模型、持久化与创建模式运行时。"""
+"""JSONL Session 数据模型、持久化与创建/恢复运行时。"""
 
 from mini_pi.session.jsonl import (
     JsonlSession,
