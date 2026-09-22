@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1、M7.2、M7.3a 已完成，下一任务为 M7.3b。
+> 状态：实施中；M7.1、M7.2、M7.3a-M7.3b 已完成，下一任务为 M7.3c。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -132,7 +132,7 @@ mini_pi/
 
 ```text
 message
-  id / parentId / timestamp / provider / model / message
+  id / parentId / timestamp / provider / model / stepCount / message
 
 compaction
   id / parentId / timestamp
@@ -144,6 +144,7 @@ compaction
 
 - entry append 时成为当前 leaf 的 child，然后推进 leaf。
 - header 的 provider / model 是创建时默认值；每条 message entry 同时记录当时使用的 provider / model，resume 取路径上最后一个值，因此 `/connect` 后的后续消息不会让配置回退。
+- 新建 AgentSession 的每条 message entry 记录提交时累计 `stepCount`；旧 M7.1 文件可缺省该字段，恢复时的兼容推导留给 M7.3c。工具改动文件保存在 `ToolMessage.modified_files`，不另设旁路状态。
 - 创建用独占写；每次 append 写一行、flush、`os.fsync()`。
 - 加载时用 Pydantic 严格校验；未知版本、非法 JSON、重复 id、缺失 parent、cwd 不一致明确报错。
 - 不跳过坏行，不猜测修复，不用空对象兜底。
@@ -379,15 +380,18 @@ M7.2 总验收（已完成）：同一段历史重放后 Provider 得到唯一�
 
 验收：专项 `11 passed`；全量 `230 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.3b：创建模式 `AgentSession`
+#### M7.3b：创建模式 `AgentSession`（已完成）
 
-- [ ] 新增 `session/runtime.py::AgentSession`，只实现 create 与 run。
-- 创建时写 header；运行时把 M7.3a 的提交回调接入 `JsonlSession.append()`。
-- 运行中的 provider、model、step_count 与 modified_files 写入既定 entry 字段，不新增旁路状态文件。
-- 针对性测试覆盖：纯文本轮、工具轮、写盘失败和 parent 链推进。
-- 不做：resume、CLI flags、`/new`。
+提交：本任务提交（`feat: 实现 AgentSession 创建模式`）。
 
-验收命令：`uv run pytest tests/session/test_runtime_create.py -q`。
+交付物：
+
+- `AgentSession.create/run` 装配 Agent 与 JsonlSession；创建时同步写 header，每条完整消息通过 M7.3a 回调同步追加 JSONL 后才进入内存。
+- message entry 记录当前 provider、model 与累计 `stepCount`；旧 M7.1 entry 允许缺省该字段；工具改动仍由 `ToolMessage.modified_files` 记录。
+- 纯文本双轮、工具轮、项目规则 patch、parent 链与写盘失败均有离线测试；失败消息不推进 Session leaf 或 Agent 消息历史。
+- 明确未做：resume、CLI flags、`/new`、compaction。
+
+验收：`uv run pytest tests/session/test_runtime_create.py -q` → 5 passed；全量 `235 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.3c：从活动分支恢复基础状态
 
@@ -747,4 +751,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.3b`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.3c`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

@@ -82,7 +82,7 @@ Python Coding Agent Harness
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
-| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3a 已接入完整消息提交 Hook（先提交再入内存）；Session 接线、恢复与 compaction 仍待后续任务 |
+| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3b 的 `AgentSession.create/run` 已接通同步 JSONL 消息提交；CLI、恢复与 compaction 仍待后续任务 |
 
 ---
 
@@ -165,7 +165,7 @@ Agent Runtime 自己实现。
 
 ## 5. 目录结构
 
-当前实现范围（M1-M6 + M7.1-M7.2 + M7.3a）：
+当前实现范围（M1-M6 + M7.1-M7.2 + M7.3a-M7.3b）：
 
 ```text
 mini-pi/
@@ -214,7 +214,8 @@ mini-pi/
 │   │
 │   ├── session/
 │   │   ├── models.py                 # Header / MessageEntry / CompactionEntry
-│   │   └── jsonl.py                  # create / load / append / leaf / 路径发现
+│   │   ├── jsonl.py                  # create / load / append / leaf / 路径发现
+│   │   └── runtime.py                # AgentSession 创建模式与消息提交
 │   │
 │   ├── context/
 │   │   ├── project.py                # 项目 AGENTS.md 发现与读取
@@ -346,7 +347,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context：JSONL entry 树、AGENTS.md、resume、compaction | 进行中（M7.1、M7.2、M7.3a 已完成） |
+| M7 | Session / Context：JSONL entry 树、AGENTS.md、resume、compaction | 进行中（M7.1、M7.2、M7.3a-M7.3b 已完成） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
@@ -419,7 +420,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行；`bash` 无危险命令确认机制
-- 无 Session / 上下文持久化，退出即丢失 transcript；无 Context Compaction
+- CLI 尚未接入 `AgentSession`，默认启动退出后仍丢失 transcript；尚无 resume 或 Context Compaction
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
 - 进程组与文件权限语义依赖 POSIX，未适配 Windows
 - LSP / MCP / Task / Memory / Multi-Agent 属于后续阶段

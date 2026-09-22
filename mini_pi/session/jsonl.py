@@ -221,8 +221,9 @@ class JsonlSession:
         *,
         provider: str,
         model: str,
+        step_count: int | None = None,
     ) -> MessageEntry:
-        """把完整消息追加为当前 leaf 的 child。"""
+        """把完整消息及提交时的累计步骤追加为当前 leaf 的 child。"""
         entry = MessageEntry(
             type="message",
             id=uuid4(),
@@ -230,6 +231,7 @@ class JsonlSession:
             timestamp=datetime.now(timezone.utc),
             provider=provider,
             model=model,
+            stepCount=step_count,
             message=message,
         )
         self._append(entry)

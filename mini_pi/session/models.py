@@ -57,11 +57,13 @@ class SessionEntryBase(SessionModel):
 
 
 class MessageEntry(SessionEntryBase):
-    """完整消息 entry，同时记录消息产生时使用的 provider/model。"""
+    """完整消息 entry，记录提交时的模型与累计步骤。"""
 
     type: Literal["message"]
     provider: NonEmptyString
     model: NonEmptyString
+    # M7.1 创建的旧文件没有该字段；新运行时每条消息都会显式写入。
+    step_count: int | None = Field(default=None, alias="stepCount", ge=0)
     message: Message
 
 
