@@ -15,6 +15,7 @@ from mini_pi.context.sections import (
     diff_sections,
     replay_system_messages,
 )
+from mini_pi.context.tokens import TokenEstimate, TokenSource, estimate_tokens
 
 __all__ = [
     "SUMMARY_TAG",
@@ -22,8 +23,11 @@ __all__ = [
     "MessageProjection",
     "ProjectInstruction",
     "SystemPromptState",
+    "TokenEstimate",
+    "TokenSource",
     "apply_section_patch",
     "diff_sections",
+    "estimate_tokens",
     "load_project_instructions",
     "project_compaction",
     "project_entry_path",

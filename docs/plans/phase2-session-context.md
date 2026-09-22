@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4c 已完成，下一任务为 M7.4d。
+> 状态：实施中；M7.1-M7.4d 已完成，下一任务为 M7.4e。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -499,14 +499,18 @@ M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 →
 
 验收：专项 `uv run pytest tests/context/test_projection_compaction.py -q` → 9 passed；全量 `308 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.4d：Token 估算
+#### M7.4d：Token 估算（已完成）
 
-- [ ] 新增独立 token estimator：有 provider usage 时优先使用，无 usage 时按统一字符规则保守估算。
-- 返回结果标记来源，禁止把估算值伪装为 provider 精确值。
-- 针对性测试覆盖：usage、中文、英文、空内容、tool arguments/result 和极长消息。
-- 不做：阈值决策、压缩。
+提交：本任务提交（`feat: 增加 Token 估算`）。
 
-验收命令：`uv run pytest tests/context/test_tokens.py -q`。
+交付物：
+
+- 新增 `context/tokens.py`：`estimate_tokens(messages)` → `TokenEstimate(tokens, source)`，`source ∈ {usage, estimated}`。
+- 优先级：最近一条 assistant 的 `usage.total_tokens` 全额采用，其后消息按 `ceil(chars / 4)` 追加；无 usage 时对全部消息估算。掺入任何估算就不得标记为 `usage`。
+- 统计范围覆盖 user/assistant/system/tool：assistant 正文与 `reasoning_content`、工具名与参数（稳定序列化）、工具结果；空片段不贡献 token。
+- 明确未做：阈值决策、压缩、切点。
+
+验收：专项 `uv run pytest tests/context/test_tokens.py -q` → 10 passed；全量 `318 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.4e：基础安全切点
 
