@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4d 已完成，下一任务为 M7.4e。
+> 状态：实施中；M7.1-M7.4e 已完成，下一任务为 M7.4f。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -512,14 +512,19 @@ M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 →
 
 验收：专项 `uv run pytest tests/context/test_tokens.py -q` → 10 passed；全量 `318 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.4e：基础安全切点
+#### M7.4e：基础安全切点（已完成）
 
-- [ ] 只允许在完整 user turn 或完整 assistant turn 边界切分。
-- 至少保留最近一轮可用对话；无安全切点时返回显式结果而非强行截断。
-- 针对性测试覆盖：尾随 user、尾随 assistant、空历史、单 turn 超长和刚好命中边界。
-- 不做：split-turn tool 配对特例。
+提交：本任务提交（`feat: 增加基础安全切点`）。
 
-验收命令：`uv run pytest tests/context/test_cut_points.py -q`。
+交付物：
+
+- 新增 `context/compaction.py`：`find_cut_point(messages, keep_recent_tokens=...)` → `CutPoint(start_index, boundary, kept_tokens) | None`。
+- 消息先切成原子段（assistant tool_calls 与紧随 tool results 永不拆散），从最新往前累计 token 到预算边界。
+- 优先 user 边界；该 user turn 自身已超预算时才允许从完整 assistant 边界切。全部在预算内、空历史或切点落到 0 时返回 None，不强行截断。
+- 非 user/assistant 起始段（如 system）不作为切点。`keep_recent_tokens <= 0` 直接报错。
+- 明确未做：split-turn 特例（单条超长 turn 内部切分）、阈值决策、摘要生成。
+
+验收：专项 `uv run pytest tests/context/test_cut_points.py -q` → 10 passed；全量 `328 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.4f：工具轮 Split-Turn 切点
 
