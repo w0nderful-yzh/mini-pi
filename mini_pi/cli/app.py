@@ -16,11 +16,12 @@ from mini_pi.auth import (
     save_last_connection,
 )
 from mini_pi.cli.console import ConsoleRenderer
-from mini_pi.errors import MiniPiError
+from mini_pi.errors import MiniPiError, SessionError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
 from mini_pi.llm.openai_client import OpenAIClient
 from mini_pi.llm.types import UserMessage
+from mini_pi.session.runtime import AgentSession
 from mini_pi.tools import build_default_registry
 from mini_pi.workspace.workspace import Workspace
 
@@ -98,35 +99,69 @@ def _build_agent(
     )
 
 
+def _build_runtime(
+    *,
+    llm: LLMClient,
+    workspace: Workspace,
+    max_steps: int,
+    renderer: ConsoleRenderer,
+    provider: str,
+    model: str,
+    no_session: bool,
+) -> Agent | AgentSession:
+    """按 CLI 模式装配纯内存 Agent 或持久化 AgentSession。"""
+    if no_session:
+        return _build_agent(llm=llm, workspace=workspace, max_steps=max_steps, renderer=renderer)
+    return AgentSession.create(
+        cwd=workspace.root,
+        llm=llm,
+        registry=build_default_registry(workspace),
+        provider=provider,
+        model=model,
+        max_steps=max_steps,
+        on_event=renderer.handle,
+    )
+
+
 @app.command()
 def cli(
-    prompt: str | None = typer.Argument(None, help="Task to run once; omit to start an interactive session."),
+    prompt: str | None = typer.Argument(
+        None, help="Task to run once; omit to start an interactive session."
+    ),
     provider: str | None = typer.Option(None, "--provider", "-p"),
     model: str | None = typer.Option(None, "--model", "-m"),
     cwd: Path = typer.Option(Path("."), "--cwd"),
     max_steps: int = typer.Option(50, "--max-steps", min=1),
+    no_session: bool = typer.Option(False, "--no-session", help="Keep history in memory only."),
 ) -> None:
     workspace = Workspace(cwd)
     console = Console()
     renderer = ConsoleRenderer(console)
-    agent: Agent | None = None
+    agent: Agent | AgentSession | None = None
     startup_error: str | None = None
     provider_override = provider
     model_override = model
     try:
         provider, model = _resolve_connection(provider, model)
-        new_agent = _build_agent(
+        new_agent = _build_runtime(
             llm=create_llm(provider, model),
             workspace=workspace,
             max_steps=max_steps,
             renderer=renderer,
+            provider=provider,
+            model=model,
+            no_session=no_session,
         )
         # 显式选择代表用户更新默认项；从已保存配置启动时无需重复写盘。
         if provider_override is not None or model_override is not None:
             save_last_connection(provider, model)
         agent = new_agent
     except MiniPiError as exc:
-        startup_error = str(exc)
+        startup_error = (
+            f"session creation failed: {exc}"
+            if not no_session and isinstance(exc, SessionError)
+            else str(exc)
+        )
 
     # 解析失败时仍给 /connect 一个确定默认值，避免交互层处理 Optional。
     provider = provider or "openai"
@@ -134,14 +169,26 @@ def cli(
 
     if prompt is not None:
         if agent is None:
-            typer.echo(f"error: {startup_error}", err=True)
+            Console(stderr=True).print(f"error: {startup_error}", style="red")
             raise typer.Exit(code=1)
-        agent.run(prompt)
+        if isinstance(agent, AgentSession):
+            console.print(f"Session storage: {agent.path.parent}", soft_wrap=True)
+        try:
+            agent.run(prompt)
+        finally:
+            if isinstance(agent, AgentSession):
+                console.print(f"Session path: {agent.path}", soft_wrap=True)
         return
 
-    console.print("mini-pi interactive mode. Commands: /connect, /reset, /exit")
+    commands = "/connect, /reset, /exit" if no_session else "/connect (if unconfigured), /exit"
+    console.print(f"mini-pi interactive mode. Commands: {commands}")
+    if isinstance(agent, AgentSession):
+        console.print(f"Session storage: {agent.path.parent}", soft_wrap=True)
     if startup_error is not None:
-        console.print(f"{startup_error}", style="yellow")
+        console.print(
+            startup_error,
+            style="red" if startup_error.startswith("session creation failed:") else "yellow",
+        )
 
     while True:
         try:
@@ -152,11 +199,23 @@ def cli(
         if stripped in {"/exit", "/quit"}:
             break
         if stripped == "/reset":
-            if agent is not None:
+            if isinstance(agent, AgentSession):
+                # 已落盘的历史不能只清内存；/new 将在后续任务处理持久化会话切换。
+                console.print(
+                    "/reset is unavailable for saved sessions; use --no-session",
+                    style="yellow",
+                )
+            elif agent is not None:
                 agent.reset()
                 console.print("context cleared")
             continue
         if stripped == "/connect":
+            if isinstance(agent, AgentSession):
+                console.print(
+                    "/connect for an active session is not yet available; use --no-session",
+                    style="yellow",
+                )
+                continue
             credentials = ask_credentials(console, provider)
             if credentials is None:
                 console.print("connect cancelled", style="yellow")
@@ -174,9 +233,21 @@ def cli(
             # 当前进程继续使用刚验证的 Key；环境变量优先级在下次启动时再生效。
             new_llm = create_llm(provider, model, api_key=api_key)
             if agent is None:
-                agent = _build_agent(
-                    llm=new_llm, workspace=workspace, max_steps=max_steps, renderer=renderer
-                )
+                try:
+                    agent = _build_runtime(
+                        llm=new_llm,
+                        workspace=workspace,
+                        max_steps=max_steps,
+                        renderer=renderer,
+                        provider=provider,
+                        model=model,
+                        no_session=no_session,
+                    )
+                except SessionError as exc:
+                    console.print(f"session creation failed: {exc}", style="red")
+                    continue
+                if isinstance(agent, AgentSession):
+                    console.print(f"Session storage: {agent.path.parent}", soft_wrap=True)
             else:
                 agent.set_llm(new_llm)
             console.print(f"saved to {auth_path}")
@@ -195,6 +266,9 @@ def cli(
             # REPL 顶层边界：程序缺陷要完整可见，但不因此终止整个会话
             console.print(f"unexpected error: {type(exc).__name__}: {exc}", style="red")
             console.print_exception()
+
+    if isinstance(agent, AgentSession):
+        console.print(f"Session path: {agent.path}", soft_wrap=True)
 
 
 def main() -> None:

@@ -82,7 +82,7 @@ Python Coding Agent Harness
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
-| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3d 已支持程序化 `AgentSession.resume()` 并沿原 leaf 追加；CLI 接线与 compaction 投影仍待后续任务 |
+| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3e 默认 CLI 创建 JSONL Session；程序化 resume 已支持，CLI 恢复与 compaction 投影仍待后续任务 |
 
 ---
 
@@ -165,7 +165,7 @@ Agent Runtime 自己实现。
 
 ## 5. 目录结构
 
-当前实现范围（M1-M6 + M7.1-M7.2 + M7.3a-M7.3d）：
+当前实现范围（M1-M6 + M7.1-M7.2 + M7.3a-M7.3e）：
 
 ```text
 mini-pi/
@@ -304,14 +304,17 @@ symlink 指向外部     → 报错
 
 ```bash
 mini-pi "修复某个 bug"          # 一次性执行
-mini-pi                         # 交互式 REPL（/connect /reset /exit）
+mini-pi                         # 交互式 REPL，默认创建 JSONL Session
 mini-pi --provider deepseek --model deepseek-chat
+mini-pi --no-session            # 保留纯内存模式（/connect /reset /exit）
 ```
 
 - 启动选择顺序：显式 `--provider/--model` > 上次成功使用的 provider/model > OpenAI 内置默认值
 - API Key 解析顺序：环境变量（`OPENAI_API_KEY` / `DEEPSEEK_API_KEY`）> `~/.mini-pi/auth.json`（目录 0700、文件 0600）
 - 交互式首次使用：输入 `/connect` → 选择 provider → 隐藏输入 Key → 真实请求验证；通过后原子保存 Key 与 provider/model，下次启动自动恢复
 - 一次性模式缺少 Key 时明确报错，并提示环境变量与 `/connect` 两种方式
+- 默认在 `~/.mini-pi/sessions/` 下按 workspace 保存 JSONL；启动显示存储目录，退出显示实际文件路径；创建失败不会静默回退到内存模式
+- `--no-session` 不创建持久化文件，保留原有 `/reset` 与 `/connect` 行为；持久化会话中 `/reset` 和已连接后的 `/connect` 暂不可用，待 M7.3g 完成会话切换语义
 - 流式打印模型正文，工具调用与结果以简洁格式展示
 - `--max-steps` 控制单次任务的最大循环步数（默认 50）
 
@@ -347,7 +350,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context：JSONL entry 树、AGENTS.md、resume、compaction | 进行中（M7.1、M7.2、M7.3a-M7.3d 已完成） |
+| M7 | Session / Context：JSONL entry 树、AGENTS.md、resume、compaction | 进行中（M7.1、M7.2、M7.3a-M7.3e 已完成） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
@@ -420,7 +423,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行；`bash` 无危险命令确认机制
-- CLI 尚未接入 `AgentSession`，默认启动退出后仍丢失 transcript；程序化 resume 已可用，CLI resume 与 Context Compaction 尚未实现
+- CLI 默认新建可落盘 Session，但暂不能从 CLI resume/continue；程序化 resume 已可用，Context Compaction 尚未实现
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
 - 进程组与文件权限语义依赖 POSIX，未适配 Windows
 - LSP / MCP / Task / Memory / Multi-Agent 属于后续阶段

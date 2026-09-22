@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1、M7.2、M7.3a-M7.3d 已完成，下一任务为 M7.3e。
+> 状态：实施中；M7.1、M7.2、M7.3a-M7.3e 已完成，下一任务为 M7.3f。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -419,14 +419,17 @@ M7.2 总验收（已完成）：同一段历史重放后 Provider 得到唯一�
 
 验收：`uv run pytest tests/session/test_runtime_resume.py -q` → 7 passed；全量 `248 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.3e：CLI 默认 Session 与 `--no-session`
+#### M7.3e：CLI 默认 Session 与 `--no-session`（已完成）
 
-- [ ] CLI 默认创建 Session；`--no-session` 保持当前纯内存行为。
-- 默认存储目录、创建失败提示和最终 session path 使用 Rich 展示，但 CLI 不参与消息决策。
-- 针对性测试覆盖：默认创建、显式禁用、启动失败和退出后文件可加载。
-- 不做：`--resume`、`--continue`、`/new`。
+提交：本任务提交（`feat: CLI 默认创建 Session 并支持纯内存模式`）。
 
-验收命令：`uv run pytest tests/cli/test_session_create.py -q`。
+交付物：
+
+- CLI 默认通过 `AgentSession.create()` 新建 JSONL，Rich 展示存储目录、创建错误与最终路径；`--no-session` 保持原内存 Agent 行为。
+- 首次缺 Key 时 `/connect` 可创建 Session；持久化模式在 M7.3g 前拒绝 `/reset` 和活动会话中的 `/connect`，避免内存历史与文件或模型元数据不一致。
+- 离线测试覆盖默认创建、显式禁用、创建失败、退出后加载、首次连接及两种模式的 reset 边界；未做 CLI 恢复、`/new`、compaction。
+
+验收：`uv run pytest tests/cli/test_session_create.py -q` → 7 passed；全量 `255 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.3f：CLI `--resume` 与 `--continue`
 
@@ -757,4 +760,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.3e`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.3f`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

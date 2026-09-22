@@ -14,13 +14,14 @@ runner = CliRunner()
 
 
 @pytest.fixture(autouse=True)
-def isolate_connection_preferences(monkeypatch: pytest.MonkeyPatch) -> None:
-    """CLI 测试不读取或改写用户真实的 ~/.mini-pi/auth.json。"""
+def isolate_connection_preferences(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """CLI 测试不读取或改写用户真实的认证与 Session 文件。"""
     monkeypatch.setattr("mini_pi.cli.app.load_last_connection", lambda: None)
     monkeypatch.setattr(
         "mini_pi.cli.app.save_last_connection",
         lambda provider, model: Path("/tmp/fake-auth.json"),
     )
+    monkeypatch.setattr("mini_pi.session.jsonl._sessions_root", lambda path: tmp_path / "sessions")
 
 
 def test_create_llm_rejects_unknown_provider() -> None:
@@ -49,6 +50,7 @@ def test_help_lists_options() -> None:
     assert result.exit_code == 0
     assert "--provider" in result.output
     assert "--max-steps" in result.output
+    assert "--no-session" in result.output
 
 
 def test_missing_api_key_raises_minipi_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,7 +87,7 @@ def test_connect_saves_verified_key(monkeypatch: pytest.MonkeyPatch, tmp_path: P
         lambda provider, key, model: saved.append((provider, key, model))
         or Path("/tmp/fake-auth.json"),
     )
-    result = runner.invoke(app, ["--cwd", str(tmp_path)], input="/connect\n/exit\n")
+    result = runner.invoke(app, ["--cwd", str(tmp_path), "--no-session"], input="/connect\n/exit\n")
     assert result.exit_code == 0
     assert saved == [("deepseek", "sk-test", "deepseek-chat")]
     assert "saved to" in result.output
@@ -112,7 +114,7 @@ def test_connect_verification_failure_does_not_save(
         lambda provider, key, model: saved.append((provider, key, model))
         or Path("/tmp/fake-auth.json"),
     )
-    result = runner.invoke(app, ["--cwd", str(tmp_path)], input="/connect\n/exit\n")
+    result = runner.invoke(app, ["--cwd", str(tmp_path), "--no-session"], input="/connect\n/exit\n")
     assert result.exit_code == 0
     assert saved == []
     assert "verification failed" in result.output
