@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1、M7.2、M7.3a-M7.3e 已完成，下一任务为 M7.3f。
+> 状态：实施中；M7.1、M7.2、M7.3a-M7.3f 已完成，下一任务为 M7.3g。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载和上下文压缩，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -431,15 +431,17 @@ M7.2 总验收（已完成）：同一段历史重放后 Provider 得到唯一�
 
 验收：`uv run pytest tests/cli/test_session_create.py -q` → 7 passed；全量 `255 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
-#### M7.3f：CLI `--resume` 与 `--continue`
+#### M7.3f：CLI `--resume` 与 `--continue`（已完成）
 
-- [ ] `--resume <path>` 恢复指定文件；`--continue` 选择当前 cwd 最近的合法 Session。
-- 两参数互斥；不存在、损坏、cwd 不匹配时给出明确错误并退出非零。
-- “最近”只依据已验证 Session 的时间字段，不根据模糊文件名猜测。
-- 针对性测试覆盖：成功恢复、互斥参数、无候选、多候选排序和损坏候选。
-- 不做：交互命令 `/new`、自动压缩。
+提交：本任务提交（`feat: CLI 支持恢复与继续最近会话`）。
 
-验收命令：`uv run pytest tests/cli/test_session_resume.py -q`。
+交付物：
+
+- `--resume <path>` 沿指定文件原 leaf 恢复；`--continue` 严格加载当前 workspace 的所有候选，按已验证的最后 entry 时间选最近活动会话（空会话用 header 时间），不依据文件名或 mtime。
+- 参数互斥、无候选、坏文件、cwd 不符和最新时间并列均在启动时显式非零退出；候选损坏不静默退回旧会话，`--no-session` 也不能与恢复选项混用。
+- 恢复默认沿用会话中的最后 provider/model；显式覆盖只影响新 entry。未做 `/new`、活动会话 `/connect` 和自动压缩。
+
+验收：`uv run pytest tests/cli/test_session_resume.py -q` → 13 passed；全量 `268 passed, 3 deselected`；compileall 与 `git diff --check` 通过。
 
 #### M7.3g：`/new` 与 `/connect` 会话连续性
 
@@ -760,4 +762,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.3f`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.3g`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

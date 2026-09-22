@@ -360,3 +360,36 @@ class JsonlSession:
             file.write(f"{line}\n")
             file.flush()
             os.fsync(file.fileno())
+
+
+def latest_session_path(
+    cwd: str | Path, *, sessions_root: str | Path | None = None
+) -> Path:
+    """严格校验当前 workspace 的候选，按最后活动时间选最近可恢复会话。"""
+    candidates = discover_session_files(cwd, sessions_root=sessions_root)
+    if not candidates:
+        workspace = _resolved_workspace(cwd, require_directory=False)
+        raise SessionError(f"no session found for cwd: {workspace}")
+
+    latest: tuple[datetime, Path] | None = None
+    tied = False
+    for path in candidates:
+        try:
+            session = JsonlSession.load(path, expected_cwd=cwd)
+            session.replay()
+        except SessionError as exc:
+            # 候选损坏不能被静默跳过，否则可能恢复到旧任务并继续写入错误历史。
+            raise SessionError(f"invalid session candidate {path}: {exc}") from exc
+        # 已使用的会话以最后 entry 为活动时间；空会话只有 header 时间。
+        activity_time = (
+            session.entries[-1].timestamp if session.entries else session.header.timestamp
+        )
+        if latest is None or activity_time > latest[0]:
+            latest = (activity_time, path)
+            tied = False
+        elif activity_time == latest[0]:
+            tied = True
+    assert latest is not None
+    if tied:
+        raise SessionError("multiple sessions share the latest activity time; use --resume")
+    return latest[1]

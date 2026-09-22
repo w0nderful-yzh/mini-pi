@@ -21,6 +21,7 @@ from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
 from mini_pi.llm.openai_client import OpenAIClient
 from mini_pi.llm.types import UserMessage
+from mini_pi.session.jsonl import latest_session_path
 from mini_pi.session.runtime import AgentSession
 from mini_pi.tools import build_default_registry
 from mini_pi.workspace.workspace import Workspace
@@ -133,7 +134,16 @@ def cli(
     cwd: Path = typer.Option(Path("."), "--cwd"),
     max_steps: int = typer.Option(50, "--max-steps", min=1),
     no_session: bool = typer.Option(False, "--no-session", help="Keep history in memory only."),
+    resume: Path | None = typer.Option(None, "--resume", help="Resume a Session JSONL file."),
+    continue_session: bool = typer.Option(
+        False, "--continue", help="Resume the latest Session for this workspace."
+    ),
 ) -> None:
+    if resume is not None and continue_session:
+        raise typer.BadParameter("--resume and --continue are mutually exclusive")
+    if no_session and (resume is not None or continue_session):
+        raise typer.BadParameter("--no-session cannot be used with --resume or --continue")
+
     workspace = Workspace(cwd)
     console = Console()
     renderer = ConsoleRenderer(console)
@@ -141,27 +151,44 @@ def cli(
     startup_error: str | None = None
     provider_override = provider
     model_override = model
-    try:
-        provider, model = _resolve_connection(provider, model)
-        new_agent = _build_runtime(
-            llm=create_llm(provider, model),
-            workspace=workspace,
-            max_steps=max_steps,
-            renderer=renderer,
-            provider=provider,
-            model=model,
-            no_session=no_session,
-        )
-        # 显式选择代表用户更新默认项；从已保存配置启动时无需重复写盘。
-        if provider_override is not None or model_override is not None:
-            save_last_connection(provider, model)
-        agent = new_agent
-    except MiniPiError as exc:
-        startup_error = (
-            f"session creation failed: {exc}"
-            if not no_session and isinstance(exc, SessionError)
-            else str(exc)
-        )
+    if resume is not None or continue_session:
+        try:
+            path = resume if resume is not None else latest_session_path(workspace.root)
+            agent = AgentSession.resume(
+                path,
+                registry=build_default_registry(workspace),
+                cwd=workspace.root,
+                provider=provider,
+                model=model,
+                llm_factory=create_llm,
+                max_steps=max_steps,
+                on_event=renderer.handle,
+            )
+        except MiniPiError as exc:
+            Console(stderr=True).print(f"error: {exc}", style="red", soft_wrap=True)
+            raise typer.Exit(code=1) from exc
+    else:
+        try:
+            provider, model = _resolve_connection(provider, model)
+            new_agent = _build_runtime(
+                llm=create_llm(provider, model),
+                workspace=workspace,
+                max_steps=max_steps,
+                renderer=renderer,
+                provider=provider,
+                model=model,
+                no_session=no_session,
+            )
+            # 显式选择代表用户更新默认项；从已保存配置启动时无需重复写盘。
+            if provider_override is not None or model_override is not None:
+                save_last_connection(provider, model)
+            agent = new_agent
+        except MiniPiError as exc:
+            startup_error = (
+                f"session creation failed: {exc}"
+                if not no_session and isinstance(exc, SessionError)
+                else str(exc)
+            )
 
     # 解析失败时仍给 /connect 一个确定默认值，避免交互层处理 Optional。
     provider = provider or "openai"
