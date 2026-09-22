@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4、M7.C1-C4 已完成，下一任务为 M7.C5。
+> 状态：实施中；M7.1-M7.4、M7.C1-C5 已完成，下一任务为 M7.5a。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载、上下文压缩和可长期使用的 CLI，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -577,7 +577,7 @@ M7.3 总验收（已完成）：离线执行“运行一轮 → 退出进程 →
 
 M7.4 总验收：`tests/context/test_m7_4_projection_pipeline.py` 表驱动覆盖无 usage、tail 追加估算、连续工具调用、单 turn 超长、全部在预算内、重复 compaction，共 6 场景通过。
 
-### M7.C CLI 与对话健康度（M7.4 后，M7.5 前）
+### M7.C CLI 与对话健康度（已完成）
 
 依据用户提供的 `mini-pi-cli-optimization-plan.md` 安排；该文件是需求素材，以下边界以本计划和现有协议为准。M7.C1-C5 按顺序完成，不改动 M7.5 / M7.6 的既有任务编号。每个任务分别做针对性离线验证、全量回归和中文提交；完成后按本文件与 README 同步状态。
 
@@ -605,11 +605,11 @@ M7.4 总验收：`tests/context/test_m7_4_projection_pipeline.py` 表驱动覆�
 
 验收：`tests/test_console.py` → 15 passed；全量离线 386 passed, 3 deselected。
 
-#### M7.C5：减少无效探索的软约束
+#### M7.C5：减少无效探索的软约束（已完成）
 
-- [ ] 在现有 system prompt 工作规则中加入“每次 observation 后判断是否已有充分证据，足够时直接回答”的短指引；简单只读问题建议少量关键读取，但不把 3-5 次设为硬上限。
-- [ ] `max_steps` 继续作为单次 run 的唯一硬步数上限；修复、测试或未知问题可继续搜索，不增加固定 workflow 或新的 Agent 状态机。
-- [ ] FakeLLM 验证 prompt 与 `max_steps` 行为，并用真实任务验收对比无效工具调用数；不能仅凭提示词宣称已降低调用量。
+交付物：在 system prompt 加入每次 observation 后判断证据是否充分的短指引；未增加固定读取次数或 Agent 状态机，`max_steps` 语义保持不变。提交：本任务提交。
+
+验收：FakeLLM 验证新规则进入 Provider prompt，六轮工具调用后仍可完成；专项 `tests/agent/test_prompt.py tests/test_loop.py` → 20 passed；全量离线 387 passed, 3 deselected。真实 DeepSeek 在同一个只读小任务中，修改前为 1 次 `read`、修改后为 1 次 `bash`，两次均完成；此样本未显示工具调用数下降，不据此声称已减少无效探索。
 
 M7.C1-C5 验收：默认终端不泄漏 thinking；图标只作状态提示；`/status`、`/context` 和工具摘要可用；上下文投影及 DeepSeek 回放行为保持正确。
 
@@ -870,4 +870,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.C5`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.5a`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

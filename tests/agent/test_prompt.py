@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from mini_pi.agent.prompt import build_sections, build_system_prompt, render_sections
+from mini_pi.agent.agent import Agent
+from mini_pi.llm.openai_client import to_openai_messages
 from mini_pi.llm.types import ToolSchema
+from mini_pi.tools.registry import ToolRegistry
+from tests.conftest import EchoTool, FakeLLMClient, assistant, tool_call
 
 
 def tool(name: str, description: str) -> ToolSchema:
@@ -82,6 +86,7 @@ def test_build_system_prompt_remains_byte_compatible(
 - Prefer the edit tool for minimal changes; use the write tool only for new files or full rewrites.
 - Verify changes with the bash tool (tests/build/lint) and inspect diffs with git_diff.
 - Tool errors are returned to you as error observations; read them and adjust instead of repeating the same call.
+- After each observation, decide whether you already have enough evidence to answer. For simple read-only questions, keep inspection focused; investigate further when the task requires it.
 - When the task is complete, stop calling tools and summarize what changed and how it was verified.
 
 # Tools
@@ -92,3 +97,25 @@ def test_build_system_prompt_remains_byte_compatible(
 
     assert render_sections(sections) == expected
     assert build_system_prompt(cwd=Path("/work/project"), tools=tools) == expected
+
+
+def test_soft_stop_guidance_does_not_cap_tool_calls(tmp_path: Path) -> None:
+    """软指引进入 Provider prompt，复杂任务仍可在 max_steps 内继续检查。"""
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    llm = FakeLLMClient(
+        [
+            assistant(tool_calls=[tool_call(f"c{index}", "echo", {"text": str(index)})])
+            for index in range(6)
+        ]
+        + [assistant("done")]
+    )
+    agent = Agent(llm=llm, registry=registry, cwd=tmp_path, max_steps=8)
+
+    result = agent.run("investigate six related observations")
+
+    prompt = to_openai_messages(llm.calls[0])[0]["content"]
+    assert "After each observation, decide whether you already have enough evidence" in prompt
+    assert result.content == "done"
+    assert len(llm.calls) == 7
+    assert agent.state.step_count == 7

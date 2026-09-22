@@ -18,6 +18,7 @@ _RULES = (
     "- Prefer the edit tool for minimal changes; use the write tool only for new files or full rewrites.",
     "- Verify changes with the bash tool (tests/build/lint) and inspect diffs with git_diff.",
     "- Tool errors are returned to you as error observations; read them and adjust instead of repeating the same call.",
+    "- After each observation, decide whether you already have enough evidence to answer. For simple read-only questions, keep inspection focused; investigate further when the task requires it.",
     "- When the task is complete, stop calling tools and summarize what changed and how it was verified.",
 )
 
