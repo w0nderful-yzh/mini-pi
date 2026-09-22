@@ -315,7 +315,7 @@ def cli(
 
     workspace = Workspace(cwd)
     console = Console()
-    renderer = ConsoleRenderer(console)
+    renderer = ConsoleRenderer(console, show_thinking=not no_banner)
     agent: Agent | AgentSession | None = None
     startup_error: str | None = None
     config_error: MiniPiError | None = None
@@ -377,6 +377,7 @@ def cli(
             Console(stderr=True).print(f"error: {exc}", style="red", soft_wrap=True)
             raise typer.Exit(code=1) from exc
         finally:
+            renderer.close()
             if isinstance(agent, AgentSession):
                 console.print(f"Session path: {agent.path}", soft_wrap=True)
         return
@@ -492,6 +493,8 @@ def cli(
             # REPL 顶层边界：程序缺陷要完整可见，但不因此终止整个会话
             console.print(f"unexpected error: {type(exc).__name__}: {exc}", style="red")
             console.print_exception()
+        finally:
+            renderer.close()
 
     if isinstance(agent, AgentSession):
         console.print(f"Session path: {agent.path}", soft_wrap=True)

@@ -1,6 +1,6 @@
 # Phase 2: Session / Context 设计与实施计划
 
-> 状态：实施中；M7.1-M7.4 已完成，下一任务为 M7.C1（CLI 展示与上下文边界），随后继续 M7.5a。
+> 状态：实施中；M7.1-M7.4、M7.C1 已完成，下一任务为 M7.C2。
 
 **目标：** 在不扩大 Agent Core 的前提下，为 Phase 1 MVP 增加可恢复会话、项目指令加载、上下文压缩和可长期使用的 CLI，使长任务能够跨进程继续，并为后续 LSP / MCP、Task / Memory 提供稳定的数据底座。
 
@@ -581,35 +581,11 @@ M7.4 总验收：`tests/context/test_m7_4_projection_pipeline.py` 表驱动覆�
 
 依据用户提供的 `mini-pi-cli-optimization-plan.md` 安排；该文件是需求素材，以下边界以本计划和现有协议为准。M7.C1-C5 按顺序完成，不改动 M7.5 / M7.6 的既有任务编号。每个任务分别做针对性离线验证、全量回归和中文提交；完成后按本文件与 README 同步状态。
 
-#### M7.C1：隐藏 raw thinking，显示思考状态
+#### M7.C1：隐藏 raw thinking，显示思考状态（已完成）
 
-- [ ] `ConsoleRenderer` 默认不打印 `MessageDeltaEvent(kind="thinking")` 的内容；普通 `text` 继续流式展示，错误与最终答复可见。禁止按英文短语过滤正文。
-- [ ] 交互式 tty 在思考阶段显示用户指定的小牛图标；图案作为 `mini_pi/assets/thinking.txt` 资源，启动仍使用现有 `banner.txt`。图标只代表运行状态，不包含或暗示模型思考内容。
-- [ ] 思考、正文、工具执行与终止事件切换时原地刷新/清理状态，避免重复刷屏；窄终端、非 tty、`--no-banner` 下提供简洁文本状态或静默降级。图标及 spinner 不进入 Session 或模型上下文。
-- [ ] 使用 FakeLLM 事件与 Rich 捕获验证：thinking 增量不泄漏，正文不丢，状态结束后无残留；DeepSeek `reasoning_content` 的既有回放测试保持通过。
+交付物：`thinking.txt` 保留用户指定图案；`ConsoleRenderer` 用 Rich Live 显示瞬时状态并隐藏 thinking 增量，正文、工具和结束事件清理状态；非 tty、窄屏、`--no-banner` 静默降级；异常退出也清理 Live。DeepSeek 回放协议未改。提交：本任务提交。
 
-参考图案（资源文件保留等宽布局；终端可按宽度降级）：
-
-```text
-      db         db
-    d88           88
-   888            888
-  d88             888b
-  888             d88P
-  Y888b  /``````\8888
-,----Y888        Y88P`````\
-|        ,'`\_/``\ |,,    |
- \,,,,-| | o | o / |  ```'
-       |  """ """  |
-      /             \
-     |               \
-     |  ,,,,----'''```|
-     |``   @    @     |
-      \,,    ___    ,,/
-        \__|   |__/
-            | | |
-            \_|_/
-```
+验收：`tests/test_console.py`、`tests/test_deepseek_client.py`、`tests/cli/test_banner.py` → 23 passed；全量离线 377 passed, 3 deselected（测试时取消本机 `NO_COLOR=1` 并设置 `TERM=xterm`）。
 
 #### M7.C2：展示元数据与模型消息隔离
 
@@ -895,4 +871,4 @@ M7.7a → 7b → 7c → 7d
 离线回归   真实模型   人工 CLI   文档收尾
 ```
 
-当前唯一允许开始的下一任务是 `M7.C1`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。
+当前唯一允许开始的下一任务是 `M7.C2`。不要把相邻编号合并成一次改动；先证明当前编号的行为与不变量，再进入下一编号。

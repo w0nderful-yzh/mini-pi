@@ -8,6 +8,7 @@ from mini_pi.agent.events import (
     AgentEndEvent,
     MessageDeltaEvent,
     MessageEndEvent,
+    MessageStartEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
@@ -29,6 +30,39 @@ def test_renders_text_deltas() -> None:
     renderer.handle(MessageDeltaEvent(kind="text", delta="lo"))
     renderer.handle(MessageEndEvent(message=AssistantMessage(content="Hello")))
     assert "Hello" in stream.getvalue()
+
+
+def test_hides_thinking_and_clears_status_before_text() -> None:
+    """思考内容不能泄漏；临时图案在正文开始时清理。"""
+    stream = io.StringIO()
+    renderer = ConsoleRenderer(Console(file=stream, force_terminal=True, width=80, no_color=True))
+    renderer.handle(MessageStartEvent())
+    assert renderer._thinking is not None
+    renderer.handle(MessageDeltaEvent(kind="thinking", delta="secret reasoning"))
+    renderer.handle(MessageDeltaEvent(kind="text", delta="answer"))
+    renderer.handle(MessageEndEvent(message=AssistantMessage(content="answer")))
+    output = stream.getvalue()
+    # tty 流保留显示和清理的 ANSI 序列；画面上的图案已被清除。
+    assert "db         db" in output
+    assert "\x1b[2K" in output
+    assert "secret reasoning" not in output
+    assert "answer" in output
+    assert renderer._thinking is None
+
+
+def test_thinking_status_is_silent_without_tty_or_banner() -> None:
+    """非终端和禁用图案时，只保留正文输出。"""
+    for terminal, show_thinking in [(False, True), (True, False)]:
+        stream = io.StringIO()
+        renderer = ConsoleRenderer(
+            Console(file=stream, force_terminal=terminal, width=80),
+            show_thinking=show_thinking,
+        )
+        renderer.handle(MessageStartEvent())
+        renderer.handle(MessageDeltaEvent(kind="thinking", delta="private"))
+        renderer.handle(MessageEndEvent(message=AssistantMessage(content="")))
+        assert "private" not in stream.getvalue()
+        assert "db         db" not in stream.getvalue()
 
 
 def test_renders_tool_starts_and_results() -> None:

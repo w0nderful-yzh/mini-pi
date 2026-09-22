@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
+from importlib import resources
 
 from rich.console import Console
+from rich.live import Live
 
 from mini_pi.agent.events import (
     AgentEndEvent,
     AgentEvent,
     MessageDeltaEvent,
     MessageEndEvent,
+    MessageStartEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
@@ -35,17 +38,45 @@ def _format_arguments(arguments: dict[str, object], *, limit: int = 120) -> str:
 class ConsoleRenderer:
     """on_event 消费者：只做渲染，不参与任何决策。"""
 
-    def __init__(self, console: Console | None = None) -> None:
+    def __init__(self, console: Console | None = None, *, show_thinking: bool = True) -> None:
         self.console = console or Console()
         self._printing_text = False
+        self._show_thinking = show_thinking
+        self._thinking: Live | None = None
+
+    def _start_thinking(self) -> None:
+        """只在足够宽的交互终端显示瞬时状态，不把图案写进日志。"""
+        if not self._show_thinking or not self.console.is_terminal:
+            return
+        art = resources.files("mini_pi").joinpath("assets/thinking.txt").read_text(encoding="utf-8")
+        if self.console.width < max(len(line) for line in art.splitlines()):
+            return
+        self._thinking = Live(
+            art.rstrip("\n"), console=self.console, auto_refresh=False, transient=True
+        )
+        self._thinking.start()
+
+    def _stop_thinking(self) -> None:
+        """在正文或工具输出前清理状态，避免残留和重复刷屏。"""
+        if self._thinking is not None:
+            self._thinking.stop()
+            self._thinking = None
+
+    def close(self) -> None:
+        """运行中断或抛错时清理终端状态。"""
+        self._stop_thinking()
 
     def handle(self, event: AgentEvent) -> None:
-        if isinstance(event, MessageDeltaEvent):
-            # thinking 用暗色区分；逐段打印不换行，message_end 时统一收尾
-            style = "dim" if event.kind == "thinking" else None
-            self.console.print(event.delta, end="", style=style, markup=False, highlight=False)
+        if isinstance(event, MessageStartEvent):
+            self._start_thinking()
+        elif isinstance(event, MessageDeltaEvent):
+            if event.kind == "thinking":
+                return
+            self._stop_thinking()
+            self.console.print(event.delta, end="", markup=False, highlight=False)
             self._printing_text = True
         elif isinstance(event, MessageEndEvent):
+            self._stop_thinking()
             if self._printing_text:
                 self.console.print()
                 self._printing_text = False
@@ -58,6 +89,7 @@ class ConsoleRenderer:
                     markup=False,
                 )
         elif isinstance(event, ToolExecutionStartEvent):
+            self._stop_thinking()
             arguments = _format_arguments(event.tool_call.arguments)
             self.console.print(
                 f"→ {event.tool_call.name} {arguments}",
@@ -72,6 +104,7 @@ class ConsoleRenderer:
             style = "red" if event.is_error else "green"
             self.console.print(line, style=style, markup=False, highlight=False)
         elif isinstance(event, AgentEndEvent):
+            self._stop_thinking()
             self._render_end(event)
 
     def _render_end(self, event: AgentEndEvent) -> None:
