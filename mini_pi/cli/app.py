@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from importlib import metadata
 from pathlib import Path
 
 import typer
@@ -16,6 +17,7 @@ from mini_pi.auth import (
     save_connection,
     save_last_connection,
 )
+from mini_pi.cli.banner import render_banner
 from mini_pi.cli.console import ConsoleRenderer
 from mini_pi.errors import MiniPiError, SessionError
 from mini_pi.llm.base import LLMClient
@@ -32,6 +34,21 @@ app = typer.Typer(add_completion=False, help="mini-pi: a lightweight Python codi
 PROVIDERS: tuple[str, ...] = ("openai", "deepseek")
 DEFAULT_MODELS = {"openai": "gpt-5.6-terra", "deepseek": "deepseek-flash"}
 API_KEY_ENV = {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
+
+_HELP_TEXT = """Available commands:
+  /connect  configure provider, API key and model
+  /new      start a new session (saved sessions only)
+  /reset    clear in-memory context (memory-only sessions)
+  /help     show this help
+  /exit     quit mini-pi"""
+
+
+def _version() -> str:
+    """读取已安装包版本；源码直跑或未打包时回退到 0.0.0。"""
+    try:
+        return metadata.version("mini-pi")
+    except metadata.PackageNotFoundError:
+        return "0.0.0"
 
 
 def create_llm(provider: str, model: str | None = None, *, api_key: str | None = None) -> LLMClient:
@@ -135,6 +152,7 @@ def cli(
     cwd: Path = typer.Option(Path("."), "--cwd"),
     max_steps: int = typer.Option(50, "--max-steps", min=1),
     no_session: bool = typer.Option(False, "--no-session", help="Keep history in memory only."),
+    no_banner: bool = typer.Option(False, "--no-banner", help="Do not print the startup banner."),
     resume: Path | None = typer.Option(None, "--resume", help="Resume a Session JSONL file."),
     continue_session: bool = typer.Option(
         False, "--continue", help="Resume the latest Session for this workspace."
@@ -214,8 +232,15 @@ def cli(
                 console.print(f"Session path: {agent.path}", soft_wrap=True)
         return
 
-    commands = "/connect, /reset, /exit" if no_session else "/connect, /new, /exit"
-    console.print(f"mini-pi interactive mode. Commands: {commands}")
+    commands = "/connect, /reset, /help, /exit" if no_session else "/connect, /new, /reset, /help, /exit"
+    render_banner(console, enabled=not no_banner)
+    console.print(
+        f"  mini-pi {_version()} · {provider}/{model} · {workspace.root}",
+        style="dim",
+        markup=False,
+        soft_wrap=True,
+    )
+    console.print(f"  commands: {commands}", style="dim", markup=False, soft_wrap=True)
     if isinstance(agent, AgentSession):
         console.print(f"Session storage: {agent.path.parent}", soft_wrap=True)
     if startup_error is not None:
@@ -239,6 +264,9 @@ def cli(
         stripped = line.strip()
         if stripped in {"/exit", "/quit"}:
             break
+        if stripped == "/help":
+            console.print(_HELP_TEXT, markup=False)
+            continue
         if stripped == "/new":
             if isinstance(agent, AgentSession):
                 try:
@@ -304,6 +332,12 @@ def cli(
             console.print(f"saved to {auth_path}")
             continue
         if not stripped:
+            continue
+        if stripped.startswith("/"):
+            # 未知命令不能当任务发给模型，否则会把斜杠文本写进 Session
+            console.print(
+                f"unknown command: {stripped} — type /help", style="yellow", markup=False
+            )
             continue
         if agent is None:
             console.print("configure a provider first with /connect", style="yellow")

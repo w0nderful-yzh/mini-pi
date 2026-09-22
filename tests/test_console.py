@@ -12,7 +12,7 @@ from mini_pi.agent.events import (
     ToolExecutionStartEvent,
 )
 from mini_pi.cli.console import ConsoleRenderer
-from mini_pi.llm.types import AssistantMessage, ToolCall
+from mini_pi.llm.types import AssistantMessage, ToolCall, Usage
 from mini_pi.tools.base import ToolResult
 
 
@@ -76,3 +76,47 @@ def test_renders_step_limit() -> None:
     renderer, stream = make_renderer()
     renderer.handle(AgentEndEvent(reason="step_limit"))
     assert "step limit" in stream.getvalue()
+
+
+def test_renders_usage_when_present() -> None:
+    """有 provider usage 时显示本轮 token 用量。"""
+    renderer, stream = make_renderer()
+    renderer.handle(
+        MessageEndEvent(
+            message=AssistantMessage(
+                content="hi", usage=Usage(input_tokens=10, output_tokens=5, total_tokens=15)
+            )
+        )
+    )
+    assert "tokens: in 10 / out 5" in stream.getvalue()
+
+
+def test_omits_usage_line_without_usage() -> None:
+    """没有 usage（如 FakeLLM）时不打印 token 行。"""
+    renderer, stream = make_renderer()
+    renderer.handle(MessageEndEvent(message=AssistantMessage(content="hi")))
+    assert "tokens:" not in stream.getvalue()
+
+
+def test_renders_modified_files_summary() -> None:
+    """工具改动文件时追加摘要，便于一眼确认改动范围。"""
+    renderer, stream = make_renderer()
+    call = ToolCall(id="c1", name="edit", arguments={"path": "a.py"})
+    renderer.handle(
+        ToolExecutionEndEvent(
+            tool_call=call,
+            result=ToolResult(content="Replaced 1 block(s)", modified_files=["a.py"]),
+            is_error=False,
+        )
+    )
+    assert "1 file(s) changed" in stream.getvalue()
+
+
+def test_tool_arguments_stay_on_one_line() -> None:
+    """超长参数要截断，工具调用块保持单行。"""
+    renderer, stream = make_renderer()
+    call = ToolCall(id="c1", name="write", arguments={"path": "a.txt", "content": "x" * 500})
+    renderer.handle(ToolExecutionStartEvent(tool_call=call))
+    output = stream.getvalue()
+    assert "…" in output
+    assert output.count("\n") == 1

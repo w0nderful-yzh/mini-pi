@@ -24,6 +24,14 @@ def _preview(content: str, *, limit: int = 200) -> str:
     return "(empty)"
 
 
+def _format_arguments(arguments: dict[str, object], *, limit: int = 120) -> str:
+    """把参数压成单行 JSON；过长截断，避免一行刷屏。"""
+    rendered = json.dumps(arguments, ensure_ascii=False)
+    if len(rendered) > limit:
+        return rendered[: limit - 1] + "…"
+    return rendered
+
+
 class ConsoleRenderer:
     """on_event 消费者：只做渲染，不参与任何决策。"""
 
@@ -41,12 +49,28 @@ class ConsoleRenderer:
             if self._printing_text:
                 self.console.print()
                 self._printing_text = False
+            usage = event.message.usage
+            if usage is not None and usage.total_tokens > 0:
+                # provider 精确用量；无 usage 时保持安静，不伪装估算
+                self.console.print(
+                    f"  tokens: in {usage.input_tokens} / out {usage.output_tokens}",
+                    style="dim",
+                    markup=False,
+                )
         elif isinstance(event, ToolExecutionStartEvent):
-            arguments = json.dumps(event.tool_call.arguments, ensure_ascii=False)
-            self.console.print(f"→ {event.tool_call.name} {arguments}", style="cyan", markup=False)
+            arguments = _format_arguments(event.tool_call.arguments)
+            self.console.print(
+                f"→ {event.tool_call.name} {arguments}",
+                style="cyan",
+                markup=False,
+                highlight=False,
+            )
         elif isinstance(event, ToolExecutionEndEvent):
+            line = f"  {_preview(event.result.content)}"
+            if event.result.modified_files:
+                line += f" · {len(event.result.modified_files)} file(s) changed"
             style = "red" if event.is_error else "green"
-            self.console.print(f"  {_preview(event.result.content)}", style=style, markup=False)
+            self.console.print(line, style=style, markup=False, highlight=False)
         elif isinstance(event, AgentEndEvent):
             self._render_end(event)
 

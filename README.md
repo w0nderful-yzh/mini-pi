@@ -309,7 +309,8 @@ mini-pi --provider deepseek --model deepseek-flash
 mini-pi --no-session            # 保留纯内存模式（/connect /reset /exit）
 mini-pi --resume <session.jsonl> # 恢复指定会话
 mini-pi --continue              # 继续当前 workspace 最近的会话
-# 持久化 REPL 支持 /new、/connect、/exit；纯内存模式支持 /reset
+mini-pi --no-banner             # 交互启动时不打印 ASCII Banner
+# 持久化 REPL 支持 /new、/connect、/help、/exit；纯内存模式支持 /reset
 ```
 
 - 新建会话时的模型选择顺序：显式 `--provider/--model` > 上次成功使用的 provider/model > OpenAI 内置默认值；恢复时默认使用会话活动路径最后的 provider/model，显式参数仅覆盖后续新消息
@@ -319,7 +320,9 @@ mini-pi --continue              # 继续当前 workspace 最近的会话
 - 默认在 `~/.mini-pi/sessions/` 下按 workspace 保存 JSONL；启动显示存储目录，退出显示实际文件路径；创建失败不会静默回退到内存模式
 - `--resume <path>` 严格加载指定会话；`--continue` 严格校验当前 workspace 的所有候选，按最后 entry 的活动时间选最新（空会话用 header 时间）。候选损坏、cwd 不匹配或最新时间并列会报错，不静默退回旧会话；两者不可并用，也不可与 `--no-session` 并用
 - `--no-session` 不创建持久化文件，保留原有 `/reset` 与 `/connect` 行为；持久化模式用 `/new` 开启独立会话，`/connect` 在当前链切换模型且仅让后续 entry 使用新配置；`/reset` 在持久化模式下提示改用 `/new`
-- 流式打印模型正文，工具调用与结果以简洁格式展示
+- 交互启动显示 ASCII Banner 与标语（`mini_pi/assets/banner.txt` 原样输出）；终端宽度不足或非 tty 时降级为单行；`--no-banner` 可关闭
+- `/help` 列出可用命令；未知 `/命令` 只提示且不会作为任务发给模型
+- 流式打印模型正文，工具调用与结果以简洁格式展示；有改动文件时追加 `· N file(s) changed`，有 provider usage 时显示每轮 token 用量
 - `--max-steps` 控制单次任务的最大循环步数（默认 50）
 
 ---
@@ -427,7 +430,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行；`bash` 无危险命令确认机制
-- CLI 已可创建、恢复和切换会话；Context Compaction 尚未实现，包含 compaction entry 的 Session 暂不能恢复
+- CLI 可创建、恢复和切换会话（含 compaction entry 的恢复走 M7.4 投影）；Compaction 的生成（M7.5）尚未实现
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
 - 进程组与文件权限语义依赖 POSIX，未适配 Windows
 - LSP / MCP / Task / Memory / Multi-Agent 属于后续阶段

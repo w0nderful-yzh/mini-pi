@@ -248,3 +248,38 @@ def test_one_shot_rejects_surrogate_task(
     )
     assert result.exit_code == 1
     assert "surrogate" in result.output
+
+
+def test_help_lists_available_commands(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """交互模式 /help 列出可用命令。"""
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: None)
+
+    result = runner.invoke(
+        app, ["--cwd", str(tmp_path), "--no-banner"], input="/help\n/exit\n"
+    )
+
+    assert result.exit_code == 0
+    assert "/connect" in result.output
+    assert "/help" in result.output
+    assert "/exit" in result.output
+
+
+def test_unknown_command_is_not_sent_to_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """未知 /命令只给提示，不应进入模型调用。"""
+    llm = FakeLLMClient([])
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: "sk-test")
+    monkeypatch.setattr("mini_pi.cli.app.create_llm", lambda *args, **kwargs: llm)
+
+    result = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "--no-session", "--no-banner", "--provider", "openai"],
+        input="/bogus\n/exit\n",
+    )
+
+    assert result.exit_code == 0
+    assert "unknown command" in result.output
+    assert llm.calls == []
