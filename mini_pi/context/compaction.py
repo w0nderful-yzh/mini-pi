@@ -12,9 +12,18 @@ from mini_pi.context.projection import (
     project_messages,
     system_message_from_state,
 )
+from mini_pi.context.serializer import serialize_transcript
+from mini_pi.context.summarizer import summarize_transcript
 from mini_pi.context.tokens import TokenEstimate, estimate_tokens
-from mini_pi.errors import SessionError
-from mini_pi.llm.types import AssistantMessage, Message, SystemMessage, ToolMessage
+from mini_pi.errors import CompactionError, SessionError
+from mini_pi.llm.base import LLMClient
+from mini_pi.llm.types import (
+    AssistantMessage,
+    Message,
+    SystemMessage,
+    ToolMessage,
+    Usage,
+)
 
 if TYPE_CHECKING:
     # 仅用于类型标注：运行时导入会触发 session 包与 jsonl 的循环依赖
@@ -337,3 +346,27 @@ def _modified_files(messages: Sequence[Message]) -> tuple[str, ...]:
         for path in message.modified_files
     }
     return tuple(sorted(files))
+
+
+@dataclass(frozen=True, slots=True)
+class CompactionResult:
+    """摘要文本与生成它的用量，连同产生它的 plan；仍不写盘。"""
+
+    summary: str
+    usage: Usage | None
+    plan: CompactionPlan
+
+
+def generate_compaction_result(plan: CompactionPlan, llm: LLMClient) -> CompactionResult:
+    """对 plan 生成摘要与 usage；不写盘、不替换 AgentState。
+
+    - 只发送 plan 选出的新消息；重复压缩由 previous_summary 增量更新，不重发更早原文
+    - 工具轮的关键上下文留在保留区，摘要输入不出现悬空的工具调用
+    - 摘要失败直接冒泡（CompactionError / LLMError），不会留下半成品
+    """
+    transcript = serialize_transcript(plan.messages_to_summarize)
+    if not transcript.strip():
+        # 历史里的消息全为空正文：没有可摘要的事实，不能发空请求
+        raise CompactionError("compaction plan produced no serializable transcript")
+    summary = summarize_transcript(llm, transcript, previous_summary=plan.previous_summary)
+    return CompactionResult(summary=summary.summary, usage=summary.usage, plan=plan)

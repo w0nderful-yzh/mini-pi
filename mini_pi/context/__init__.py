@@ -3,9 +3,11 @@
 from mini_pi.context.compaction import (
     CompactionPlan,
     CompactionPreparation,
+    CompactionResult,
     CutBoundary,
     CutPoint,
     find_cut_point,
+    generate_compaction_result,
     prepare_compaction,
 )
 from mini_pi.context.policy import (
@@ -46,6 +48,7 @@ __all__ = [
     "CompactionPlan",
     "CompactionPreparation",
     "CompactionProjection",
+    "CompactionResult",
     "CompactionStatus",
     "ContextPolicy",
     "CutBoundary",
@@ -61,6 +64,7 @@ __all__ = [
     "estimate_tokens",
     "evaluate_compaction",
     "find_cut_point",
+    "generate_compaction_result",
     "load_project_instructions",
     "prepare_compaction",
     "project_compaction",

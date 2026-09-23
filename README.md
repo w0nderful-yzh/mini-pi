@@ -168,7 +168,7 @@ Agent Runtime 自己实现。
 
 ## 5. 目录结构
 
-当前实现范围（M1-M6 + M7.1-M7.4 + M7.C1-C8 + M7.5a-M7.5c）：
+当前实现范围（M1-M6 + M7.1-M7.4 + M7.C1-C8 + M7.5a-M7.5d）：
 
 ```text
 mini-pi/
@@ -378,7 +378,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C8、M7.5a-M7.5c 已完成；下一项 M7.5d） |
+| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C8、M7.5a-M7.5d 已完成；下一项 M7.5e） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
