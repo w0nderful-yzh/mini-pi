@@ -161,12 +161,14 @@ def _segment(messages: Sequence[Message]) -> list[_Segment]:
 
 
 def _tokens_from(segments: Sequence[_Segment], start_index: int) -> int:
+    """累加 start_index 及之后所有片段的 token（保留区总量）。"""
     return sum(segment.tokens for segment in segments if segment.start >= start_index)
 
 
 def _next_splittable_segment(
     segments: Sequence[_Segment], start_index: int
 ) -> _Segment | None:
+    """从 start_index 往后找第一个可作保留起点的片段（跳过 system/残缺工具轮）。"""
     for segment in segments:
         if segment.start >= start_index and segment.splittable:
             return segment
@@ -176,6 +178,7 @@ def _next_splittable_segment(
 def _previous_user_segment(
     segments: Sequence[_Segment], start_index: int
 ) -> _Segment | None:
+    """找 start_index 之前最近的 user 边界片段；没有则返回 None。"""
     user_segment: _Segment | None = None
     for segment in segments:
         if segment.start >= start_index:

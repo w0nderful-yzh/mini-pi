@@ -24,9 +24,11 @@ class GitDiffTool(Tool):
     max_bytes = 50_000
 
     def __init__(self, workspace: Workspace) -> None:
+        """持有 Workspace，git 在 root 执行且路径先校验。"""
         self._workspace = workspace
 
     def execute(self, path: str | None = None, staged: bool = False) -> ToolResult:
+        """运行 git diff 返回统一 diff；git 失败抛 ToolError，空输出回 “No changes.”。"""
         argv = ["git", "diff", "--no-color"]
         if staged:
             argv.append("--cached")

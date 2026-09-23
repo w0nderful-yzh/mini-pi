@@ -188,6 +188,7 @@ class ConsoleRenderer:
         show_thinking: bool = True,
         verbose: bool = False,
     ) -> None:
+        """初始化渲染器与本次 run 的用量/计时累加字段。"""
         self.console = console or Console()
         self._printing_text = False
         self._show_thinking = show_thinking
@@ -252,6 +253,7 @@ class ConsoleRenderer:
         return (self._input_tokens, self._output_tokens) if self._has_usage else None
 
     def handle(self, event: AgentEvent) -> None:
+        """按 AgentEvent 类型渲染进度/工具/用量；纯消费事件不做决策。"""
         if isinstance(event, AgentStartEvent):
             self._input_tokens = 0
             self._output_tokens = 0
@@ -358,6 +360,7 @@ class ConsoleRenderer:
             )
 
     def _render_end(self, event: AgentEndEvent) -> None:
+        """根据终止原因输出结束提示（completed/step_limit/error/budget_limit）。"""
         if event.reason == "step_limit":
             self.console.print(
                 "Reached the step limit before finishing the task.", style="yellow", markup=False

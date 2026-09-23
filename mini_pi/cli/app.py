@@ -187,6 +187,7 @@ def _build_agent(
     max_run_input_tokens: int | None = None,
     renderer: ConsoleRenderer,
 ) -> Agent:
+    """装配纯内存 Agent（--no-session）；事件走 renderer，不接持久化。"""
     return Agent(
         llm=llm,
         registry=build_default_registry(workspace),
@@ -346,6 +347,7 @@ def cli(
         False, "--continue", help="Resume the latest Session for this workspace."
     ),
 ) -> None:
+    """主命令：解析选项后一次性跑 prompt 或进入交互式 REPL。"""
     if resume is not None and continue_session:
         raise typer.BadParameter("--resume and --continue are mutually exclusive")
     if no_session and (resume is not None or continue_session):
@@ -591,5 +593,6 @@ def _configure_stdio() -> None:
 
 
 def main() -> None:
+    """入口：先把 stdio 强制为 UTF-8，再交给 Typer app。"""
     _configure_stdio()
     app()

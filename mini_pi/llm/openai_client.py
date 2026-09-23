@@ -136,6 +136,7 @@ class _ToolCallBuffer:
     """单个工具调用的参数 JSON 拼装缓冲。"""
 
     def __init__(self) -> None:
+        """初始化空缓冲；id/name/arguments 由后续分片逐步填充。"""
         self.id = ""
         self.name = ""
         self.arguments_json = ""
@@ -145,6 +146,7 @@ class _AssistantAccumulator:
     """把 SSE chunk 序列聚合成 AssistantMessage，并产出对应事件。"""
 
     def __init__(self) -> None:
+        """初始化累加器：文本/思考/工具调用/finish_reason/usage 均为空。"""
         self._text: list[str] = []
         self._reasoning: list[str] = []
         self._tool_calls: dict[int, _ToolCallBuffer] = {}
@@ -152,6 +154,7 @@ class _AssistantAccumulator:
         self._usage: Usage | None = None
 
     def consume(self, chunk: Any) -> Iterator[StreamEvent]:
+        """消费一个 SSE chunk，累加内容并产出对应的增量事件。"""
         # usage 可能出现在 choices 为空的最后一个 chunk 上
         usage = getattr(chunk, "usage", None)
         if usage is not None:
@@ -195,6 +198,7 @@ class _AssistantAccumulator:
                 )
 
     def _build_tool_calls(self) -> list[tuple[int, ToolCall]]:
+        """按 index 排序解析参数 JSON；缺名或非法 JSON 显式报错，不静默兼底。"""
         built: list[tuple[int, ToolCall]] = []
         for index in sorted(self._tool_calls):
             buffer = self._tool_calls[index]
@@ -250,6 +254,7 @@ class OpenAIClient(BaseLLMClient):
         sleep: Callable[[float], None] = time.sleep,
         client: Any = None,
     ) -> None:
+        """复用基类重试配置；未注入 client 时按 Key/base_url 构造 SDK（SDK 重试关闭）。"""
         super().__init__(model=model, max_retries=max_retries, sleep=sleep)
         if client is None:
             resolved_key = api_key or os.environ.get(self.api_key_env)
@@ -260,11 +265,13 @@ class OpenAIClient(BaseLLMClient):
         self._client = client
 
     def _messages_to_wire(self, messages: list[Message]) -> list[dict[str, Any]]:
+        """transcript 转 OpenAI wire 格式（不回放 reasoning）。"""
         return to_openai_messages(messages)
 
     def _stream_once(
         self, messages: list[Message], tools: list[ToolSchema] | None = None
     ) -> Iterator[StreamEvent]:
+        """单次流式请求：发起失败可交基类重试，StartEvent 产出后的失败不重试。"""
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": self._messages_to_wire(messages),

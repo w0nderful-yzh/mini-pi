@@ -24,9 +24,11 @@ class ReadTool(Tool):
     max_bytes = 50_000
 
     def __init__(self, workspace: Workspace) -> None:
+        """持有 Workspace，只读不声明 modified_files。"""
         self._workspace = workspace
 
     def execute(self, path: str, offset: int = 1, limit: int | None = None) -> ToolResult:
+        """分页读取 UTF-8 文本；拦二进制/非 UTF-8/越界 offset，截断时附续读提示。"""
         rel = self._workspace.relative(path)
         resolved = self._workspace.resolve(path)
         if not resolved.is_file():

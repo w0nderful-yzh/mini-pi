@@ -25,6 +25,7 @@ class DeepSeekClient(OpenAIClient):
         sleep: Callable[[float], None] = time.sleep,
         client: Any = None,
     ) -> None:
+        """注入 DeepSeek 默认 model 与 base_url，其余复用 OpenAIClient。"""
         super().__init__(
             model=model,
             api_key=api_key,
@@ -35,5 +36,6 @@ class DeepSeekClient(OpenAIClient):
         )
 
     def _messages_to_wire(self, messages: list[Message]) -> list[dict[str, Any]]:
+        """DeepSeek 需回放 reasoning_content，因此开启 include_reasoning。"""
         # 开启 include_reasoning，否则多轮对话中 DeepSeek 会拒绝请求
         return to_openai_messages(messages, include_reasoning=True)

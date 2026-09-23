@@ -25,6 +25,7 @@ class LLMError(MiniPiError):
     """LLM 层可预期失败，由 LLM Client 编码为 ErrorEvent。"""
 
     def __init__(self, message: str, *, retryable: bool, status_code: int | None = None) -> None:
+        """记录是否可重试与 HTTP 状态码，供上层重试与错误分类。"""
         super().__init__(message)
         self.retryable = retryable
         self.status_code = status_code

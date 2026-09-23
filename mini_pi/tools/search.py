@@ -55,6 +55,7 @@ class SearchTool(Tool):
     max_file_bytes = 1_000_000
 
     def __init__(self, workspace: Workspace) -> None:
+        """持有 Workspace，搜索范围限制在 root 内。"""
         self._workspace = workspace
 
     def execute(
@@ -65,6 +66,7 @@ class SearchTool(Tool):
         is_regex: bool = False,
         limit: int = 100,
     ) -> ToolResult:
+        """校验参数后选择 rg/Python 引擎，返回 file:line:text 匹配。"""
         if not pattern:
             raise ToolArgumentError("pattern must not be empty")
         if is_regex:
@@ -99,6 +101,7 @@ class SearchTool(Tool):
         is_regex: bool,
         limit: int,
     ) -> tuple[list[str], bool]:
+        """调用 rg 并把输出解析为相对路径匹配；exit 非 0/1 视为工具故障。"""
         argv = [rg, "--line-number", "--no-heading", "--color", "never"]
         if not is_regex:
             argv.append("--fixed-strings")
@@ -131,6 +134,7 @@ class SearchTool(Tool):
         is_regex: bool,
         limit: int,
     ) -> tuple[list[str], bool]:
+        """无 rg 时的 Python 兜底：跳过二进制/超大/非 UTF-8 文件。"""
         files = [base] if base.is_file() else list(self._iter_files(base))
         matches: list[str] = []
         truncated = False

@@ -19,9 +19,11 @@ class WriteTool(Tool):
     args_model = WriteArgs
 
     def __init__(self, workspace: Workspace) -> None:
+        """持有 Workspace，所有路径经边界校验。"""
         self._workspace = workspace
 
     def execute(self, path: str, content: str) -> ToolResult:
+        """原子写整文件并声明 modified_files（新文件与覆写同处理）。"""
         rel = self._workspace.relative(path)
         self._workspace.write_text(path, content)
         size = len(content.encode("utf-8"))

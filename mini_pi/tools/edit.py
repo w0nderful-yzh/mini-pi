@@ -30,9 +30,11 @@ class EditTool(Tool):
     args_model = EditArgs
 
     def __init__(self, workspace: Workspace) -> None:
+        """持有 Workspace，文件读写均经边界校验。"""
         self._workspace = workspace
 
     def execute(self, path: str, edits: list[EditSpec]) -> ToolResult:
+        """按原始内容定位并校验唯一/不重叠后从后往前替换，返回 diff。"""
         rel = self._workspace.relative(path)
         resolved = self._workspace.resolve(path)
         if not resolved.is_file():

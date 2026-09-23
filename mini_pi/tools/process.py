@@ -32,6 +32,7 @@ class _BoundedCapture:
     """固定内存的字节缓冲：head 保留开头，tail 保留结尾。"""
 
     def __init__(self, max_bytes: int, keep: Literal["head", "tail"]) -> None:
+        """初始化固定上限的空缓冲；keep 决定溢出时丢弃哪端。"""
         if max_bytes <= 0:
             raise ValueError("max_bytes must be > 0")
         self._max = max_bytes
@@ -40,6 +41,7 @@ class _BoundedCapture:
         self._truncated = False
 
     def feed(self, chunk: bytes) -> None:
+        """按 head/tail 方向写入分片；满上限则丢弃多余部分并标记截断。"""
         if not chunk:
             return
         if self._keep == "head":
@@ -64,6 +66,7 @@ class _BoundedCapture:
         self._buffer.extend(chunk)
 
     def result(self) -> tuple[str, bool]:
+        """返回 (解码文本, 是否截断)。"""
         # 截断可能落在多字节字符中间，用 replace 容错解码
         return self._buffer.decode("utf-8", errors="replace"), self._truncated
 
@@ -116,6 +119,7 @@ def _run_bounded(
     max_output_bytes: int,
     keep: Literal["head", "tail"],
 ) -> ProcessResult:
+    """等待进程结束，读线程排空管道，超时杀进程组并汇总有界输出。"""
     stdout_capture = _BoundedCapture(max_output_bytes, keep)
     stderr_capture = _BoundedCapture(max_output_bytes, keep)
     # 用读取线程持续排空管道，避免子进程因管道写满而阻塞
@@ -189,6 +193,7 @@ def _kill_group(process: subprocess.Popen[bytes]) -> None:
 
 
 def _close(stream: IO[bytes] | None) -> None:
+    """关闭管道流；已关闭或出错都忽略。"""
     if stream is None:
         return
     try:

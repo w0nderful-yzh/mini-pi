@@ -94,6 +94,7 @@ class JsonlSession:
     def __init__(
         self, *, path: Path, header: SessionHeader, entries: list[SessionEntry]
     ) -> None:
+        """缓存 path/header/entries，并建 id 索引与初始 leaf（空 Session 为 None）。"""
         self._path = path
         self._header = header
         self._entries = entries

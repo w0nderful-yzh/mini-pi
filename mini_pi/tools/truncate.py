@@ -21,6 +21,7 @@ def truncate_text(
         truncated = True
 
     def encoded_length(candidate: list[str]) -> int:
+        """按整行拼接后的 UTF-8 字节数度量，避免多字节字符被切断。"""
         return len("\n".join(candidate).encode("utf-8"))
 
     # 逐行丢弃直到满足字节上限；UTF-8 多字节字符不会被切断

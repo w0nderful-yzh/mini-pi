@@ -55,6 +55,7 @@ class AgentSession:
         provider: str,
         model: str,
     ) -> None:
+        """持有会话/依赖并构建 Agent，将提交回调接到自身的 durable-first 入口。"""
         self._session = session
         self._llm = llm
         self._registry = registry

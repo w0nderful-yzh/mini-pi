@@ -33,6 +33,7 @@ def resolve_api_key(provider: str, *, env_var: str, path: Path | None = None) ->
 
 
 def load_api_key(provider: str, *, path: Path | None = None) -> str | None:
+    """从认证文件读取指定 provider 的 API Key；文件/条目缺失返回 None，格式非法报错。"""
     auth_path = path or DEFAULT_AUTH_PATH
     if not auth_path.is_file():
         return None

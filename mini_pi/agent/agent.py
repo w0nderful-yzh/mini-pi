@@ -31,6 +31,7 @@ class Agent:
         on_event: Callable[[AgentEvent], None] | None = None,
         on_message_commit: MessageCommit | None = None,
     ) -> None:
+        """注入依赖与构建 Workspace/State；预算与回调在此固定，多次 run 复用。"""
         if max_steps <= 0:
             raise ValueError("max_steps must be > 0")
         if max_run_input_tokens is not None and max_run_input_tokens <= 0:

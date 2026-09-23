@@ -59,6 +59,7 @@ class _RunInputBudget:
 
     @property
     def source(self) -> BudgetSource:
+        """本run已用量的来源：全实测 provider、全估算，或两者 mixed。"""
         if self.measured_requests and self.estimated_requests:
             return "mixed"
         if self.measured_requests:
@@ -280,6 +281,7 @@ def _append_tool_message(
     is_error: bool,
     on_message_commit: MessageCommit | None,
 ) -> None:
+    """将工具结果组装为 ToolMessage 并提交；失败时不记录 modified_files。"""
     message = ToolMessage(
         tool_call_id=call.id,
         name=call.name,
@@ -293,4 +295,5 @@ def _append_tool_message(
 
 
 def _noop(event: AgentEvent) -> None:
+    """默认事件 Sink：吞掉事件，供不需展示的调用方（如测试）使用。"""
     pass

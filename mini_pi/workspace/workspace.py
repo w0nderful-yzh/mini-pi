@@ -13,6 +13,7 @@ class Workspace:
     """所有文件操作的唯一入口，禁止 Tool 绕过此类直接 open()。"""
 
     def __init__(self, root: str | Path) -> None:
+        """校验 root 为已存在目录并 resolve 为真实路径（拦截 /tmp 等符号链接）。"""
         candidate = Path(root).expanduser()
         if not candidate.is_dir():
             raise NotADirectoryError(f"workspace root is not a directory: {candidate}")
@@ -21,6 +22,7 @@ class Workspace:
 
     @property
     def root(self) -> Path:
+        """返回已 resolve 的 workspace 根目录。"""
         return self._root
 
     def resolve(self, path: str | Path) -> Path:
@@ -38,6 +40,7 @@ class Workspace:
         return self.resolve(path).relative_to(self._root).as_posix()
 
     def read_text(self, path: str | Path, *, encoding: str = "utf-8") -> str:
+        """经 resolve 边界校验后读取文本。"""
         return self.resolve(path).read_text(encoding=encoding)
 
     def read_bytes(self, path: str | Path) -> bytes:

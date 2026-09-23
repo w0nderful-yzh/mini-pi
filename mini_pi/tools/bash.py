@@ -23,9 +23,11 @@ class BashTool(Tool):
     max_bytes = 50_000
 
     def __init__(self, workspace: Workspace) -> None:
+        """持有 Workspace，命令 cwd 固定为 root。"""
         self._workspace = workspace
 
     def execute(self, command: str, timeout: int = 120) -> ToolResult:
+        """执行命令并截断输出；非零退出码如实回传为 Observation，不抛错。"""
         result = run_shell(command, cwd=self._workspace.root, timeout_s=timeout)
         # 命令输出尾部信息量更大（报错在最后），按 tail 保留
         stdout, stdout_truncated = truncate_text(

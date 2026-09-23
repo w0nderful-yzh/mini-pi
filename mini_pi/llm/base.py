@@ -23,11 +23,15 @@ class LLMClient(Protocol):
 
     def stream(
         self, messages: list[Message], tools: list[ToolSchema] | None = None
-    ) -> Iterator[StreamEvent]: ...
+    ) -> Iterator[StreamEvent]:
+        """契约：流式产出文本/思考增量、错误或 done 事件。"""
+        ...
 
     def complete(
         self, messages: list[Message], tools: list[ToolSchema] | None = None
-    ) -> AssistantMessage: ...
+    ) -> AssistantMessage:
+        """契约：一次性返回聚合后的完整 assistant 消息。"""
+        ...
 
 
 def backoff_seconds(attempt: int) -> float:
@@ -48,6 +52,7 @@ class BaseLLMClient(ABC):
         max_retries: int = 2,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
+        """保存 model 与重试上限；sleep 可注入供测试避免真实等待。"""
         if max_retries < 0:
             raise ValueError("max_retries must be >= 0")
         self.model = model
@@ -58,6 +63,7 @@ class BaseLLMClient(ABC):
     def stream(
         self, messages: list[Message], tools: list[ToolSchema] | None = None
     ) -> Iterator[StreamEvent]:
+        """带重试的流式入口：仅重试尚未产出任何事件的可重试错误。"""
         for attempt in range(self.max_retries + 1):
             started = False
             try:
@@ -75,7 +81,9 @@ class BaseLLMClient(ABC):
     @abstractmethod
     def _stream_once(
         self, messages: list[Message], tools: list[ToolSchema] | None = None
-    ) -> Iterator[StreamEvent]: ...
+    ) -> Iterator[StreamEvent]:
+        """契约：子类实现单次向 Provider 请求并产出原始事件流（不含重试）。"""
+        ...
 
     def complete(
         self, messages: list[Message], tools: list[ToolSchema] | None = None

@@ -15,6 +15,7 @@ class ToolRegistry:
     """维护 name -> Tool 映射，统一校验参数后再调用工具。"""
 
     def __init__(self) -> None:
+        """初始化空的 name -> Tool 映射。"""
         self._tools: dict[str, Tool] = {}
 
     def register(self, tool: Tool) -> None:
@@ -28,6 +29,7 @@ class ToolRegistry:
         return [tool.schema() for tool in self._tools.values()]
 
     def execute(self, name: str, arguments: dict[str, Any]) -> ToolResult:
+        """校验工具存在与参数后执行；未知工具/参数非法转对应 ToolError。"""
         tool = self._tools.get(name)
         if tool is None:
             raise ToolNotFoundError(f"unknown tool: {name!r}")
