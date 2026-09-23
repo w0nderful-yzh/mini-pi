@@ -50,6 +50,7 @@ class AgentSession:
         llm: LLMClient,
         registry: ToolRegistry,
         max_steps: int,
+        max_run_input_tokens: int | None,
         on_event: Callable[[AgentEvent], None] | None,
         provider: str,
         model: str,
@@ -58,6 +59,7 @@ class AgentSession:
         self._llm = llm
         self._registry = registry
         self._max_steps = max_steps
+        self._max_run_input_tokens = max_run_input_tokens
         self._on_event = on_event
         self._provider = provider
         self._model = model
@@ -66,6 +68,7 @@ class AgentSession:
             registry=registry,
             cwd=session.header.cwd,
             max_steps=max_steps,
+            max_run_input_tokens=max_run_input_tokens,
             on_event=on_event,
             on_message_commit=self._commit_message,
         )
@@ -81,11 +84,14 @@ class AgentSession:
         model: str,
         sessions_root: str | Path | None = None,
         max_steps: int = 50,
+        max_run_input_tokens: int | None = None,
         on_event: Callable[[AgentEvent], None] | None = None,
     ) -> AgentSession:
         """校验运行参数后创建 header，并接通 durable-first 消息提交。"""
         if max_steps <= 0:
             raise ValueError("max_steps must be > 0")
+        if max_run_input_tokens is not None and max_run_input_tokens <= 0:
+            raise ValueError("max_run_input_tokens must be > 0")
         session = JsonlSession.create(
             cwd=cwd,
             provider=provider,
@@ -97,6 +103,7 @@ class AgentSession:
             llm=llm,
             registry=registry,
             max_steps=max_steps,
+            max_run_input_tokens=max_run_input_tokens,
             on_event=on_event,
             provider=provider,
             model=model,
@@ -113,11 +120,14 @@ class AgentSession:
         model: str | None = None,
         llm_factory: LLMFactory | None = None,
         max_steps: int = 50,
+        max_run_input_tokens: int | None = None,
         on_event: Callable[[AgentEvent], None] | None = None,
     ) -> AgentSession:
         """从活动 leaf 恢复状态和模型配置，后续消息沿原 leaf 追加。"""
         if max_steps <= 0:
             raise ValueError("max_steps must be > 0")
+        if max_run_input_tokens is not None and max_run_input_tokens <= 0:
+            raise ValueError("max_run_input_tokens must be > 0")
         session = JsonlSession.load(path, expected_cwd=cwd)
         if not session.header.cwd.is_dir():
             raise SessionError(f"session cwd does not exist: {session.header.cwd}")
@@ -136,6 +146,7 @@ class AgentSession:
             llm=llm,
             registry=registry,
             max_steps=max_steps,
+            max_run_input_tokens=max_run_input_tokens,
             on_event=on_event,
             provider=resolved_provider,
             model=resolved_model,
@@ -186,6 +197,11 @@ class AgentSession:
         """只读活动链中的最近任务；resume 后仍可回看原始 usage。"""
         return recent_session_run_usage(self._session.active_entries())
 
+    @property
+    def max_run_input_tokens(self) -> int | None:
+        """返回每次 run 重置的显式累计输入预算。"""
+        return self._max_run_input_tokens
+
     def new(self, *, sessions_root: str | Path | None = None) -> AgentSession:
         """用当前模型和工具创建独立会话，保留旧 JSONL 以供恢复。"""
         return self.create(
@@ -196,6 +212,7 @@ class AgentSession:
             model=self._model,
             sessions_root=sessions_root,
             max_steps=self._max_steps,
+            max_run_input_tokens=self._max_run_input_tokens,
             on_event=self._on_event,
         )
 

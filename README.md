@@ -73,7 +73,7 @@ Python Coding Agent Harness
 | 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 第一阶段单层循环，只处理 tool batch；队列、steering 留到 Session 阶段 |
 | 事件驱动 | `AgentEvent` 事件流驱动 TUI/print/RPC，UI 是纯消费者 | Loop 发 `AgentEvent`，CLI 只做渲染；M7.C7 的命令标题和失败提示不进入 ToolMessage，也不改变 Agent 决策 |
 | 思考与终端展示 | thinking 事件可供 UI 展示，Provider 保留必要回放字段 | M7.C 默认只显示思考状态图标；CLI 元数据不进入消息历史，DeepSeek 的 `reasoning_content` 回放保持协议兼容 |
-| 用量与上下文 | 模型请求返回 usage，compaction 缩短后续模型投影 | M7.C6 已区分单次任务累计 Provider 用量和当前上下文估算；C8 再实现请求边界的任务预算，窗口阈值只负责压缩安全 |
+| 用量与上下文 | 模型请求返回 usage，compaction 缩短后续模型投影 | M7.C6 已区分单次任务累计 Provider 用量和当前上下文估算；M7.C8 提供默认关闭、显式启用的请求边界任务预算，窗口阈值只负责压缩安全 |
 | 工具结果生命周期 | Session 保留完整消息，compaction 生成摘要投影 | 当前工具轮使用真实且有界的 observation；JSONL 原始消息不改写，后续投影只在安全切点压缩，展示摘要不替代 ToolMessage |
 | LLM 流式 | provider 无关的 `AssistantMessageEvent` 事件流，错误编码进流 | 复刻：同步 SDK + `stream=True`，`ErrorEvent` 不裸抛给 Loop |
 | Tool Call 拼装 | 按 `index` 聚合 SSE 增量，结束后解析 JSON | 复刻：`_AssistantAccumulator`，解析失败显式报错（不静默返回 `{}`） |
@@ -272,7 +272,7 @@ LLM → Tool Call → Tool → Observation → LLM → ...
 
 - `run_loop()` 是纯函数：输入 `AgentState + LLMClient + ToolRegistry`，输出最终 `AssistantMessage`
 - 每轮通过 `on_event` 回调发出 `AgentEvent`，CLI 是纯消费者
-- 终止条件：无 tool call / LLM error / 达到 max_steps / `length` 截断后的修复轮结束
+- 终止条件：无 tool call / LLM error / 达到 max_steps / 显式任务预算阻止下一请求 / `length` 截断后的修复轮结束
 - `stop_reason == "length"` 时**不执行**任何 tool call，全部转 error observation 让模型重发
 - 不做 `read → edit → test` 固定流程，下一步由模型根据 Observation 自主决定
 
@@ -325,6 +325,7 @@ mini-pi --resume <session.jsonl> # 恢复指定会话
 mini-pi --continue              # 继续当前 workspace 最近的会话
 mini-pi --no-banner             # 交互启动时不打印 ASCII Banner
 mini-pi --verbose               # 显示工具参数与有界日志
+mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入预算
 # 持久化 REPL 支持 /new、/model、/status、/context、/tools、/help、/exit；纯内存模式支持 /reset
 ```
 
@@ -341,6 +342,7 @@ mini-pi --verbose               # 显示工具参数与有界日志
 - `/status` 分开显示当前投影估算与最近任务的请求数、累计 Provider 用量、工具数和耗时；Session 恢复后从完整活动链重建统计，`/status full` 才显示完整路径。`/context` 分解当前投影，并单列最近请求输入与任务累计用量；`/tools` 列出工具
 - 流式打印模型正文，默认工具事件根据已知命令形态显示操作标题、真实退出码、超时/截断与简短 stderr；未知或含凭据的 shell 命令采用保守标题，不推断任务成败。`--verbose` 展示参数及 Tool 层已截断日志并脱敏已知凭据。任务结束只打印一行请求、用量覆盖率、工具数和耗时；缺失 usage 明确标为不可用或部分实测。耗时在恢复后是 JSONL 消息时间的近似跨度
 - `--max-steps` 控制单次任务的最大循环步数（默认 50）
+- `--max-run-input-tokens` 显式启用每次 `run()` 的累计输入预算，默认关闭。Loop 在下一次模型请求前用 Provider 已报告 input 加当前投影估算检查；接近上限时只提示模型收敛一次，预计超限则以 `budget_limit` 停止。它是请求边界控制，单次请求仍可能超过预测；已提交的消息、工具结果和文件改动保留，交互模式下一条任务获得新预算
 
 ---
 
@@ -374,7 +376,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C7 已完成；下一项 M7.C8） |
+| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C8 已完成；下一项 M7.5a） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

@@ -67,13 +67,28 @@ class TurnEndEvent(BaseModel):
     step: int
 
 
+class BudgetWarningEvent(BaseModel):
+    """下一请求接近用户预算；提示只作用于本次 run。"""
+
+    type: Literal["budget_warning"] = "budget_warning"
+    limit: int
+    used: int
+    remaining: int
+    predicted_next_input: int
+    source: Literal["provider", "estimated", "mixed"]
+
+
 class AgentEndEvent(BaseModel):
     """一次 run 结束，reason 说明终止原因。"""
 
     type: Literal["agent_end"] = "agent_end"
-    reason: Literal["completed", "step_limit", "error"]
+    reason: Literal["completed", "step_limit", "budget_limit", "error"]
     message: AssistantMessage | None = None
     error: str | None = None
+    budget_limit: int | None = None
+    budget_used: int | None = None
+    predicted_next_input: int | None = None
+    budget_source: Literal["provider", "estimated", "mixed"] | None = None
 
 
 # 以 type 为判别字段的事件联合，CLI 只做分发渲染，不参与决策
@@ -86,6 +101,7 @@ AgentEvent = Annotated[
     | ToolExecutionStartEvent
     | ToolExecutionEndEvent
     | TurnEndEvent
+    | BudgetWarningEvent
     | AgentEndEvent,
     Field(discriminator="type"),
 ]

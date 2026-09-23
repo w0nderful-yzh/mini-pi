@@ -151,6 +151,7 @@ def _prompt_and_build(
     console: Console,
     workspace: Workspace,
     max_steps: int,
+    max_run_input_tokens: int | None = None,
     renderer: ConsoleRenderer,
     provider: str,
     model: str,
@@ -170,6 +171,7 @@ def _prompt_and_build(
         llm=create_llm(provider, model, api_key=api_key),
         workspace=workspace,
         max_steps=max_steps,
+        max_run_input_tokens=max_run_input_tokens,
         renderer=renderer,
         provider=provider,
         model=model,
@@ -178,13 +180,19 @@ def _prompt_and_build(
 
 
 def _build_agent(
-    *, llm: LLMClient, workspace: Workspace, max_steps: int, renderer: ConsoleRenderer
+    *,
+    llm: LLMClient,
+    workspace: Workspace,
+    max_steps: int,
+    max_run_input_tokens: int | None = None,
+    renderer: ConsoleRenderer,
 ) -> Agent:
     return Agent(
         llm=llm,
         registry=build_default_registry(workspace),
         cwd=workspace.root,
         max_steps=max_steps,
+        max_run_input_tokens=max_run_input_tokens,
         on_event=renderer.handle,
     )
 
@@ -194,6 +202,7 @@ def _build_runtime(
     llm: LLMClient,
     workspace: Workspace,
     max_steps: int,
+    max_run_input_tokens: int | None = None,
     renderer: ConsoleRenderer,
     provider: str,
     model: str,
@@ -201,7 +210,13 @@ def _build_runtime(
 ) -> Agent | AgentSession:
     """按 CLI 模式装配纯内存 Agent 或持久化 AgentSession。"""
     if no_session:
-        return _build_agent(llm=llm, workspace=workspace, max_steps=max_steps, renderer=renderer)
+        return _build_agent(
+            llm=llm,
+            workspace=workspace,
+            max_steps=max_steps,
+            max_run_input_tokens=max_run_input_tokens,
+            renderer=renderer,
+        )
     return AgentSession.create(
         cwd=workspace.root,
         llm=llm,
@@ -209,6 +224,7 @@ def _build_runtime(
         provider=provider,
         model=model,
         max_steps=max_steps,
+        max_run_input_tokens=max_run_input_tokens,
         on_event=renderer.handle,
     )
 
@@ -226,6 +242,7 @@ def _switch_connection(
     model: str,
     workspace: Workspace,
     max_steps: int,
+    max_run_input_tokens: int | None = None,
     renderer: ConsoleRenderer,
     no_session: bool,
     arguments: list[str],
@@ -277,6 +294,7 @@ def _switch_connection(
                 llm=new_llm,
                 workspace=workspace,
                 max_steps=max_steps,
+                max_run_input_tokens=max_run_input_tokens,
                 renderer=renderer,
                 provider=chosen_provider,
                 model=chosen_model,
@@ -314,6 +332,12 @@ def cli(
     model: str | None = typer.Option(None, "--model", "-m"),
     cwd: Path = typer.Option(Path("."), "--cwd"),
     max_steps: int = typer.Option(50, "--max-steps", min=1),
+    max_run_input_tokens: int | None = typer.Option(
+        None,
+        "--max-run-input-tokens",
+        min=1,
+        help="Opt-in cumulative input budget per task, checked before each model request.",
+    ),
     no_session: bool = typer.Option(False, "--no-session", help="Keep history in memory only."),
     no_banner: bool = typer.Option(False, "--no-banner", help="Do not print the startup banner."),
     verbose: bool = typer.Option(False, "--verbose", help="Show tool arguments and bounded logs."),
@@ -344,6 +368,7 @@ def cli(
                 model=model,
                 llm_factory=create_llm,
                 max_steps=max_steps,
+                max_run_input_tokens=max_run_input_tokens,
                 on_event=renderer.handle,
             )
         except MiniPiError as exc:
@@ -356,6 +381,7 @@ def cli(
                 llm=create_llm(provider, model),
                 workspace=workspace,
                 max_steps=max_steps,
+                max_run_input_tokens=max_run_input_tokens,
                 renderer=renderer,
                 provider=provider,
                 model=model,
@@ -388,6 +414,9 @@ def cli(
             console.print(f"Session storage: {agent.path.parent}", soft_wrap=True)
         try:
             agent.run(prompt)
+            if renderer.last_end_reason == "budget_limit":
+                # 一次性调用未完成必须返回非零；Session 已保留，可继续恢复。
+                raise typer.Exit(code=2)
         except MiniPiError as exc:
             # 一次性任务失败以非零码退出，避免把可预期错误伪装成成功
             Console(stderr=True).print(f"error: {exc}", style="red", soft_wrap=True)
@@ -414,6 +443,7 @@ def cli(
             console=console,
             workspace=workspace,
             max_steps=max_steps,
+            max_run_input_tokens=max_run_input_tokens,
             renderer=renderer,
             provider=provider,
             model=model,
@@ -504,6 +534,7 @@ def cli(
                 model=model,
                 workspace=workspace,
                 max_steps=max_steps,
+                max_run_input_tokens=max_run_input_tokens,
                 renderer=renderer,
                 no_session=no_session,
                 arguments=stripped.split()[1:],

@@ -76,6 +76,13 @@ def render_status(
     console.print(f"Current context (estimated): {_usage_label(_stats(agent).total, model)}", markup=False)
     usage = _run_usage(agent, renderer)
     console.print(f"Last run Provider usage: {_provider_label(usage)}", markup=False)
+    budget = agent.max_run_input_tokens if agent is not None else None
+    console.print(
+        "Run input budget: disabled"
+        if budget is None
+        else f"Run input budget: {budget} tokens (request-boundary, resets per task)",
+        markup=False,
+    )
     if usage is not None:
         console.print(f"Last run requests: {usage.requests}", markup=False)
         console.print(f"Last run tools: {usage.tool_calls}", markup=False)

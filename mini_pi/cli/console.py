@@ -16,6 +16,7 @@ from mini_pi.agent.events import (
     AgentEndEvent,
     AgentEvent,
     AgentStartEvent,
+    BudgetWarningEvent,
     MessageDeltaEvent,
     MessageEndEvent,
     MessageStartEvent,
@@ -200,6 +201,7 @@ class ConsoleRenderer:
         self._measured_requests = 0
         self._started_at: float | None = None
         self.last_run_seconds: float | None = None
+        self.last_end_reason: str | None = None
         self.last_tool_count = 0
 
     def _start_thinking(self) -> None:
@@ -258,6 +260,7 @@ class ConsoleRenderer:
             self._measured_requests = 0
             self._started_at = perf_counter()
             self.last_run_seconds = None
+            self.last_end_reason = None
             self.last_tool_count = 0
         elif isinstance(event, MessageStartEvent):
             self._start_thinking()
@@ -323,6 +326,7 @@ class ConsoleRenderer:
                 )
         elif isinstance(event, AgentEndEvent):
             self._stop_thinking()
+            self.last_end_reason = event.reason
             if self._started_at is not None:
                 self.last_run_seconds = perf_counter() - self._started_at
             self._render_end(event)
@@ -341,6 +345,17 @@ class ConsoleRenderer:
                 style="dim",
                 markup=False,
             )
+        elif isinstance(event, BudgetWarningEvent):
+            qualifier = "estimated" if event.source == "estimated" else event.source
+            self.console.print(
+                "Run input budget is close: "
+                f"{event.used}/{event.limit} used ({qualifier}); "
+                f"next request ~{event.predicted_next_input}, "
+                f"{event.remaining} remaining. Asking the model to conclude if possible.",
+                style="yellow",
+                markup=False,
+                soft_wrap=True,
+            )
 
     def _render_end(self, event: AgentEndEvent) -> None:
         if event.reason == "step_limit":
@@ -350,4 +365,15 @@ class ConsoleRenderer:
         elif event.reason == "error":
             self.console.print(
                 f"Agent stopped with an error: {event.error}", style="red", markup=False
+            )
+        elif event.reason == "budget_limit":
+            source = event.budget_source or "estimated"
+            self.console.print(
+                "Run stopped before the next model request: input budget would be exceeded "
+                f"({event.budget_used}/{event.budget_limit} used, "
+                f"next request ~{event.predicted_next_input}, {source}). "
+                "The task is incomplete; continue in this session to start a new run budget.",
+                style="yellow",
+                markup=False,
+                soft_wrap=True,
             )

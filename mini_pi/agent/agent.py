@@ -27,14 +27,18 @@ class Agent:
         registry: ToolRegistry,
         cwd: Path,
         max_steps: int = 50,
+        max_run_input_tokens: int | None = None,
         on_event: Callable[[AgentEvent], None] | None = None,
         on_message_commit: MessageCommit | None = None,
     ) -> None:
         if max_steps <= 0:
             raise ValueError("max_steps must be > 0")
+        if max_run_input_tokens is not None and max_run_input_tokens <= 0:
+            raise ValueError("max_run_input_tokens must be > 0")
         self._llm = llm
         self._registry = registry
         self._max_steps = max_steps
+        self._max_run_input_tokens = max_run_input_tokens
         self._on_event = on_event
         self._on_message_commit = on_message_commit
         self._workspace = Workspace(cwd)
@@ -51,6 +55,7 @@ class Agent:
             self._llm,
             self._registry,
             max_steps=self._max_steps,
+            max_run_input_tokens=self._max_run_input_tokens,
             on_event=self._on_event,
             on_message_commit=self._on_message_commit,
         )
@@ -98,3 +103,8 @@ class Agent:
     def tool_schemas(self) -> list[ToolSchema]:
         """向 CLI 暴露当前实际 Registry 的只读工具说明。"""
         return self._registry.schemas()
+
+    @property
+    def max_run_input_tokens(self) -> int | None:
+        """返回显式任务输入预算；None 表示默认关闭。"""
+        return self._max_run_input_tokens

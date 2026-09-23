@@ -240,6 +240,7 @@ while steps_this_run < max_steps:
 任务完成（无 tool call）
 LLM 错误（stop_reason == error）
 达到 max_steps（默认 50）
+显式任务输入预算阻止下一次模型请求（budget_limit）
 ```
 
 ### 事件
@@ -249,7 +250,8 @@ Loop 通过 `on_event: Callable[[AgentEvent], None]` 发出事件，CLI 是纯�
 ```text
 agent_start / turn_start / message_start / message_delta
 message_end / tool_execution_start / tool_execution_end
-turn_end / agent_end(reason: completed | step_limit | error)
+turn_end / budget_warning
+agent_end(reason: completed | step_limit | budget_limit | error)
 ```
 
 规则：
@@ -258,6 +260,7 @@ turn_end / agent_end(reason: completed | step_limit | error)
 - CLI 不参与决策、不直接调用 Tool
 - M7.C 起 CLI 默认只显示 thinking 状态图标，不显示 raw `thinking_delta`；图标、spinner、token 文案、Session 路径不进入模型消息或 JSONL message。DeepSeek `reasoning_content` 按 Provider 协议保留回放，不为隐藏终端内容改写持久化历史
 - M7.C7 起 CLI 仅按工具名、结构化参数和明确命令形态生成确定性操作标题；非零退出码、超时、截断和 stderr 只按实际结果展示。未知/组合/含凭据命令不推断执行意图或任务最终成败；默认工具事件单行有界且脱敏，`--verbose` 仍限于工具已捕获内容。展示不改 ToolMessage 或 Agent 决策
+- M7.C8 起 `--max-run-input-tokens` 可显式启用单次 `run()` 累计输入预算，默认关闭。Loop 在完整工具批次后、下一请求前检查 Provider 已报告 input 与下一投影估算；接近上限只发一次未持久化收敛提示，预计超限发 `budget_limit`。这是请求边界控制，Session、tool pair、`modified_files` 和已执行修改必须保留；下一次 `run()` 重新计预算
 - `on_event` 为可选参数，测试时传 None 或列表收集器
 - `on_message_commit` 仅在完整 system / user / assistant / tool 消息上触发；回调成功后才追加内存历史，失败直接冒泡；tool 改动文件随已提交的 ToolMessage 记录
 
@@ -576,7 +579,7 @@ Context Compaction 放在第二阶段：
 时机：turn 边界
 ```
 
-M7.C6 起将两种 token 口径分开：一次 `run()` 多次请求的 Provider input/output 之和是任务累计消耗；下一次请求的活动投影估算才是当前上下文。`/context` 只分解当前投影，不把累计消耗当窗口占用。任务预算在完整工具批次后、下一次模型请求前检查；窗口阈值仍只用于 Context Compaction。Provider usage 缺失时明确标注不可用或估算，不伪称实测。
+M7.C6 起将两种 token 口径分开：一次 `run()` 多次请求的 Provider input/output 之和是任务累计消耗；下一次请求的活动投影估算才是当前上下文。`/context` 只分解当前投影，不把累计消耗当窗口占用。M7.C8 的任务预算在完整工具批次后、下一次模型请求前检查；Provider usage 缺失时使用独立标记的投影估算，不能伪称实测。窗口阈值仍只用于 Context Compaction。
 
 原始 `ToolMessage` 和 JSONL 记录保留真实、有界的 observation；展示摘要不写入模型消息。旧工具结果只在安全切点后通过 compaction 投影压缩，保持 tool call/result 配对和 `modified_files`；提前摘要需验证净成本收益。
 
