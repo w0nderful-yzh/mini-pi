@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from mini_pi.cli.app import app
+from mini_pi.context.policy import KNOWN_CONTEXT_WINDOWS
 from mini_pi.errors import LLMError
 from mini_pi.llm.types import AssistantMessage, Usage, UserMessage
 from mini_pi.session.jsonl import JsonlSession
@@ -18,6 +19,8 @@ runner = CliRunner()
 
 # 默认保留窗口是 20k token，因此历史里要有一条超过它的长回复才会产生切点
 _LONG_REPLY = "x" * 100_000
+# 约 35000 token：单条就超过小窗口阈值，用于自动压缩触发的失败路径
+_HUGE_REPLY = "y" * 140_000
 
 
 def _patch_environment(
@@ -167,3 +170,48 @@ def test_compact_failure_reports_and_leaves_session_unchanged(
     entries = JsonlSession.load(next((tmp_path / "sessions").rglob("*.jsonl"))).entries
     assert len(entries) == 5
     assert all(isinstance(entry, MessageEntry) for entry in entries)
+
+
+def test_auto_compaction_failure_is_reported_in_repl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """自动压缩失败以 agent error 展示（M7.6d），不写半成品，也不中断 REPL。"""
+    monkeypatch.setitem(KNOWN_CONTEXT_WINDOWS, "test-cli-small-window", 40_000)
+    llm = FakeLLMClient([assistant(_HUGE_REPLY), LLMError("summary down", retryable=False)])
+    _patch_environment(monkeypatch, tmp_path, llm)
+
+    result = runner.invoke(
+        app,
+        [
+            "--cwd",
+            str(tmp_path),
+            "--no-banner",
+            "-p",
+            "deepseek",
+            "-m",
+            "test-cli-small-window",
+        ],
+        input="task\nsecond\n/status\n/exit\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Agent stopped with an error: automatic compaction failed" in result.output
+    assert "summary down" in result.output
+    # 失败后 REPL 仍能响应后续命令
+    assert "Current context (estimated):" in result.output
+    entries = JsonlSession.load(next((tmp_path / "sessions").rglob("*.jsonl"))).entries
+    assert len(entries) == 3
+    assert all(isinstance(entry, MessageEntry) for entry in entries)
+
+
+def test_one_shot_agent_error_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """一次性任务以 agent error 结束时返回非零码，不把失败伪装成成功。"""
+    llm = FakeLLMClient([LLMError("provider down", retryable=False)])
+    _patch_environment(monkeypatch, tmp_path, llm)
+
+    result = runner.invoke(app, ["--cwd", str(tmp_path), "--no-banner", "task"])
+
+    assert result.exit_code == 1, result.output
+    assert "Agent stopped with an error: provider down" in result.output

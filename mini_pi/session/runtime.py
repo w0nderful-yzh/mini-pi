@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mini_pi.agent.agent import Agent
-from mini_pi.agent.events import AgentEvent
+from mini_pi.agent.events import AgentEndEvent, AgentEvent, AgentStartEvent
 from mini_pi.agent.state import AgentState
 from mini_pi.auth import resolve_api_key
 from mini_pi.context.compaction import (
@@ -22,7 +22,7 @@ from mini_pi.context.policy import (
 )
 from mini_pi.context.projection import project_compaction, project_entry_path
 from mini_pi.context.tokens import estimate_tokens
-from mini_pi.errors import MiniPiError, SessionError
+from mini_pi.errors import CompactionError, MiniPiError, SessionError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
 from mini_pi.llm.openai_client import OpenAIClient
@@ -40,6 +40,17 @@ class CompactionExecution:
 
     result: CompactionResult | None
     reason: str
+
+
+def _compaction_failure(reason: str) -> str:
+    """自动压缩无法把投影降到阈值内时的终止原因；由调用方转成 agent error。
+
+    文案只陈述做了什么与没做什么，不声称 Session 状态；状态保留由事务与测试保证。
+    """
+    return (
+        f"automatic compaction failed: {reason}. "
+        "The run stopped before sending the next model request."
+    )
 
 
 def _create_auth_llm(provider: str, model: str) -> LLMClient:
@@ -93,7 +104,7 @@ class AgentSession:
             on_event=on_event,
             on_message_commit=self._commit_message,
             # 工具轮之间复用同一策略与事务：下一次请求读到压缩后的投影
-            prepare_next_turn=self._auto_compact_if_needed,
+            prepare_next_turn=self._compact_between_turns,
         )
 
     @classmethod
@@ -253,25 +264,66 @@ class AgentSession:
         if not task.strip():
             # 空任务不触发压缩检查，也不产生任何 Session 写入
             raise ValueError("task must not be empty")
-        self._auto_compact_if_needed()
+        failure = self._auto_compact_if_needed()
+        if failure is not None:
+            # 压缩没能把投影降到阈值内：这次任务以明确 agent error 结束
+            return self._abort_before_prompt(failure)
         return self._agent.run(task)
 
-    def _auto_compact_if_needed(self) -> None:
-        """按 M7.4g 窗口策略检查当前投影，超阈值时执行一次 M7.5 事务。
+    def _auto_compact_if_needed(self) -> str | None:
+        """按 M7.4g 窗口策略检查当前投影；返回 None 表示可以继续，否则是终止原因。
 
-        - 判定：估算 > context_window - reserve_tokens；窗口未知时不动任何状态
-        - 两个调用点共用同一判定与保留预算：`run()` 的 prompt 前检查，以及
-          Agent Loop 的 `prepare_next_turn`（完整工具批次提交后、下一次请求前）
-        - 成功后投影由 CompactionEntry 重建，同一次 run 继续；已执行的工具不重放
-        - 无安全切点时既不写盘也不改投影（终止语义属于 M7.6d），
-          摘要或写盘失败直接冒泡，不做 overflow 自动 retry
+        - 判定：估算 > context_window - reserve_tokens；窗口未知、未超阈值都放行
+        - 需要在压缩时执行一次 M7.5 事务，保留预算与手动 `/compact` 相同
+        - 摘要失败、写盘失败与无安全切点都返回原因，不吞掉也不落半成品
+        - 压缩后仍超阈值同样不能继续：那会越过模型窗口，必须显式结束这次 run
+        - 两个调用点共用：`run()` 的 prompt 前检查与工具轮之间的钩子
         """
         policy = resolve_policy(self._model)
+        if policy is None:
+            # 窗口未知：不猜百分比、不做自动压缩，也不阻止任务
+            return None
         estimate = estimate_tokens(self._agent.state.messages)
         if evaluate_compaction(estimate, policy=policy).status != "needed":
-            return
-        # 与手动 /compact 共用同一保留预算：窗口阈值只决定触发时机
-        self.compact(keep_recent_tokens=DEFAULT_KEEP_RECENT_TOKENS)
+            return None
+        try:
+            execution = self.compact(keep_recent_tokens=DEFAULT_KEEP_RECENT_TOKENS)
+        except (MiniPiError, OSError) as exc:
+            # 摘要调用（LLMError / CompactionError）与写盘失败：事务已保证
+            # JSONL 与内存投影都不变，这里只负责把它转成终止原因
+            return _compaction_failure(str(exc))
+        if execution.result is None:
+            # 需要压缩却没有安全切点或没有新内容可摘要：不能携超限上下文继续
+            return _compaction_failure(execution.reason)
+        after = estimate_tokens(self._agent.state.messages)
+        if after.tokens > policy.threshold_tokens:
+            # 单个工具轮本身就超过阈值：压缩已尽力，仍不得发出越窗请求
+            return _compaction_failure(
+                f"compaction left {after.tokens} tokens above the window threshold "
+                f"{policy.threshold_tokens} ({after.source})"
+            )
+        return None
+
+    def _compact_between_turns(self) -> None:
+        """工具轮之间的自动压缩钩子；失败时抛 CompactionError 结束本次 run。
+
+        钩子没有返回值通道，可预期失败用 CompactionError 表达；Loop 会把它转成
+        `AgentEndEvent(reason="error")` 与 error assistant 消息，已提交的工具结果保留。
+        """
+        failure = self._auto_compact_if_needed()
+        if failure is not None:
+            raise CompactionError(failure)
+
+    def _abort_before_prompt(self, error: str) -> AssistantMessage:
+        """prompt 前的自动压缩失败：发出成对的 start/end 事件并返回 error 消息。
+
+        这次任务没有开始，因此不写任何 entry；返回的 assistant 消息只用于表达终止，
+        CLI 依据 `AgentEndEvent.reason == "error"` 显示原因。
+        """
+        if self._on_event is not None:
+            self._on_event(AgentStartEvent())
+            self._on_event(AgentEndEvent(reason="error", error=error))
+        return AssistantMessage(stop_reason="error", error_message=error)
 
     def compact(
         self, *, keep_recent_tokens: int, instructions: str | None = None

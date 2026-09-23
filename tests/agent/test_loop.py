@@ -6,9 +6,10 @@ from typing import Any
 
 import pytest
 
-from mini_pi.agent.events import AgentEvent
+from mini_pi.agent.events import AgentEndEvent, AgentEvent
 from mini_pi.agent.loop import run_loop
 from mini_pi.agent.state import AgentState
+from mini_pi.errors import CompactionError
 from mini_pi.llm.openai_client import to_openai_messages
 from mini_pi.llm.types import AssistantMessage, Message, ToolMessage, UserMessage
 from mini_pi.tools.registry import ToolRegistry
@@ -232,6 +233,40 @@ def test_prepare_next_turn_skipped_without_real_tool_batch(
     )
 
     assert calls == []
+
+
+def test_prepare_next_turn_expected_failure_ends_run_with_agent_error(
+    echo_registry: ToolRegistry,
+) -> None:
+    """钩子的可预期失败（MiniPiError）转成 agent error：不追加假消息，不再请求模型。"""
+    state = AgentState(messages=[UserMessage(content="task")])
+    events: list[AgentEvent] = []
+
+    def hook() -> None:
+        """模拟自动压缩没能把投影降到阈值内。"""
+        raise CompactionError("automatic compaction failed: still over the window threshold")
+
+    assistant_message = run_loop(
+        state,
+        FakeLLMClient(
+            [
+                assistant(tool_calls=[tool_call("c1", "echo", {"text": "hi"})]),
+                assistant("should never run"),
+            ]
+        ),
+        echo_registry,
+        on_event=events.append,
+        prepare_next_turn=hook,
+    )
+
+    assert assistant_message.stop_reason == "error"
+    assert "automatic compaction failed" in (assistant_message.error_message or "")
+    # 工具批次已提交，但没有假 assistant 或后续请求
+    assert [message.role for message in state.messages] == ["user", "assistant", "tool"]
+    final = events[-1]
+    assert isinstance(final, AgentEndEvent)
+    assert final.reason == "error"
+    assert final.error == assistant_message.error_message
 
 
 def test_prepare_next_turn_failure_propagates(echo_registry: ToolRegistry) -> None:

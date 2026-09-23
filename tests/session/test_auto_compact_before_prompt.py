@@ -23,6 +23,9 @@ _SMALL_WINDOW = 40_000
 
 # 约 35000 token 的回复：单条就超过阈值，同时超过保留预算
 _HUGE_REPLY = "x" * 140_000
+# 约 25000 / 15000 token：单条都在预算内，累计后才越过阈值
+_OLD_REPLY = "y" * 100_000
+_MEDIUM_REPLY = "z" * 60_000
 
 
 def _registry() -> ToolRegistry:
@@ -90,14 +93,25 @@ def test_above_threshold_compacts_before_appending_user_message(
 ) -> None:
     """超阈值时先压缩再追加 user 消息：摘要不含新 prompt，原 entry 不删。"""
     _small_window(monkeypatch)
-    llm = FakeLLMClient([assistant(_HUGE_REPLY), assistant("## Goal\n完成"), assistant("done")])
+    llm = FakeLLMClient(
+        [
+            assistant(_OLD_REPLY),
+            assistant(_MEDIUM_REPLY),
+            assistant("## Goal\n完成"),
+            assistant("done"),
+        ]
+    )
     runtime = _session(tmp_path, llm, model=_SMALL_WINDOW_MODEL)
     runtime.run("task")
-
+    # 两个 turn 累计后才越过阈值；最后一段仍在保留预算内，压缩能真正降下来
     runtime.run("second")
+
+    runtime.run("third")
 
     entries = _entries(runtime)
     assert [type(entry).__name__ for entry in entries] == [
+        "MessageEntry",
+        "MessageEntry",
         "MessageEntry",
         "MessageEntry",
         "MessageEntry",
@@ -105,16 +119,17 @@ def test_above_threshold_compacts_before_appending_user_message(
         "MessageEntry",
         "MessageEntry",
     ]
-    assert _user_contents(runtime) == ["task", "second"]
+    assert _user_contents(runtime) == ["task", "second", "third"]
     # 摘要请求只包含压缩前的历史，新 prompt 不在其中
-    summary_request = llm.calls[1][1]
+    summary_request = llm.calls[2][1]
     assert isinstance(summary_request, UserMessage)
     assert "[User]: task" in summary_request.content
-    assert "second" not in summary_request.content
+    assert "third" not in summary_request.content
     replayed = JsonlSession.load(runtime.path).replay().messages
-    assert len(replayed) == 5
+    assert len(replayed) == 6
     assert isinstance(replayed[1], UserMessage) and SUMMARY_TAG in replayed[1].content
-    assert isinstance(replayed[3], UserMessage) and replayed[3].content == "second"
+    assert isinstance(replayed[2], UserMessage) and replayed[2].content == "second"
+    assert isinstance(replayed[4], UserMessage) and replayed[4].content == "third"
 
 
 def test_unknown_window_never_auto_compacts(tmp_path: Path) -> None:
@@ -130,31 +145,34 @@ def test_unknown_window_never_auto_compacts(tmp_path: Path) -> None:
     assert _user_contents(runtime) == ["task", "second"]
 
 
-def test_one_compaction_per_prompt_even_when_still_over_threshold(
+def test_prompt_before_stays_over_threshold_ends_without_appending(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """每次 run 只检查一次：压缩后仍超阈值也不在同一轮里反复压缩。"""
+    """压缩后仍超阈值时以 agent error 结束（M7.6d）：不重复压缩，也不追加 user 消息。"""
     _small_window(monkeypatch)
     llm = FakeLLMClient([assistant(_HUGE_REPLY), assistant("## Goal\n完成"), assistant("done")])
     runtime = _session(tmp_path, llm, model=_SMALL_WINDOW_MODEL)
     runtime.run("task")
 
-    runtime.run("second")
+    reply = runtime.run("second")
 
+    assert reply.stop_reason == "error"
+    assert reply.error_message is not None
+    assert "above the window threshold" in reply.error_message
+    # 长回复落在保留区，压缩本身成功了一次；本轮不再发第二次摘要，也没有任务请求
     assert len(_compactions(runtime)) == 1
-    assert _user_contents(runtime) == ["task", "second"]
-    assert len(llm.calls) == 3
-    # 长回复落在保留区，压缩后投影依旧超过阈值；本轮不再触发第二次摘要
+    assert len(llm.calls) == 2
     policy = ContextPolicy(context_window=_SMALL_WINDOW)
     assert estimate_tokens(runtime.state.messages).tokens > policy.threshold_tokens
+    assert _user_contents(runtime) == ["task"]
 
 
 def test_summary_failure_keeps_session_and_skips_user_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """自动压缩失败时 run 直接失败：不追加 user 消息，也不留压缩痕迹。
+    """自动压缩失败时 run 以 agent error 结束：不追加 user 消息，也不留压缩痕迹。
 
-    失败如何转成 agent error 由 M7.6d 定义；这里先固定“不写半成品”的边界。
+    失败转成 agent error 的完整语义（事件、状态保留）由 M7.6d 的用例覆盖。
     """
     _small_window(monkeypatch)
     llm = FakeLLMClient([assistant(_HUGE_REPLY), LLMError("summary down", retryable=False)])
@@ -162,9 +180,11 @@ def test_summary_failure_keeps_session_and_skips_user_message(
     runtime.run("task")
     before_file = runtime.path.read_text(encoding="utf-8")
 
-    with pytest.raises(LLMError, match="summary down"):
-        runtime.run("second")
+    reply = runtime.run("second")
 
+    assert reply.stop_reason == "error"
+    assert reply.error_message is not None
+    assert "summary down" in reply.error_message
     assert runtime.path.read_text(encoding="utf-8") == before_file
     assert _user_contents(runtime) == ["task"]
     assert _compactions(runtime) == []

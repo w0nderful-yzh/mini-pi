@@ -257,9 +257,10 @@ def test_second_tool_turn_compacts_incrementally(
 def test_summary_failure_keeps_tool_result_without_compaction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """摘要失败时 run 直接失败：已提交的工具结果保留，不写半成品压缩。
+    """摘要失败时以 agent error 结束：已提交的工具结果保留，不写半成品压缩。
 
-    失败如何转成 agent error 由 M7.6d 定义；这里先固定“工具不重放、投影不半写”。
+    终止语义（事件、状态保留、不发越界请求）由 M7.6d 的用例覆盖；这里固定
+    “工具不重放、投影不半写”的边界。
     """
     _small_window(monkeypatch)
     tool = LargeOutputTool()
@@ -274,9 +275,11 @@ def test_summary_failure_keeps_tool_result_without_compaction(
     runtime.run("task")
     before = runtime.state.messages[:]
 
-    with pytest.raises(LLMError, match="summary down"):
-        runtime.run("second")
+    reply = runtime.run("second")
 
+    assert reply.stop_reason == "error"
+    assert reply.error_message is not None
+    assert "summary down" in reply.error_message
     assert tool.calls == 1
     assert _compactions(runtime) == []
     assert _tool_contents(runtime) == [_TOOL_OUTPUT]

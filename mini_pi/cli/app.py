@@ -462,6 +462,9 @@ def cli(
             if renderer.last_end_reason == "budget_limit":
                 # 一次性调用未完成必须返回非零；Session 已保留，可继续恢复。
                 raise typer.Exit(code=2)
+            if renderer.last_end_reason == "error":
+                # Agent 以 agent error 结束（含自动压缩失败）同样不能伪装成成功
+                raise typer.Exit(code=1)
         except MiniPiError as exc:
             # 一次性任务失败以非零码退出，避免把可预期错误伪装成成功
             Console(stderr=True).print(f"error: {exc}", style="red", soft_wrap=True)

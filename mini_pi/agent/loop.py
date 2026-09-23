@@ -135,7 +135,9 @@ def run_loop(
 
     `prepare_next_turn` 只在完整工具批次提交后、下一次模型请求前调用；它可以替换
     `state.messages`（例如压缩），`None` 时保持 Phase 1 的事件行为不变。截断轮
-    （stop_reason=length）没有真实工具批次，不触发该钩子；钩子异常直接冒泡。
+    （stop_reason=length）没有真实工具批次，不触发该钩子。钩子抛出的 `MiniPiError`
+    是可预期失败（例如自动压缩没能把投影降到阈值内）：以 agent error 结束本次 run，
+    且不发送下一次请求；其他异常是程序缺陷，直接冒泡。
     """
     if max_steps <= 0:
         raise ValueError("max_steps must be > 0")
@@ -211,8 +213,15 @@ def run_loop(
         _execute_tool_calls(state, registry, assistant.tool_calls, emit, on_message_commit)
         emit(TurnEndEvent(step=step))
         if prepare_next_turn is not None:
-            # 工具批次已提交、turn 已收尾：下一次请求会重新读取 state.messages
-            prepare_next_turn()
+            try:
+                # 工具批次已提交、turn 已收尾：下一次请求会重新读取 state.messages
+                prepare_next_turn()
+            except MiniPiError as exc:
+                # 可预期失败（如自动压缩无法把投影降到阈值内）：不追加假 assistant、
+                # 不改投影，以 agent error 结束，避免发出已经越界的下一次请求
+                stopped = AssistantMessage(stop_reason="error", error_message=str(exc))
+                emit(AgentEndEvent(reason="error", message=stopped, error=str(exc)))
+                return stopped
     # 循环由 max_steps 截断：保留最后消息供调用方检查
     assert last is not None
     emit(AgentEndEvent(reason="step_limit", message=last))
