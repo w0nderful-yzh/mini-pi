@@ -586,11 +586,15 @@ M7.6c 起同一个判定与事务也接到 prepare_next_turn：每个完整工�
 M7.6d 起无安全切点、没有新内容可摘要、摘要/写盘失败、压缩后仍超阈值都以 agent error 结束这次 run：
 prompt 前由 AgentSession 发出成对 start/end 事件，工具轮之间由 Loop 转成 agent_end(error)；
 两者都不追加假 assistant、不改投影，也不再发出越界的下一次请求
+M7.6f 起工具轮之间多一个独立于窗口阈值的成本触发（mini_pi/context/cost.py 纯函数）：
+被摘要区域里 ToolMessage 占比 ≥ 50%、摘要不比区域大、按 3 次后续请求净收益为正时才提前压缩；
+当前工具轮 observation 原样，旧历史只在安全切点后进入摘要；每次 run 最多一次，
+摘要阶段失败只放弃优化、不终止 run，写盘/重建失败仍转 agent error 终止
 ```
 
 M7.C6 起将两种 token 口径分开：一次 `run()` 多次请求的 Provider input/output 之和是任务累计消耗；下一次请求的活动投影估算才是当前上下文。`/context` 只分解当前投影，不把累计消耗当窗口占用。M7.C8 的任务预算在完整工具批次后、下一次模型请求前检查；Provider usage 缺失时使用独立标记的投影估算，不能伪称实测。窗口阈值仍只用于 Context Compaction。
 
-原始 `ToolMessage` 和 JSONL 记录保留真实、有界的 observation；展示摘要不写入模型消息。旧工具结果只在安全切点后通过 compaction 投影压缩，保持 tool call/result 配对和 `modified_files`；提前摘要需验证净成本收益。
+原始 `ToolMessage` 和 JSONL 记录保留真实、有界的 observation；展示摘要不写入模型消息。旧工具结果只在安全切点后通过 compaction 投影压缩，保持 tool call/result 配对和 `modified_files`；提前摘要需验证净成本收益（M7.6f 的成本模型与离线记录见 `docs/benchmarks/m7-6f-cost-aware-compaction.md`，没有真实计费结论前不声称节省费用）。
 
 ---
 

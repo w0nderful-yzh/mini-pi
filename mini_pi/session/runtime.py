@@ -11,9 +11,15 @@ from mini_pi.agent.events import AgentEndEvent, AgentEvent, AgentStartEvent
 from mini_pi.agent.state import AgentState
 from mini_pi.auth import resolve_api_key
 from mini_pi.context.compaction import (
+    CompactionPreparation,
     CompactionResult,
     generate_compaction_result,
     prepare_compaction,
+)
+from mini_pi.context.cost import (
+    decide_cost_aware_compaction,
+    estimate_compaction_cost,
+    measure_tool_results,
 )
 from mini_pi.context.policy import (
     DEFAULT_KEEP_RECENT_TOKENS,
@@ -22,7 +28,7 @@ from mini_pi.context.policy import (
 )
 from mini_pi.context.projection import project_compaction, project_entry_path
 from mini_pi.context.tokens import estimate_tokens
-from mini_pi.errors import CompactionError, MiniPiError, SessionError
+from mini_pi.errors import CompactionError, LLMError, MiniPiError, SessionError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
 from mini_pi.llm.openai_client import OpenAIClient
@@ -95,6 +101,8 @@ class AgentSession:
         self._on_event = on_event
         self._provider = provider
         self._model = model
+        # 成本感知的提前压缩每次 run 只尝试一次：失败也不重复打扰模型
+        self._cost_compaction_attempted = False
         self._agent = Agent(
             llm=llm,
             registry=registry,
@@ -264,6 +272,7 @@ class AgentSession:
         if not task.strip():
             # 空任务不触发压缩检查，也不产生任何 Session 写入
             raise ValueError("task must not be empty")
+        self._cost_compaction_attempted = False
         failure = self._auto_compact_if_needed()
         if failure is not None:
             # 压缩没能把投影降到阈值内：这次任务以明确 agent error 结束
@@ -305,14 +314,50 @@ class AgentSession:
         return None
 
     def _compact_between_turns(self) -> None:
-        """工具轮之间的自动压缩钩子；失败时抛 CompactionError 结束本次 run。
+        """工具轮之间的钩子：窗口触发失败必须终止，成本触发只是尽力而为。
 
-        钩子没有返回值通道，可预期失败用 CompactionError 表达；Loop 会把它转成
-        `AgentEndEvent(reason="error")` 与 error assistant 消息，已提交的工具结果保留。
+        钩子没有返回值通道，窗口触发的可预期失败用 CompactionError 表达；Loop 会把它
+        转成 `AgentEndEvent(reason="error")` 与 error assistant 消息，已提交的工具结果保留。
         """
         failure = self._auto_compact_if_needed()
         if failure is not None:
             raise CompactionError(failure)
+        self._compact_old_tool_results()
+
+    def _compact_old_tool_results(self) -> None:
+        """窗口内但旧工具结果占主导时，按 M7.6f 成本模型提前压缩一次。
+
+        - 只在工具轮之间尝试：这里确定还会有下一次请求，节省才有对象
+        - 窗口未知时不做任何自动压缩（沿用 M7.4g 边界），成本触发也不例外
+        - 判定与成本估算都是纯函数；不通过判定就不会调用摘要模型
+        - 每次 run 最多一次；摘要阶段失败只放弃这次优化，不改变本次 run 的结果
+        - 写盘或重建失败会让内存投影与 JSONL 分叉，与窗口触发同样终止这次 run
+        """
+        if self._cost_compaction_attempted or resolve_policy(self._model) is None:
+            return
+        preparation = prepare_compaction(
+            self._session.active_entries(), keep_recent_tokens=DEFAULT_KEEP_RECENT_TOKENS
+        )
+        if preparation.plan is None:
+            # 没有安全切点或没有新内容：提前压缩没有对象，也不该报错
+            return
+        plan = preparation.plan
+        cost = estimate_compaction_cost(plan)
+        decision = decide_cost_aware_compaction(
+            cost, measure_tool_results(plan.messages_to_summarize)
+        )
+        if not decision.should_compact:
+            return
+        # 先置位再尝试：失败后本次 run 不再重试，避免每个工具轮都浪费一次调用
+        self._cost_compaction_attempted = True
+        try:
+            self._commit_prepared(preparation)
+        except (LLMError, CompactionError):
+            # 摘要请求失败时事务尚未写盘：窗口内继续请求是安全的
+            return
+        except (SessionError, OSError) as exc:
+            # 写盘/重建失败已越过“只是优化失败”的边界：不得让投影与 JSONL 分叉
+            raise CompactionError(_compaction_failure(str(exc))) from exc
 
     def _abort_before_prompt(self, error: str) -> AssistantMessage:
         """prompt 前的自动压缩失败：发出成对的 start/end 事件并返回 error 消息。
@@ -337,6 +382,12 @@ class AgentSession:
         preparation = prepare_compaction(
             self._session.active_entries(), keep_recent_tokens=keep_recent_tokens
         )
+        return self._commit_prepared(preparation, instructions=instructions)
+
+    def _commit_prepared(
+        self, preparation: CompactionPreparation, *, instructions: str | None = None
+    ) -> CompactionExecution:
+        """执行已备好的压缩：摘要成功后才写 entry 并重建内存投影。"""
         if preparation.plan is None:
             return CompactionExecution(result=None, reason=preparation.reason)
         result = generate_compaction_result(

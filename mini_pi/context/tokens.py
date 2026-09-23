@@ -62,6 +62,11 @@ def estimate_message_tokens(message: Message) -> int:
     return _estimate_message(message)
 
 
+def estimate_text_tokens(text: str) -> int:
+    """对纯文本按同一字符规则估算；成本模型与统计复用，不引入第二套口径。"""
+    return _ceil_div(len(text), _CHARS_PER_TOKEN)
+
+
 def _ceil_div(value: int, divisor: int) -> int:
     """整数向上取整，避免浮点在极长文本上丢精度。"""
     return -(-value // divisor)

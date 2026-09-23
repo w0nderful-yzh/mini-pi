@@ -85,7 +85,7 @@ Python Coding Agent Harness
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
-| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3 已完成 CLI 新建、恢复、`/new` 与同链 `/model` 切换；M7.4 已完成 compaction 投影，M7.5 已完成手动 `/compact`（摘要检查点、原 entry 不删、失败不改状态）；M7.6 起 prompt 前与工具轮之间都会按窗口阈值自动触发同一事务，失败（无切点、摘要/写盘失败、压缩后仍超阈值）以明确 agent error 终止且不发越界请求 |
+| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3 已完成 CLI 新建、恢复、`/new` 与同链 `/model` 切换；M7.4 已完成 compaction 投影，M7.5 已完成手动 `/compact`（摘要检查点、原 entry 不删、失败不改状态）；M7.6 起 prompt 前、工具轮之间与“旧工具结果主导且净收益为正”时都会触发同一事务，失败语义见 M7.6d/M7.6f |
 
 ---
 
@@ -235,6 +235,7 @@ mini-pi/
 │   │   ├── serializer.py             # 摘要输入的确定性序列化
 │   │   ├── summarizer.py             # 固定摘要协议与单次摘要调用
 │   │   ├── policy.py                 # context window 与阈值策略
+│   │   ├── cost.py                   # 旧工具结果提前压缩的成本模型
 │   │   └── stats.py                  # 当前投影分类估算
 │   │
 │   └── workspace/
@@ -346,7 +347,7 @@ mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入
 - `/help` 列出可用命令；未知 `/命令` 只提示且不会作为任务发给模型
 - `/status` 分开显示当前投影估算与最近任务的请求数、累计 Provider 用量、工具数和耗时；Session 恢复后从完整活动链重建统计，`/status full` 才显示完整路径。`/context` 分解当前投影，并单列最近请求输入与任务累计用量；`/tools` 列出工具
 - `/compact [instructions]` 手动压缩持久化会话：只在安全切点前生成摘要检查点，摘要请求不带工具，`instructions` 仅进入本次请求；输出摘要消息数、保留 entry 数、切点边界、压缩前后当前上下文估算与摘要调用的实测 usage。原始 message entry 一条不删，失败时不改 JSONL 与内存投影；`--no-session` 明确拒绝，不隐式建 JSONL
-- 同一套判定也会自动运行：M7.6b 起每次 `run()` 提交新 user 消息前按窗口策略（当前投影估算 > `context_window - reserve`）检查，需要时先压缩再追加这一条消息；M7.6c 起每个完整工具批次提交后、下一次请求前也用同一判定检查，压缩成功后同一次任务继续，已执行的工具不重放。窗口未知的模型不启用自动压缩，未超阈值不产生任何写入。M7.6d 起自动压缩失败（无安全切点、摘要或写盘失败、压缩后仍超阈值）以 agent error 结束这次任务：不追加假 assistant、不改投影、不再发出越界的下一次请求；已提交的消息与工具结果保留，一次性 CLI 调用返回非零码
+- 同一套判定也会自动运行：M7.6b 起每次 `run()` 提交新 user 消息前按窗口策略（当前投影估算 > `context_window - reserve`）检查，需要时先压缩再追加这一条消息；M7.6c 起每个完整工具批次提交后、下一次请求前也用同一判定检查，压缩成功后同一次任务继续，已执行的工具不重放。窗口未知的模型不启用自动压缩，未超阈值不产生任何写入。M7.6d 起自动压缩失败（无安全切点、摘要或写盘失败、压缩后仍超阈值）以 agent error 结束这次任务：不追加假 assistant、不改投影、不再发出越界的下一次请求；已提交的消息与工具结果保留，一次性 CLI 调用返回非零码。M7.6f 起工具轮之间还有第二个触发：窗口内但旧工具结果占被摘要区域一半以上、且按 3 次后续请求算得摘要成本小于预计节省时提前压缩（旧输出按 2000 字符截断进入摘要请求，因此摘要成本与日志长度无关）；每次任务最多尝试一次，摘要阶段失败只放弃这次优化、不终止任务，写盘或重建失败仍以 agent error 终止；仅离线估算验证过收益（[记录](docs/benchmarks/m7-6f-cost-aware-compaction.md)），没有真实计费结论
 - 流式打印模型正文，默认工具事件根据已知命令形态显示操作标题、真实退出码、超时/截断与简短 stderr；未知或含凭据的 shell 命令采用保守标题，不推断任务成败。`--verbose` 展示参数及 Tool 层已截断日志并脱敏已知凭据。任务结束只打印一行请求、用量覆盖率、工具数和耗时；缺失 usage 明确标为不可用或部分实测。耗时在恢复后是 JSONL 消息时间的近似跨度
 - `--max-steps` 控制单次任务的最大循环步数（默认 50）
 - `--max-run-input-tokens` 显式启用每次 `run()` 的累计输入预算，默认关闭。Loop 在下一次模型请求前用 Provider 已报告 input 加当前投影估算检查；接近上限时只提示模型收敛一次，预计超限则以 `budget_limit` 停止。它是请求边界控制，单次请求仍可能超过预测；已提交的消息、工具结果和文件改动保留，交互模式下一条任务获得新预算
@@ -383,7 +384,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C8、M7.5、M7.6a-M7.6e 已完成；下一项 M7.6f 旧工具结果的成本感知压缩） |
+| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C8、M7.5、M7.6 已完成；下一项 M7.D1 会话列表与启动页） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
@@ -456,7 +457,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行；`bash` 无危险命令确认机制
-- CLI 可创建、恢复和切换会话（含 compaction entry 的恢复走 M7.4 投影）；手动 `/compact` 与新一轮 prompt 前、工具轮之间的自动压缩已可用，失败时的终止语义见 M7.6d；旧工具结果的成本感知提前压缩（M7.6f）尚未实现
+- CLI 可创建、恢复和切换会话（含 compaction entry 的恢复走 M7.4 投影）；手动 `/compact`、prompt 前与工具轮之间的自动压缩，以及旧工具结果的成本感知提前压缩都已可用；成本收益只有离线估算记录，真实模型对照（M7.7b）尚未执行
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
 - 进程组与文件权限语义依赖 POSIX，未适配 Windows
 - LSP / MCP / Task / Memory / Multi-Agent 属于后续阶段

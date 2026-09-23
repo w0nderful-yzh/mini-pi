@@ -135,7 +135,7 @@ def summarize_transcript(
     if not transcript.strip():
         # 空输入说明调用方给了错误的历史，属于程序缺陷
         raise ValueError("transcript must not be empty")
-    messages = _build_messages(
+    messages = build_summary_messages(
         transcript, previous_summary=previous_summary, instructions=instructions
     )
     response = llm.complete(messages, None)
@@ -153,13 +153,17 @@ def summarize_transcript(
     return SummaryResult(summary=summary, usage=response.usage)
 
 
-def _build_messages(
+def build_summary_messages(
     transcript: str,
     *,
     previous_summary: str | None = None,
     instructions: str | None = None,
 ) -> list[Message]:
-    """整段历史作为待总结材料放在一条 user 消息里，避免被模型当成对话续写。"""
+    """构造摘要请求的消息；纯函数，供实际调用与成本估算共用同一份输入。
+
+    整段历史作为待总结材料放在一条 user 消息里，避免被模型当成对话续写；
+    成本模型（M7.6f）据此在调用前算出摘要请求本身的 input 规模。
+    """
     blocks = [f"<conversation>\n{transcript}\n</conversation>"]
     if previous_summary is None:
         prompt = SUMMARIZATION_PROMPT
