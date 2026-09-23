@@ -1,6 +1,6 @@
 # Phase 2：Session、Context 与 CLI 成本控制
 
-> 状态：实施中。M7.1–M7.4、M7.C1–C8 已完成；下一任务是 **M7.5a：Transcript Serializer**。本文件先列待开发任务，已完成交付放在末尾。
+> 状态：实施中。M7.1–M7.4、M7.C1–C8、M7.5a 已完成；下一任务是 **M7.5b：固定摘要协议与调用器**。本文件先列待开发任务，已完成交付放在末尾。
 
 **目标：** 在已有 Coding Agent 闭环上，控制单次任务的重复探索和累计模型输入，完成安全的手动/自动上下文压缩，并让终端清楚展示进度、失败和真实用量。只支持 OpenAI、DeepSeek；不引入 Agent 框架、额外规划模型或并行工具执行。
 
@@ -68,13 +68,6 @@ CLI → AgentSession → Agent → run_loop → (LLM, ToolRegistry) → Tool →
 ## 3. M7.5 手动 Compaction
 
 前置：C6–C8 完成。`/compact` 对当前投影做**可审计的历史压缩**，不是代替任务预算；对 21k 上下文调用摘要模型未必划算。
-
-### M7.5a：Transcript Serializer
-
-- [ ] 确定性序列化 role、tool name、call id、arguments、result、错误状态；单条 tool result 输入固定上限且标记截断。
-- [ ] 不修改原始 message，不把 UI details 当事实；不调用模型。
-
-验收：`uv run pytest tests/context/test_serializer.py -q`。
 
 ### M7.5b：固定摘要协议与调用器
 
@@ -206,11 +199,12 @@ M7 完成标准：会话可恢复；项目规则生效；单任务累计成本�
 | M7.C1–C5 | 隐藏 raw thinking、小牛状态、展示/消息隔离、基础 status/context/tools、简洁工具事件与软提示 | C5 全量 387 passed, 3 deselected；`c8ec231`、`5da4848`、`5ebcc25`、`eb61481`、`1d28651`；真实简单只读 A/B 均为 1 Tool，不声称成本已下降 |
 | M7.C6 | 最近任务请求/Tool/Provider usage 从活动链重建，CLI 分开显示累计用量与当前投影；[脱敏基准与 C8 决策](../benchmarks/m7-c6-usage-baseline.md) | 全量 392 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`b4cf0d0`；没有额外真实模型调用，复杂排障样本待补 |
 | M7.C7 | CLI 为已知工具/命令生成确定性标题，展示实际退出码、超时、截断和有界 stderr；默认单行，详细模式脱敏，Session/ToolMessage 不变 | `tests/cli/test_tool_events.py` 20 passed；全量 412 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`50ce733` |
-| M7.C8 | `--max-run-input-tokens` 显式启用每次任务累计输入预算；请求前预测、一次收敛提示及 `budget_limit` 安全停止保持 Session、tool pair 和文件修改，可在同会话用新预算继续 | 预算专项 10 passed；全量 422 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；真实 B1–B4 未运行，默认继续关闭；本提交 |
+| M7.C8 | `--max-run-input-tokens` 显式启用每次任务累计输入预算；请求前预测、一次收敛提示及 `budget_limit` 安全停止保持 Session、tool pair 和文件修改，可在同会话用新预算继续 | 预算专项 10 passed；全量 422 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；真实 B1–B4 未运行，默认继续关闭；`8323300` |
+| M7.5a | Transcript 序列化：role、工具名、call id、参数、结果与错误状态确定性输出；单条 tool result 2000 字符头部截断并标记省略量；system 快照不进入摘要输入 | `tests/context/test_serializer.py` 11 passed；全量 433 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；本提交 |
 
 ### 实施与审查规则
 
 1. 每个新编号是一批可审查的最小行为；不提前创建后续编号的接口或占位实现。代码、必要测试、README 与本计划状态在**同一提交**；中文 `feat/fix/docs` 消息。
 2. 每批运行针对性测试、全量离线测试和 `git diff --check`，再更新状态；真实模型测试只有执行过才能记“通过”。文件测试用 `tmp_path`，默认测试不联网。
 3. 若设计改变 Session/Context/CLI 边界，同步 README 第 2 节与 AGENTS.md。发现文档与代码不一致，先修文档再继续实现。
-4. 下一批只做 **M7.5a**；先确定可审计的 transcript 序列化，再接入摘要调用。
+4. 下一批只做 **M7.5b**；transcript 序列化已固化，再接入固定摘要协议与调用器，之后才允许写盘。
