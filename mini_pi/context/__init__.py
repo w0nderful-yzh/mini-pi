@@ -1,6 +1,13 @@
 """Context：项目规则发现与后续上下文投影能力。"""
 
-from mini_pi.context.compaction import CutBoundary, CutPoint, find_cut_point
+from mini_pi.context.compaction import (
+    CompactionPlan,
+    CompactionPreparation,
+    CutBoundary,
+    CutPoint,
+    find_cut_point,
+    prepare_compaction,
+)
 from mini_pi.context.policy import (
     DEFAULT_RESERVE_TOKENS,
     KNOWN_CONTEXT_WINDOWS,
@@ -18,6 +25,7 @@ from mini_pi.context.projection import (
     project_compaction,
     project_entry_path,
     project_messages,
+    system_message_from_state,
 )
 from mini_pi.context.sections import (
     SystemPromptState,
@@ -35,6 +43,8 @@ __all__ = [
     "SUMMARY_TAG",
     "TOOL_RESULT_LIMIT",
     "CompactionDecision",
+    "CompactionPlan",
+    "CompactionPreparation",
     "CompactionProjection",
     "CompactionStatus",
     "ContextPolicy",
@@ -52,6 +62,7 @@ __all__ = [
     "evaluate_compaction",
     "find_cut_point",
     "load_project_instructions",
+    "prepare_compaction",
     "project_compaction",
     "project_entry_path",
     "project_messages",
@@ -59,4 +70,5 @@ __all__ = [
     "resolve_policy",
     "serialize_transcript",
     "summarize_transcript",
+    "system_message_from_state",
 ]

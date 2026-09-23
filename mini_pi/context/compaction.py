@@ -1,13 +1,24 @@
-"""压缩切点：只在完整 user turn 或完整工具轮边界选择保留区间起点。"""
+"""压缩准备：选择保留区间切点，并生成不可变的压缩输入 plan。"""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+from uuid import UUID
 
-from mini_pi.context.tokens import estimate_tokens
-from mini_pi.llm.types import AssistantMessage, Message, ToolMessage
+from mini_pi.context.projection import (
+    project_compaction,
+    project_messages,
+    system_message_from_state,
+)
+from mini_pi.context.tokens import TokenEstimate, estimate_tokens
+from mini_pi.errors import SessionError
+from mini_pi.llm.types import AssistantMessage, Message, SystemMessage, ToolMessage
+
+if TYPE_CHECKING:
+    # 仅用于类型标注：运行时导入会触发 session 包与 jsonl 的循环依赖
+    from mini_pi.session.models import SessionEntry
 
 # 允许作为切点的消息 role；system/tool 不能作为保留区间起点
 CutBoundary = Literal["user", "assistant"]
@@ -201,3 +212,125 @@ def _turn_has_incomplete_batch(
         segment.has_incomplete_batch
         for segment in _turn_segments(segments, user_segment)
     )
+
+
+@dataclass(frozen=True, slots=True)
+class CompactionPlan:
+    """不可变的压缩输入；生成过程不写盘、不调用模型。"""
+
+    cut: CutPoint
+    # 待摘要的新消息：不含 system 与旧摘要，可直接交给序列化器
+    messages_to_summarize: tuple[Message, ...]
+    previous_summary: str | None
+    # 被摘要吸收的 entry：system entry 只进快照，原文仍留在 JSONL
+    summarized_entry_ids: tuple[UUID, ...]
+    # 保留区 entry，起点即 firstKeptEntryId
+    kept_entry_ids: tuple[UUID, ...]
+    tokens_before: TokenEstimate
+    system_message: SystemMessage
+    modified_files: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        """保留区间不能为空，否则 firstKeptEntryId 指向不了真实 entry。"""
+        if not self.kept_entry_ids:
+            raise ValueError("compaction plan requires at least one kept entry")
+
+    @property
+    def first_kept_entry_id(self) -> UUID:
+        """保留区间起点；事务提交时原样写入 firstKeptEntryId。"""
+        return self.kept_entry_ids[0]
+
+
+@dataclass(frozen=True, slots=True)
+class CompactionPreparation:
+    """准备结果；plan 为 None 时 reason 说明为什么不能压缩。"""
+
+    plan: CompactionPlan | None
+    reason: str
+
+
+def prepare_compaction(
+    entries: Sequence[SessionEntry], *, keep_recent_tokens: int
+) -> CompactionPreparation:
+    """用活动投影、token 估算与安全切点生成不可变 plan；不写盘、不调用模型。
+
+    - 切点在投影消息上选择，再按对象同一性映射回真实 message entry
+    - 切点落在 system 快照或旧摘要等合成消息上时没有新内容可摘要，只返回原因
+    - 无安全切点时调用方不得调用摘要器，plan 必须保持 None
+    """
+    path = tuple(entries)
+    compaction = project_compaction(path)
+    projection = compaction if compaction is not None else project_messages(path)
+    messages = projection.messages
+    cut = find_cut_point(messages, keep_recent_tokens=keep_recent_tokens)
+    if cut is None:
+        return CompactionPreparation(
+            plan=None,
+            reason="no safe cut point: recent messages fit within keep_recent_tokens",
+        )
+
+    sources = _source_entry_ids(path, messages)
+    absorbed = tuple(
+        (message, source)
+        for message, source in zip(messages[: cut.start_index], sources[: cut.start_index])
+        if source is not None
+    )
+    # system 只进快照，旧摘要只走 previous_summary：两者都不进摘要输入
+    transcript_messages = tuple(
+        message for message, _ in absorbed if not isinstance(message, SystemMessage)
+    )
+    if not transcript_messages:
+        # 重复压缩会走到这里：切点之前除了 system 快照与旧摘要没有新消息
+        return CompactionPreparation(
+            plan=None,
+            reason="cut point leaves no new messages to summarize",
+        )
+    if projection.system_prompt is None:
+        # system 快照是 CompactionEntry 必填字段，缺失说明历史不符合协议
+        raise SessionError("compaction requires a system prompt snapshot")
+
+    kept_entry_ids = tuple(source for source in sources[cut.start_index :] if source is not None)
+    return CompactionPreparation(
+        plan=CompactionPlan(
+            cut=cut,
+            messages_to_summarize=transcript_messages,
+            previous_summary=projection.summary if compaction is not None else None,
+            summarized_entry_ids=tuple(source for _, source in absorbed),
+            kept_entry_ids=kept_entry_ids,
+            tokens_before=estimate_tokens(messages),
+            system_message=system_message_from_state(projection.system_prompt),
+            modified_files=_modified_files(transcript_messages),
+        ),
+        reason=(
+            f"ready: summarize {len(transcript_messages)} messages, "
+            f"keep {len(kept_entry_ids)} entries"
+        ),
+    )
+
+
+def _source_entry_ids(
+    path: tuple[SessionEntry, ...], messages: Sequence[Message]
+) -> tuple[UUID | None, ...]:
+    """按对象同一性把投影消息映射回来源 entry；合成消息返回 None。
+
+    投影函数直接持有 `entry.message` 对象，因此同一性查找是精确映射；system
+    快照与旧摘要由投影现场构造，不在 path 中，查不到即是合成消息。
+    """
+    # 运行时导入避免 session 包初始化期间与 jsonl 形成循环依赖
+    from mini_pi.session.models import MessageEntry
+
+    by_object = {
+        id(entry.message): entry.id for entry in path if isinstance(entry, MessageEntry)
+    }
+    return tuple(by_object.get(id(message)) for message in messages)
+
+
+def _modified_files(messages: Sequence[Message]) -> tuple[str, ...]:
+    """待摘要范围内的文件改动；排序保证同一历史产出同一 plan。"""
+    files = {
+        path
+        for message in messages
+        if isinstance(message, ToolMessage)
+        for path in message.modified_files
+    }
+    return tuple(sorted(files))

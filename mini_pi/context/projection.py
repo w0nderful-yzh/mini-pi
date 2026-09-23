@@ -141,6 +141,8 @@ class CompactionProjection:
     """活动路径上最近一次 compaction 生效后的上下文投影。"""
 
     system_prompt: SystemPromptState
+    # 原始摘要文本；summary_message 是它加标签后的可投影形态
+    summary: str
     summary_message: UserMessage
     kept_messages: tuple[Message, ...]
 
@@ -148,7 +150,7 @@ class CompactionProjection:
     def messages(self) -> tuple[Message, ...]:
         """system 快照 → 摘要 → 保留消息，顺序可直接替换 AgentState.messages。"""
         return (
-            _system_message_from_state(self.system_prompt),
+            system_message_from_state(self.system_prompt),
             self.summary_message,
             *self.kept_messages,
         )
@@ -210,16 +212,19 @@ def project_compaction(entries: Iterable[SessionEntry]) -> CompactionProjection 
         # compaction.system_message 必有载荷，走到这里说明模型协议被破坏
         raise SessionError("compaction entry has no system snapshot")
 
-    summary = compaction.summary
+    summary_text = compaction.summary
     return CompactionProjection(
         system_prompt=state,
-        summary_message=UserMessage(content=f"<{SUMMARY_TAG}>\n{summary}\n</{SUMMARY_TAG}>"),
+        summary=summary_text,
+        summary_message=UserMessage(
+            content=f"<{SUMMARY_TAG}>\n{summary_text}\n</{SUMMARY_TAG}>"
+        ),
         kept_messages=tuple(kept_messages),
     )
 
 
-def _system_message_from_state(state: SystemPromptState) -> SystemMessage:
-    """把回放后的 system 状态还原为唯一可折叠的 system message。"""
+def system_message_from_state(state: SystemPromptState) -> SystemMessage:
+    """把回放后的 system 状态还原为完整快照消息；投影与压缩快照共用。"""
     if state.content is not None:
         return SystemMessage(content=state.content)
     if state.sections is None:
