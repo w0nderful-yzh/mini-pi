@@ -10,7 +10,8 @@ from mini_pi.agent.agent import Agent
 from mini_pi.cli.console import ConsoleRenderer
 from mini_pi.context.policy import resolve_policy
 from mini_pi.context.stats import ContextStats, context_stats
-from mini_pi.session.runtime import AgentSession
+from mini_pi.llm.types import Usage
+from mini_pi.session.runtime import AgentSession, CompactionExecution
 from mini_pi.session.usage import RunUsage, recent_run_usage
 from mini_pi.tools import build_default_registry
 from mini_pi.workspace.workspace import Workspace
@@ -31,6 +32,11 @@ def _usage_label(total: int, model: str) -> str:
         return f"~{total} tokens / window unknown"
     percentage = total / policy.context_window * 100
     return f"~{total} / {policy.context_window} tokens ({percentage:.1f}%)"
+
+
+def current_context_tokens(agent: Agent | AgentSession | None) -> int:
+    """当前投影的估算总量；/status 与 /compact 使用同一口径，避免前后不一致。"""
+    return _stats(agent).total
 
 
 def _run_usage(agent: Agent | AgentSession | None, renderer: ConsoleRenderer) -> RunUsage | None:
@@ -121,6 +127,39 @@ def render_context(
         console.print("Auto-compaction: unavailable (context window unknown)", markup=False)
     else:
         console.print("Auto-compaction: planned for M7.6", markup=False)
+
+
+def _summary_usage_label(usage: Usage | None) -> str:
+    """摘要调用的实测用量；Provider 未返回时明确标注不可用，不伪造成本。"""
+    if usage is None:
+        return "unavailable (provider returned no usage)"
+    return f"in {usage.input_tokens} / out {usage.output_tokens} tokens"
+
+
+def render_compaction(
+    console: Console,
+    *,
+    model: str,
+    execution: CompactionExecution,
+    tokens_before: int,
+    tokens_after: int,
+) -> None:
+    """显示压缩前后估算、切点与摘要调用成本；跳过时只说明原因。"""
+    result = execution.result
+    if result is None:
+        console.print(f"Compaction skipped: {execution.reason}", markup=False)
+        return
+    plan = result.plan
+    console.print(
+        f"Compaction: summarized {len(plan.messages_to_summarize)} messages, "
+        f"kept {len(plan.kept_entry_ids)} entries (cut boundary: {plan.cut.boundary})",
+        markup=False,
+    )
+    console.print(
+        f"Current context (estimated): ~{tokens_before} → {_usage_label(tokens_after, model)}",
+        markup=False,
+    )
+    console.print(f"Summary usage: {_summary_usage_label(result.usage)}", markup=False)
 
 
 def render_tools(console: Console, *, agent: Agent | AgentSession | None, cwd: Path) -> None:

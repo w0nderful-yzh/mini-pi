@@ -357,10 +357,13 @@ class CompactionResult:
     plan: CompactionPlan
 
 
-def generate_compaction_result(plan: CompactionPlan, llm: LLMClient) -> CompactionResult:
+def generate_compaction_result(
+    plan: CompactionPlan, llm: LLMClient, *, instructions: str | None = None
+) -> CompactionResult:
     """对 plan 生成摘要与 usage；不写盘、不替换 AgentState。
 
     - 只发送 plan 选出的新消息；重复压缩由 previous_summary 增量更新，不重发更早原文
+    - `instructions` 只进入本次摘要请求，不落盘、不进入消息历史
     - 工具轮的关键上下文留在保留区，摘要输入不出现悬空的工具调用
     - 摘要失败直接冒泡（CompactionError / LLMError），不会留下半成品
     """
@@ -368,5 +371,10 @@ def generate_compaction_result(plan: CompactionPlan, llm: LLMClient) -> Compacti
     if not transcript.strip():
         # 历史里的消息全为空正文：没有可摘要的事实，不能发空请求
         raise CompactionError("compaction plan produced no serializable transcript")
-    summary = summarize_transcript(llm, transcript, previous_summary=plan.previous_summary)
+    summary = summarize_transcript(
+        llm,
+        transcript,
+        previous_summary=plan.previous_summary,
+        instructions=instructions,
+    )
     return CompactionResult(summary=summary.summary, usage=summary.usage, plan=plan)

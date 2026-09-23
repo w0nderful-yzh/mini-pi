@@ -118,19 +118,27 @@ class SummaryResult:
 
 
 def summarize_transcript(
-    llm: LLMClient, transcript: str, *, previous_summary: str | None = None
+    llm: LLMClient,
+    transcript: str,
+    *,
+    previous_summary: str | None = None,
+    instructions: str | None = None,
 ) -> SummaryResult:
     """单次调用生成摘要；任何协议违规都直接失败，绝不返回半成品。
 
     - 历史已由 transcript 序列化承载，这里只负责协议与校验，不写盘、不改 AgentState
     - 传入 `previous_summary` 时改用 UPDATE 模板增量更新，不重发更早的原文
+    - `instructions` 只影响本次请求的 prompt，不落盘、不进入任何消息
     - `length` 截断、意外工具调用、空摘要都视为失败
     - LLM error 由 `LLMClient.complete()` 抛 `LLMError`，不在此处吞掉或重试
     """
     if not transcript.strip():
         # 空输入说明调用方给了错误的历史，属于程序缺陷
         raise ValueError("transcript must not be empty")
-    response = llm.complete(_build_messages(transcript, previous_summary=previous_summary), None)
+    messages = _build_messages(
+        transcript, previous_summary=previous_summary, instructions=instructions
+    )
+    response = llm.complete(messages, None)
     if response.stop_reason == "length":
         raise CompactionError("summary request was truncated (stop_reason=length)")
     if response.stop_reason == "error":
@@ -146,7 +154,10 @@ def summarize_transcript(
 
 
 def _build_messages(
-    transcript: str, *, previous_summary: str | None = None
+    transcript: str,
+    *,
+    previous_summary: str | None = None,
+    instructions: str | None = None,
 ) -> list[Message]:
     """整段历史作为待总结材料放在一条 user 消息里，避免被模型当成对话续写。"""
     blocks = [f"<conversation>\n{transcript}\n</conversation>"]
@@ -155,6 +166,10 @@ def _build_messages(
     else:
         blocks.append(f"<previous-summary>\n{previous_summary}\n</previous-summary>")
         prompt = UPDATE_SUMMARIZATION_PROMPT
+    focus = instructions.strip() if instructions is not None else ""
+    if focus:
+        # 用户附加关注点只影响本次摘要请求
+        prompt = f"{prompt}\n\nAdditional focus: {focus}"
     return [
         SystemMessage(content=SUMMARIZATION_SYSTEM_PROMPT),
         UserMessage(content="\n\n".join([*blocks, prompt])),

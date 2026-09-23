@@ -244,10 +244,13 @@ class AgentSession:
         """执行一轮任务，完整消息由提交回调立即持久化。"""
         return self._agent.run(task)
 
-    def compact(self, *, keep_recent_tokens: int) -> CompactionExecution:
+    def compact(
+        self, *, keep_recent_tokens: int, instructions: str | None = None
+    ) -> CompactionExecution:
         """对当前投影执行一次手动压缩；没有安全切点时不做任何改动。
 
         - 摘要调用走当前会话的 LLM，失败（LLMError / CompactionError）直接冒泡
+        - `instructions` 只进入本次摘要请求，不写进 Session
         - 只有摘要成功后才写 CompactionEntry，再从 entry 路径重建内存投影
         """
         preparation = prepare_compaction(
@@ -255,7 +258,9 @@ class AgentSession:
         )
         if preparation.plan is None:
             return CompactionExecution(result=None, reason=preparation.reason)
-        result = generate_compaction_result(preparation.plan, self._llm)
+        result = generate_compaction_result(
+            preparation.plan, self._llm, instructions=instructions
+        )
         self._commit_compaction(result)
         return CompactionExecution(result=result, reason=preparation.reason)
 

@@ -10,6 +10,9 @@ from mini_pi.context.tokens import TokenEstimate, TokenSource
 # 默认为输出留出的 reserve；可在创建 ContextPolicy 时覆盖
 DEFAULT_RESERVE_TOKENS = 8_192
 
+# 手动 /compact 默认原样保留的最近上下文：与窗口大小无关，窗口未知时手动压缩同样可用
+DEFAULT_KEEP_RECENT_TOKENS = 20_000
+
 # 已知模型的显式上下文窗口；来源为 2026-09 官方文档，未知模型不猜值，
 # 必须由用户传入 context_window（如 deepseek-flash / gpt-5.6-* 均为 1M 级）。
 KNOWN_CONTEXT_WINDOWS: dict[str, int] = {

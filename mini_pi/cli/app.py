@@ -20,7 +20,14 @@ from mini_pi.auth import (
 )
 from mini_pi.cli.banner import render_banner
 from mini_pi.cli.console import ConsoleRenderer
-from mini_pi.cli.status import render_context, render_status, render_tools
+from mini_pi.cli.status import (
+    current_context_tokens,
+    render_compaction,
+    render_context,
+    render_status,
+    render_tools,
+)
+from mini_pi.context.policy import DEFAULT_KEEP_RECENT_TOKENS
 from mini_pi.errors import MiniPiError, MissingAPIKeyError, SessionError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
@@ -39,6 +46,7 @@ API_KEY_ENV = {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
 
 _HELP_TEXT = """Available commands:
   /model [provider] [model]  switch provider/model (reuse saved key; ask only if missing)
+  /compact [instructions]    summarize older context into a checkpoint (saved sessions only)
   /new                       start a new session (saved sessions only)
   /reset                     clear in-memory context (memory-only sessions)
   /status [full]             show model, workspace, session, and context
@@ -233,6 +241,41 @@ def _build_runtime(
 def _is_model_command(command: str) -> bool:
     """`/model` 与兼容别名 `/connect`；两者都支持 provider/model 参数。"""
     return command.split(maxsplit=1)[0] in {"/model", "/connect"}
+
+
+def _run_compaction(
+    console: Console,
+    agent: Agent | AgentSession | None,
+    *,
+    model: str,
+    instructions: str | None,
+) -> None:
+    """执行一次手动压缩：显示前后估算、切点与摘要调用成本，失败不中断 REPL。"""
+    if agent is None:
+        console.print("configure a provider first with /model", style="yellow")
+        return
+    if not isinstance(agent, AgentSession):
+        # --no-session 不能隐式建 JSONL：压缩检查点必须有可追加的事实源
+        console.print(
+            "/compact requires a saved session; restart without --no-session",
+            style="yellow",
+        )
+        return
+    before = current_context_tokens(agent)
+    try:
+        execution = agent.compact(
+            keep_recent_tokens=DEFAULT_KEEP_RECENT_TOKENS, instructions=instructions
+        )
+    except MiniPiError as exc:
+        console.print(f"compaction failed: {exc}", style="red", markup=False)
+        return
+    render_compaction(
+        console,
+        model=model,
+        execution=execution,
+        tokens_before=before,
+        tokens_after=current_context_tokens(agent),
+    )
 
 
 def _switch_connection(
@@ -432,7 +475,7 @@ def cli(
     commands = (
         "/model, /reset, /status, /context, /tools, /help, /exit"
         if no_session
-        else "/model, /new, /reset, /status, /context, /tools, /help, /exit"
+        else "/model, /compact, /new, /reset, /status, /context, /tools, /help, /exit"
     )
     render_banner(console, enabled=not no_banner)
     if (
@@ -503,6 +546,15 @@ def cli(
             continue
         if stripped == "/tools":
             render_tools(console, agent=agent, cwd=workspace.root)
+            continue
+        if stripped == "/compact" or stripped.startswith("/compact "):
+            # 可选 instructions 只随本次摘要请求发送，不写入 Session
+            _run_compaction(
+                console,
+                agent,
+                model=model,
+                instructions=stripped[len("/compact") :].strip() or None,
+            )
             continue
         if stripped == "/new":
             if isinstance(agent, AgentSession):
