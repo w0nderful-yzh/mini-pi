@@ -34,5 +34,9 @@ class SessionError(MiniPiError):
     """Session 文件或 entry 不符合持久化协议。"""
 
 
+class CompactionError(MiniPiError):
+    """压缩的摘要生成或提交失败；失败时不得改变 Session 与 AgentState。"""
+
+
 class MissingAPIKeyError(MiniPiError):
     """当前 provider 没有可用的 API Key；交互式入口可据此提示输入。"""

@@ -26,6 +26,7 @@ from mini_pi.context.sections import (
     replay_system_messages,
 )
 from mini_pi.context.serializer import TOOL_RESULT_LIMIT, serialize_transcript
+from mini_pi.context.summarizer import SummaryResult, summarize_transcript
 from mini_pi.context.tokens import TokenEstimate, TokenSource, estimate_tokens
 
 __all__ = [
@@ -41,6 +42,7 @@ __all__ = [
     "CutPoint",
     "MessageProjection",
     "ProjectInstruction",
+    "SummaryResult",
     "SystemPromptState",
     "TokenEstimate",
     "TokenSource",
@@ -56,4 +58,5 @@ __all__ = [
     "replay_system_messages",
     "resolve_policy",
     "serialize_transcript",
+    "summarize_transcript",
 ]
