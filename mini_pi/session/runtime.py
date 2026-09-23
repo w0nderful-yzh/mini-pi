@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from mini_pi.agent.agent import Agent
 from mini_pi.agent.events import AgentEvent
 from mini_pi.agent.state import AgentState
 from mini_pi.auth import resolve_api_key
+from mini_pi.context.compaction import (
+    CompactionResult,
+    generate_compaction_result,
+    prepare_compaction,
+)
 from mini_pi.context.projection import project_compaction, project_entry_path
 from mini_pi.errors import MiniPiError, SessionError
 from mini_pi.llm.base import LLMClient
@@ -20,6 +26,14 @@ from mini_pi.session.usage import RunUsage, recent_session_run_usage
 from mini_pi.tools.registry import ToolRegistry
 
 LLMFactory = Callable[[str, str], LLMClient]
+
+
+@dataclass(frozen=True, slots=True)
+class CompactionExecution:
+    """一次手动压缩的执行结果；result 为 None 时 reason 说明为什么没有压缩。"""
+
+    result: CompactionResult | None
+    reason: str
 
 
 def _create_auth_llm(provider: str, model: str) -> LLMClient:
@@ -229,6 +243,39 @@ class AgentSession:
     def run(self, task: str) -> AssistantMessage:
         """执行一轮任务，完整消息由提交回调立即持久化。"""
         return self._agent.run(task)
+
+    def compact(self, *, keep_recent_tokens: int) -> CompactionExecution:
+        """对当前投影执行一次手动压缩；没有安全切点时不做任何改动。
+
+        - 摘要调用走当前会话的 LLM，失败（LLMError / CompactionError）直接冒泡
+        - 只有摘要成功后才写 CompactionEntry，再从 entry 路径重建内存投影
+        """
+        preparation = prepare_compaction(
+            self._session.active_entries(), keep_recent_tokens=keep_recent_tokens
+        )
+        if preparation.plan is None:
+            return CompactionExecution(result=None, reason=preparation.reason)
+        result = generate_compaction_result(preparation.plan, self._llm)
+        self._commit_compaction(result)
+        return CompactionExecution(result=result, reason=preparation.reason)
+
+    def _commit_compaction(self, result: CompactionResult) -> None:
+        """摘要成功后追加 CompactionEntry，再整体替换内存投影。
+
+        先落盘、后重建：写盘失败时 JSONL 与内存都不变；重建失败时保留旧投影，
+        AgentState 不会被写成半成品（JSONL 里是完整 entry，新进程 resume 可重建）。
+        """
+        plan = result.plan
+        self._session.append_compaction(
+            summary=result.summary,
+            first_kept_entry_id=plan.first_kept_entry_id,
+            tokens_before=plan.tokens_before.tokens,
+            system_message=plan.system_message,
+            usage=result.usage,
+            modified_files=list(plan.modified_files),
+        )
+        messages = self._session.replay().messages
+        self._agent.state.messages = list(messages)
 
     def _commit_message(self, message: Message) -> None:
         """先追加 JSONL；失败时让 Agent 的 durable-first 入口停止。"""

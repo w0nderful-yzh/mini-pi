@@ -7,11 +7,12 @@ from mini_pi.session.jsonl import (
     session_dir_for_cwd,
 )
 from mini_pi.session.models import CompactionEntry, MessageEntry, SessionEntry, SessionHeader
-from mini_pi.session.runtime import AgentSession
+from mini_pi.session.runtime import AgentSession, CompactionExecution
 
 __all__ = [
     "AgentSession",
     "CompactionEntry",
+    "CompactionExecution",
     "JsonlSession",
     "MessageEntry",
     "SessionEntry",

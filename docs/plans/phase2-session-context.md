@@ -1,6 +1,6 @@
 # Phase 2：Session、Context 与 CLI 成本控制
 
-> 状态：实施中。M7.1–M7.4、M7.C1–C8、M7.5a–M7.5d 已完成；下一任务是 **M7.5e：Compaction 事务提交**。本文件先列待开发任务，已完成交付放在末尾。
+> 状态：实施中。M7.1–M7.4、M7.C1–C8、M7.5a–M7.5e 已完成；下一任务是 **M7.5f：CLI `/compact [instructions]`**。本文件先列待开发任务，已完成交付放在末尾。
 
 **目标：** 在已有 Coding Agent 闭环上，控制单次任务的重复探索和累计模型输入，完成安全的手动/自动上下文压缩，并让终端清楚展示进度、失败和真实用量。只支持 OpenAI、DeepSeek；不引入 Agent 框架、额外规划模型或并行工具执行。
 
@@ -68,13 +68,6 @@ CLI → AgentSession → Agent → run_loop → (LLM, ToolRegistry) → Tool →
 ## 3. M7.5 手动 Compaction
 
 前置：C6–C8 完成。`/compact` 对当前投影做**可审计的历史压缩**，不是代替任务预算；对 21k 上下文调用摘要模型未必划算。
-
-### M7.5e：Compaction 事务提交
-
-- [ ] 摘要成功后 append `CompactionEntry`，从 JSONL 重新投影，再一次性替换 `AgentState.messages`；原始 message entry 不删除。
-- [ ] 摘要、写盘或重建失败时不得留下半条 entry、错误投影或重复工具执行。
-
-验收：`uv run pytest tests/session/test_compaction_transaction.py -q`。
 
 ### M7.5f：CLI `/compact [instructions]`
 
@@ -182,11 +175,12 @@ M7 完成标准：会话可恢复；项目规则生效；单任务累计成本�
 | M7.5a | Transcript 序列化：role、工具名、call id、参数、结果与错误状态确定性输出；单条 tool result 2000 字符头部截断并标记省略量；system 快照不进入摘要输入 | `tests/context/test_serializer.py` 11 passed；全量 433 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`adc5bd1` |
 | M7.5b | 固定摘要协议与单次调用器：Goal、Constraints、Progress、Key Decisions、Next Steps、Critical Context、read/modified files 模板；独立 system prompt、`tools=None`；空摘要、`length`、error 状态、意外 tool call 与 LLM error 一律失败不落盘 | `tests/context/test_summarizer.py` 9 passed；全量 442 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`ded341d` |
 | M7.5c | 压缩输入 plan：活动投影 + `find_cut_point` 选切点，按对象同一性映射回真实 entry；列出待摘要/保留 entry id、firstKeptEntryId、tokensBefore、system 快照、modifiedFiles 与 `previous_summary`；无安全切点只返回原因 | `tests/context/test_compaction_plan.py` 6 passed；全量 448 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`9efa836` |
-| M7.5d | Compaction Result：对 plan 序列化并单次调用生成摘要与 usage；重复压缩改用 UPDATE 模板并把旧摘要放进 `<previous-summary>`，不重发更早原文；split-turn 的工具轮整体留在保留区；仍不写盘、不替换 AgentState | `tests/context/test_compaction_result.py` 5 passed；全量 453 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；本提交 |
+| M7.5d | Compaction Result：对 plan 序列化并单次调用生成摘要与 usage；重复压缩改用 UPDATE 模板并把旧摘要放进 `<previous-summary>`，不重发更早原文；split-turn 的工具轮整体留在保留区；仍不写盘、不替换 AgentState | `tests/context/test_compaction_result.py` 5 passed；全量 453 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`f942068` |
+| M7.5e | 事务提交：`AgentSession.compact()` 摘要成功后 append `CompactionEntry`（summary/firstKeptEntryId/tokensBefore/systemMessage/usage/modifiedFiles），再从 entry 路径重建并一次性替换 `AgentState.messages`；原始 message entry 不删、工具不重放；摘要/写盘/重建失败都不改 JSONL 与内存 | `tests/session/test_compaction_transaction.py` 6 passed；M7.5 总验收（原始 message 数不变、投影变短、resume 一致）已在用例内验证；全量 459 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；本提交 |
 
 ### 实施与审查规则
 
 1. 每个新编号是一批可审查的最小行为；不提前创建后续编号的接口或占位实现。代码、必要测试、README 与本计划状态在**同一提交**；中文 `feat/fix/docs` 消息。
 2. 每批运行针对性测试、全量离线测试和 `git diff --check`，再更新状态；真实模型测试只有执行过才能记“通过”。文件测试用 `tmp_path`，默认测试不联网。
 3. 若设计改变 Session/Context/CLI 边界，同步 README 第 2 节与 AGENTS.md。发现文档与代码不一致，先修文档再继续实现。
-4. 下一批只做 **M7.5e**；摘要与 usage 已能生成，先做事务提交：摘要成功才 append `CompactionEntry`，再从 JSONL 重新投影并一次性替换 `AgentState.messages`。
+4. 下一批只做 **M7.5f**；事务提交已就绪，最后把它接进 CLI：`/compact [instructions]`，并显示压缩前后估算、切点与摘要调用成本。
