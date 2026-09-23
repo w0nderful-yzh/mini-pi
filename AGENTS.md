@@ -736,6 +736,7 @@ LLM Mock
 ```text
 Agent / Loop 测试使用 FakeLLMClient（脚本化事件流），不调用真实 API
 真实 API 测试标记 @pytest.mark.integration，默认通过 addopts 排除
+tests/integration/ 存放离线端到端用例（FakeLLM 驱动全链路），不加 integration marker
 文件测试使用 tmp_path，不触碰真实项目文件
 禁止测试依赖网络
 ```

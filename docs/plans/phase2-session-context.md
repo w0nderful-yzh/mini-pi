@@ -1,6 +1,6 @@
 # Phase 2：Session、Context 与 CLI 成本控制
 
-> 状态：实施中。M7.1–M7.4、M7.C1–C8、M7.5、M7.6a–d 已完成；下一任务是 **M7.6e：离线端到端**。本文件先列待开发任务，已完成交付放在末尾。
+> 状态：实施中。M7.1–M7.4、M7.C1–C8、M7.5、M7.6a–e 已完成；下一任务是 **M7.6f：旧 Tool Result 的成本感知压缩**。本文件先列待开发任务，已完成交付放在末尾。
 
 **目标：** 在已有 Coding Agent 闭环上，控制单次任务的重复探索和累计模型输入，完成安全的手动/自动上下文压缩，并让终端清楚展示进度、失败和真实用量。只支持 OpenAI、DeepSeek；不引入 Agent 框架、额外规划模型或并行工具执行。
 
@@ -81,7 +81,7 @@ CLI → AgentSession → Agent → run_loop → (LLM, ToolRegistry) → Tool →
 
 ### M7.6e：离线端到端
 
-- [ ] FakeLLM 验证 assistant → tool → compact → assistant，工具只执行一次；退出后 resume 投影与内存一致。
+- [x] FakeLLM 验证 assistant → tool → compact → assistant，工具只执行一次；退出后 resume 投影与内存一致。
 
 验收：`uv run pytest tests/integration/test_auto_compaction.py -q`。
 
@@ -157,10 +157,11 @@ M7 完成标准：会话可恢复；项目规则生效；单任务累计成本�
 | M7.6b | 新 user 消息前自动压缩：`AgentSession.run()` 先用 M7.4g 策略（估算 > 窗口 − reserve）判断，需要时复用 M7.5 事务、保留预算同手动 `/compact`；窗口未知或未超阈值不动状态，每次 run 只检查一次，压缩成功后只追加一条 user 消息；摘要失败不写半成品 | `tests/session/test_auto_compact_before_prompt.py` 7 passed（小窗口阈值、单次追加、未知窗口、仍超阈值不重复压缩、摘要失败无写入、空任务不触发）；全量 475 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`ae18d7b` |
 | M7.6c | 工具轮之间的自动压缩：`AgentSession` 把同一策略判定与 M7.5 事务接到 `prepare_next_turn`，每个完整工具批次提交后按 M7.4g 阈值重新检查；`run()` 的 prompt 前检查与钩子共用 `_auto_compact_if_needed`，保留预算仍为 `DEFAULT_KEEP_RECENT_TOKENS`；成功后同一次 run 用重建投影继续，已执行的工具不重放（ToolMessage 原文与条数不变），不做 overflow 自动 retry；摘要失败保留已提交的工具结果、不写半成品 | `tests/session/test_auto_compact_tool_turn.py` 6 passed（工具轮越线压缩后同一 run 继续、未越线不压缩、未知窗口禁用、第二个工具轮增量压缩带 `<previous-summary>` 且不重发原文、摘要失败工具不重放且投影不半写、阈值夹具）；停用钩子接线后 3 个用例失败，确认覆盖真实触发路径；全量 481 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`6edc306` |
 | M7.6d | 自动压缩失败语义：钩子抛出的 `MiniPiError` 在 Loop 内转成 `AgentEndEvent(reason="error")` 与 error assistant 消息（不追加假消息、不改投影），prompt 前的同类失败在 `AgentSession.run()` 内发成对 start/end 事件并返回 error 消息；无安全切点、摘要失败、写盘失败以及**压缩后仍超阈值**都不再发出下一次请求；一次性 CLI 以 error 结束时返回非零码。此处收紧 M7.6b 的旧行为（当时允许带着仍超阈值的投影继续） | `tests/session/test_auto_compact_errors.py` 7 passed（工具轮摘要失败仍保工具结果、无切点、已压缩仍超、单轮即超阈值、写盘失败、失败后可恢复、夹具窗口关系）、`tests/agent/test_loop.py` 钩子 agent error 用例、`tests/cli/test_compact_command.py` REPL 展示与一次性非零码；M7.6b/M7.6c 的失败用例同步改为新语义；去掉“压缩后仍超阈值”分支会打挂对应用例；全量 491 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`a6d9d9f` |
+| M7.6e | 离线端到端：新增 `tests/integration/`（不加 `integration` marker——那是真实 API 专用，目录名与 marker 无关）走生产装配路径（`build_default_registry` + 真实 `Workspace` + 真实 `read`/`write` + 真实 JSONL + `--resume`）：旧回复约 25k token 时用真实日志（read 回 1000 行、约 11k token）把投影推过阈值，压缩后同一次 run 继续；退出后 `AgentSession.resume` 的投影、stepCount、modifiedFiles 与内存一致，首个请求即压缩后投影加新任务；CliRunner 跨进程验证 `--resume` 用的也是压缩后投影 | `tests/integration/test_auto_compaction.py` 4 passed（工具批次真实执行且不重放、恢复一致并沿同一 leaf 续写、CLI 两次调用跨进程、夹具阈值关系与 read 双限自证）；停用工具轮钩子后 3 个用例失败；全量 495 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；本提交 |
 
 ### 实施与审查规则
 
 1. 每个新编号是一批可审查的最小行为；不提前创建后续编号的接口或占位实现。代码、必要测试、README 与本计划状态在**同一提交**；中文 `feat/fix/docs` 消息。
 2. 每批运行针对性测试、全量离线测试和 `git diff --check`，再更新状态；真实模型测试只有执行过才能记“通过”。文件测试用 `tmp_path`，默认测试不联网。
 3. 若设计改变 Session/Context/CLI 边界，同步 README 第 2 节与 AGENTS.md。发现文档与代码不一致，先修文档再继续实现。
-4. 下一批只做 **M7.6e**；失败语义已固定（无切点、摘要/写盘失败、压缩后仍超阈值都以 agent error 终止），接着用 FakeLLM 跑 assistant → tool → compact → assistant 的离线端到端，验证工具只执行一次且 resume 投影与内存一致。
+4. 下一批只做 **M7.6f**；端到端已证明压缩链路与恢复一致，接着评估旧工具结果的成本感知提前压缩，必须用实测成本证明净收益，不能只因累计输入高就额外调用摘要模型。
