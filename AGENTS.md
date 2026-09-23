@@ -264,7 +264,7 @@ agent_end(reason: completed | step_limit | budget_limit | error)
 - M7.C8 起 `--max-run-input-tokens` 可显式启用单次 `run()` 累计输入预算，默认关闭。Loop 在完整工具批次后、下一请求前检查 Provider 已报告 input 与下一投影估算；接近上限只发一次未持久化收敛提示，预计超限发 `budget_limit`。这是请求边界控制，Session、tool pair、`modified_files` 和已执行修改必须保留；下一次 `run()` 重新计预算
 - `on_event` 为可选参数，测试时传 None 或列表收集器
 - `on_message_commit` 仅在完整 system / user / assistant / tool 消息上触发；回调成功后才追加内存历史，失败直接冒泡；tool 改动文件随已提交的 ToolMessage 记录
-- M7.6a 起 `run_loop` 支持可选 `prepare_next_turn`：只在完整工具批次提交、turn 收尾之后调用，下一次请求重新读取 `state.messages`，因此钩子可替换投影（压缩）；`None` 保持原事件行为，截断轮没有真实工具批次不触发，钩子异常直接冒泡
+- M7.6a 起 `run_loop` 支持可选 `prepare_next_turn`：只在完整工具批次提交、turn 收尾之后调用，下一次请求重新读取 `state.messages`，因此钩子可替换投影（压缩）；`None` 保持原事件行为，截断轮没有真实工具批次不触发，钩子异常直接冒泡。M7.6c 起 `AgentSession` 用该钩子运行同一套窗口判定与 M7.5 压缩事务，与 prompt 前检查共用入口
 
 ---
 
@@ -581,6 +581,8 @@ Context Compaction 放在第二阶段：
 时机：turn 边界
 M7.6b 起 AgentSession.run() 在提交新 user 消息前按上述阈值判断，需要时复用同一压缩事务；
 窗口未知不启用自动压缩，未超阈值不产生任何写入，每次 run 只检查一次
+M7.6c 起同一个判定与事务也接到 prepare_next_turn：每个完整工具批次提交后、下一次请求前检查；
+成功后同一次 run 用重建投影继续，已执行的工具不重放，不做 overflow 自动 retry
 ```
 
 M7.C6 起将两种 token 口径分开：一次 `run()` 多次请求的 Provider input/output 之和是任务累计消耗；下一次请求的活动投影估算才是当前上下文。`/context` 只分解当前投影，不把累计消耗当窗口占用。M7.C8 的任务预算在完整工具批次后、下一次模型请求前检查；Provider usage 缺失时使用独立标记的投影估算，不能伪称实测。窗口阈值仍只用于 Context Compaction。

@@ -1,6 +1,6 @@
 # Phase 2：Session、Context 与 CLI 成本控制
 
-> 状态：实施中。M7.1–M7.4、M7.C1–C8、M7.5、M7.6a–b 已完成；下一任务是 **M7.6c：工具轮之间自动压缩**。本文件先列待开发任务，已完成交付放在末尾。
+> 状态：实施中。M7.1–M7.4、M7.C1–C8、M7.5、M7.6a–c 已完成；下一任务是 **M7.6d：自动压缩失败语义**。本文件先列待开发任务，已完成交付放在末尾。
 
 **目标：** 在已有 Coding Agent 闭环上，控制单次任务的重复探索和累计模型输入，完成安全的手动/自动上下文压缩，并让终端清楚展示进度、失败和真实用量。只支持 OpenAI、DeepSeek；不引入 Agent 框架、额外规划模型或并行工具执行。
 
@@ -69,7 +69,7 @@ CLI → AgentSession → Agent → run_loop → (LLM, ToolRegistry) → Tool →
 
 ### M7.6c：工具轮之间自动压缩
 
-- [ ] 将 M7.5 事务接入 M7.6a hook，成功后同一次 run 继续；工具不能重放，不做 overflow 自动 retry。
+- [x] 将 M7.5 事务接入 M7.6a hook，成功后同一次 run 继续；工具不能重放，不做 overflow 自动 retry。
 
 验收：`uv run pytest tests/session/test_auto_compact_tool_turn.py -q`。
 
@@ -154,11 +154,12 @@ M7 完成标准：会话可恢复；项目规则生效；单任务累计成本�
 | M7.5e | 事务提交：`AgentSession.compact()` 摘要成功后 append `CompactionEntry`（summary/firstKeptEntryId/tokensBefore/systemMessage/usage/modifiedFiles），再从 entry 路径重建并一次性替换 `AgentState.messages`；原始 message entry 不删、工具不重放；摘要/写盘/重建失败都不改 JSONL 与内存 | `tests/session/test_compaction_transaction.py` 6 passed；M7.5 总验收（原始 message 数不变、投影变短、resume 一致）已在用例内验证；全量 459 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`f947671` |
 | M7.5f | CLI `/compact [instructions]`：`DEFAULT_KEEP_RECENT_TOKENS=20000` 触发手动压缩；instructions 只进摘要请求不落盘；显示摘要消息数、保留 entry 数、切点边界、压缩前后当前上下文估算与摘要实测用量；失败只报错不改 Session；`--no-session` 明确拒绝且不建 JSONL；不引入自动压缩 | `tests/cli/test_compact_command.py` 4 passed；M7.5 总验收在 CLI 层复核（6 条 entry = 5 message + 1 compaction，重放投影 4 条，原始 message 不删）；全量 463 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`eba468e` |
 | M7.6a | `run_loop` 可选 `prepare_next_turn` 钩子：只在完整工具批次提交、turn 收尾后调用，下一次请求重新读取 `state.messages`；`None` 保持 Phase 1 事件行为，截断轮不触发，钩子异常直接冒泡；`Agent` 透传该钩子供 Session 层接入 | `tests/agent/test_loop.py` 11 passed（含钩子时序、多批次、跳过与失败冒泡）、`tests/agent/test_agent.py` 透传用例；全量 468 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`038a7ee` |
-| M7.6b | 新 user 消息前自动压缩：`AgentSession.run()` 先用 M7.4g 策略（估算 > 窗口 − reserve）判断，需要时复用 M7.5 事务、保留预算同手动 `/compact`；窗口未知或未超阈值不动状态，每次 run 只检查一次，压缩成功后只追加一条 user 消息；摘要失败不写半成品 | `tests/session/test_auto_compact_before_prompt.py` 7 passed（小窗口阈值、单次追加、未知窗口、仍超阈值不重复压缩、摘要失败无写入、空任务不触发）；全量 475 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；本提交 |
+| M7.6b | 新 user 消息前自动压缩：`AgentSession.run()` 先用 M7.4g 策略（估算 > 窗口 − reserve）判断，需要时复用 M7.5 事务、保留预算同手动 `/compact`；窗口未知或未超阈值不动状态，每次 run 只检查一次，压缩成功后只追加一条 user 消息；摘要失败不写半成品 | `tests/session/test_auto_compact_before_prompt.py` 7 passed（小窗口阈值、单次追加、未知窗口、仍超阈值不重复压缩、摘要失败无写入、空任务不触发）；全量 475 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`ae18d7b` |
+| M7.6c | 工具轮之间的自动压缩：`AgentSession` 把同一策略判定与 M7.5 事务接到 `prepare_next_turn`，每个完整工具批次提交后按 M7.4g 阈值重新检查；`run()` 的 prompt 前检查与钩子共用 `_auto_compact_if_needed`，保留预算仍为 `DEFAULT_KEEP_RECENT_TOKENS`；成功后同一次 run 用重建投影继续，已执行的工具不重放（ToolMessage 原文与条数不变），不做 overflow 自动 retry；摘要失败保留已提交的工具结果、不写半成品 | `tests/session/test_auto_compact_tool_turn.py` 6 passed（工具轮越线压缩后同一 run 继续、未越线不压缩、未知窗口禁用、第二个工具轮增量压缩带 `<previous-summary>` 且不重发原文、摘要失败工具不重放且投影不半写、阈值夹具）；停用钩子接线后 3 个用例失败，确认覆盖真实触发路径；全量 481 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；本提交 |
 
 ### 实施与审查规则
 
 1. 每个新编号是一批可审查的最小行为；不提前创建后续编号的接口或占位实现。代码、必要测试、README 与本计划状态在**同一提交**；中文 `feat/fix/docs` 消息。
 2. 每批运行针对性测试、全量离线测试和 `git diff --check`，再更新状态；真实模型测试只有执行过才能记“通过”。文件测试用 `tmp_path`，默认测试不联网。
 3. 若设计改变 Session/Context/CLI 边界，同步 README 第 2 节与 AGENTS.md。发现文档与代码不一致，先修文档再继续实现。
-4. 下一批只做 **M7.6c**；prompt 前检查已就绪，再把同一事务接到 `prepare_next_turn` 钩子上，覆盖工具轮之间的超限。
+4. 下一批只做 **M7.6d**；两个触发点（prompt 前、工具轮之间）已接通同一事务，接着定义无安全切点、摘要失败与写盘失败时的明确 agent error 与状态保留。

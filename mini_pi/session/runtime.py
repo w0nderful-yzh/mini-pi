@@ -92,6 +92,8 @@ class AgentSession:
             max_run_input_tokens=max_run_input_tokens,
             on_event=on_event,
             on_message_commit=self._commit_message,
+            # 工具轮之间复用同一策略与事务：下一次请求读到压缩后的投影
+            prepare_next_turn=self._auto_compact_if_needed,
         )
 
     @classmethod
@@ -251,15 +253,18 @@ class AgentSession:
         if not task.strip():
             # 空任务不触发压缩检查，也不产生任何 Session 写入
             raise ValueError("task must not be empty")
-        self._compact_before_prompt()
+        self._auto_compact_if_needed()
         return self._agent.run(task)
 
-    def _compact_before_prompt(self) -> None:
-        """新 user 消息前按 M7.4g 窗口策略自动压缩；未超阈值或窗口未知都不动状态。
+    def _auto_compact_if_needed(self) -> None:
+        """按 M7.4g 窗口策略检查当前投影，超阈值时执行一次 M7.5 事务。
 
-        - 判定：当前投影估算 > context_window - reserve_tokens 才需要压缩
-        - 复用 M7.5 事务，成功后由 `run()` 追加**一条** user 消息
-        - 无安全切点时既不写盘也不改投影（终止语义属于 M7.6d）
+        - 判定：估算 > context_window - reserve_tokens；窗口未知时不动任何状态
+        - 两个调用点共用同一判定与保留预算：`run()` 的 prompt 前检查，以及
+          Agent Loop 的 `prepare_next_turn`（完整工具批次提交后、下一次请求前）
+        - 成功后投影由 CompactionEntry 重建，同一次 run 继续；已执行的工具不重放
+        - 无安全切点时既不写盘也不改投影（终止语义属于 M7.6d），
+          摘要或写盘失败直接冒泡，不做 overflow 自动 retry
         """
         policy = resolve_policy(self._model)
         estimate = estimate_tokens(self._agent.state.messages)
