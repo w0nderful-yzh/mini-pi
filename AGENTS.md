@@ -579,6 +579,8 @@ Context Compaction 放在第二阶段：
 切点：只切 user / assistant 消息，绝不拆散 tool_call / tool_result 配对
 摘要：单次 LLM 调用，固定模板；失败视为压缩失败
 时机：turn 边界
+M7.6b 起 AgentSession.run() 在提交新 user 消息前按上述阈值判断，需要时复用同一压缩事务；
+窗口未知不启用自动压缩，未超阈值不产生任何写入，每次 run 只检查一次
 ```
 
 M7.C6 起将两种 token 口径分开：一次 `run()` 多次请求的 Provider input/output 之和是任务累计消耗；下一次请求的活动投影估算才是当前上下文。`/context` 只分解当前投影，不把累计消耗当窗口占用。M7.C8 的任务预算在完整工具批次后、下一次模型请求前检查；Provider usage 缺失时使用独立标记的投影估算，不能伪称实测。窗口阈值仍只用于 Context Compaction。

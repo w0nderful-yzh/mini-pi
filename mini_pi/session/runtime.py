@@ -15,7 +15,13 @@ from mini_pi.context.compaction import (
     generate_compaction_result,
     prepare_compaction,
 )
+from mini_pi.context.policy import (
+    DEFAULT_KEEP_RECENT_TOKENS,
+    evaluate_compaction,
+    resolve_policy,
+)
 from mini_pi.context.projection import project_compaction, project_entry_path
+from mini_pi.context.tokens import estimate_tokens
 from mini_pi.errors import MiniPiError, SessionError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
@@ -241,8 +247,26 @@ class AgentSession:
         self._model = model
 
     def run(self, task: str) -> AssistantMessage:
-        """执行一轮任务，完整消息由提交回调立即持久化。"""
+        """执行一轮任务：先按窗口策略判断是否需要压缩，再提交这一条 user 消息。"""
+        if not task.strip():
+            # 空任务不触发压缩检查，也不产生任何 Session 写入
+            raise ValueError("task must not be empty")
+        self._compact_before_prompt()
         return self._agent.run(task)
+
+    def _compact_before_prompt(self) -> None:
+        """新 user 消息前按 M7.4g 窗口策略自动压缩；未超阈值或窗口未知都不动状态。
+
+        - 判定：当前投影估算 > context_window - reserve_tokens 才需要压缩
+        - 复用 M7.5 事务，成功后由 `run()` 追加**一条** user 消息
+        - 无安全切点时既不写盘也不改投影（终止语义属于 M7.6d）
+        """
+        policy = resolve_policy(self._model)
+        estimate = estimate_tokens(self._agent.state.messages)
+        if evaluate_compaction(estimate, policy=policy).status != "needed":
+            return
+        # 与手动 /compact 共用同一保留预算：窗口阈值只决定触发时机
+        self.compact(keep_recent_tokens=DEFAULT_KEEP_RECENT_TOKENS)
 
     def compact(
         self, *, keep_recent_tokens: int, instructions: str | None = None
