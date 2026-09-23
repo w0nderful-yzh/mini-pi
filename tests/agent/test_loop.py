@@ -154,3 +154,103 @@ def test_non_modifying_observations_have_no_modified_files(
     assert len(tool_messages) == 1
     assert tool_messages[0].modified_files == []
     assert state.modified_files == set()
+
+
+def test_prepare_next_turn_runs_after_tool_batch_and_before_next_request(
+    echo_registry: ToolRegistry,
+) -> None:
+    """钩子看到完整工具批次，替换后的投影成为下一次请求的内容。"""
+    state = AgentState(messages=[UserMessage(content="write")])
+    llm = FakeLLMClient(
+        [
+            assistant(tool_calls=[tool_call("c1", "echo", {"text": "hi"})]),
+            assistant("done"),
+        ]
+    )
+    seen: list[list[str]] = []
+
+    def hook() -> None:
+        """记录触发时的 transcript，并模拟压缩后的投影替换。"""
+        seen.append([message.role for message in state.messages])
+        state.messages = [UserMessage(content="compacted")]
+
+    run_loop(state, llm, echo_registry, prepare_next_turn=hook)
+
+    # 工具结果已提交、turn 已收尾，才轮到钩子
+    assert seen == [["user", "assistant", "tool"]]
+    assert llm.calls[1] == [UserMessage(content="compacted")]
+    # 循环结束后钩子替换的投影仍在，最终回复追加在其后
+    assert [message.role for message in state.messages] == ["user", "assistant"]
+    assert state.messages[0] == UserMessage(content="compacted")
+
+
+def test_prepare_next_turn_runs_once_per_tool_batch(echo_registry: ToolRegistry) -> None:
+    """每个完整工具批次触发一次，多轮工具调用不会合并或重复触发。"""
+    state = AgentState(messages=[UserMessage(content="task")])
+    calls: list[int] = []
+    run_loop(
+        state,
+        FakeLLMClient(
+            [
+                assistant(tool_calls=[tool_call("c1", "echo", {"text": "one"})]),
+                assistant(tool_calls=[tool_call("c2", "echo", {"text": "two"})]),
+                assistant("done"),
+            ]
+        ),
+        echo_registry,
+        prepare_next_turn=lambda: calls.append(state.step_count),
+    )
+
+    assert calls == [1, 2]
+
+
+def test_prepare_next_turn_skipped_without_real_tool_batch(
+    echo_registry: ToolRegistry,
+) -> None:
+    """最终回答轮与截断轮都没有真实工具批次，不触发钩子。"""
+    state = AgentState(messages=[UserMessage(content="task")])
+    calls: list[str] = []
+    run_loop(
+        state,
+        FakeLLMClient([assistant("done")]),
+        echo_registry,
+        prepare_next_turn=lambda: calls.append("final"),
+    )
+    run_loop(
+        state,
+        FakeLLMClient(
+            [
+                assistant(
+                    tool_calls=[tool_call("c1", "echo", {"text": "partial"})],
+                    stop_reason="length",
+                ),
+                assistant("done"),
+            ]
+        ),
+        echo_registry,
+        prepare_next_turn=lambda: calls.append("truncated"),
+    )
+
+    assert calls == []
+
+
+def test_prepare_next_turn_failure_propagates(echo_registry: ToolRegistry) -> None:
+    """钩子失败直接冒泡，不在 Loop 内兜底或静默跳过。"""
+    state = AgentState(messages=[UserMessage(content="task")])
+
+    def hook() -> None:
+        """模拟压缩失败。"""
+        raise RuntimeError("compaction exploded")
+
+    with pytest.raises(RuntimeError, match="compaction exploded"):
+        run_loop(
+            state,
+            FakeLLMClient(
+                [
+                    assistant(tool_calls=[tool_call("c1", "echo", {"text": "hi"})]),
+                    assistant("done"),
+                ]
+            ),
+            echo_registry,
+            prepare_next_turn=hook,
+        )

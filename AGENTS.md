@@ -232,6 +232,7 @@ while steps_this_run < max_steps:
     if not assistant.tool_calls: 结束（reason=completed）
     if assistant.stop_reason == "length": tool call 全部转 error observation，下一轮
     for call in assistant.tool_calls: 执行并追加 ToolMessage
+    prepare_next_turn()  # 可选：仅在完整工具批次提交后、下一次请求前
 ```
 
 ### 终止条件
@@ -263,6 +264,7 @@ agent_end(reason: completed | step_limit | budget_limit | error)
 - M7.C8 起 `--max-run-input-tokens` 可显式启用单次 `run()` 累计输入预算，默认关闭。Loop 在完整工具批次后、下一请求前检查 Provider 已报告 input 与下一投影估算；接近上限只发一次未持久化收敛提示，预计超限发 `budget_limit`。这是请求边界控制，Session、tool pair、`modified_files` 和已执行修改必须保留；下一次 `run()` 重新计预算
 - `on_event` 为可选参数，测试时传 None 或列表收集器
 - `on_message_commit` 仅在完整 system / user / assistant / tool 消息上触发；回调成功后才追加内存历史，失败直接冒泡；tool 改动文件随已提交的 ToolMessage 记录
+- M7.6a 起 `run_loop` 支持可选 `prepare_next_turn`：只在完整工具批次提交、turn 收尾之后调用，下一次请求重新读取 `state.messages`，因此钩子可替换投影（压缩）；`None` 保持原事件行为，截断轮没有真实工具批次不触发，钩子异常直接冒泡
 
 ---
 

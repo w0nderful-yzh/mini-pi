@@ -274,6 +274,7 @@ LLM → Tool Call → Tool → Observation → LLM → ...
 
 - `run_loop()` 是纯函数：输入 `AgentState + LLMClient + ToolRegistry`，输出最终 `AssistantMessage`
 - 每轮通过 `on_event` 回调发出 `AgentEvent`，CLI 是纯消费者
+- M7.6a 起可选 `prepare_next_turn` 钩子在完整工具批次提交后、下一次请求前调用，供 Session 层替换 `state.messages`（压缩投影）；`None` 时行为与 Phase 1 一致，截断轮不触发
 - 终止条件：无 tool call / LLM error / 达到 max_steps / 显式任务预算阻止下一请求 / `length` 截断后的修复轮结束
 - `stop_reason == "length"` 时**不执行**任何 tool call，全部转 error observation 让模型重发
 - 不做 `read → edit → test` 固定流程，下一步由模型根据 Observation 自主决定
@@ -379,7 +380,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C8、M7.5 已完成；下一项 M7.6a 自动压缩） |
+| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C8、M7.5、M7.6a 已完成；下一项 M7.6b 自动压缩触发） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

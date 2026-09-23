@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from mini_pi.llm.types import Message
 
 MessageCommit = Callable[[Message], None]
+# 完整工具批次提交后、下一次模型请求前的可选钩子；允许替换 state.messages
+PrepareNextTurn = Callable[[], None]
 
 
 @dataclass

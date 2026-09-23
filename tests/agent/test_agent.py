@@ -9,7 +9,7 @@ import pytest
 from mini_pi.agent.agent import Agent
 from mini_pi.llm.types import Message, SystemMessage, UserMessage
 from mini_pi.tools.registry import ToolRegistry
-from tests.conftest import FakeLLMClient, assistant
+from tests.conftest import FakeLLMClient, assistant, tool_call
 
 
 def test_run_commits_complete_messages_before_memory_append(tmp_path: Path) -> None:
@@ -85,3 +85,28 @@ def test_user_commit_failure_keeps_only_committed_system(tmp_path: Path) -> None
 
     assert [message.role for message in agent.state.messages] == ["system"]
     assert llm.calls == []
+
+
+def test_run_installs_prepare_next_turn_hook(tmp_path: Path, echo_registry: ToolRegistry) -> None:
+    """Agent 把钩子透传给 Loop：每个完整工具批次触发一次，可用于压缩投影。"""
+    llm = FakeLLMClient(
+        [
+            assistant(tool_calls=[tool_call("c1", "echo", {"text": "hi"})]),
+            assistant("done"),
+        ]
+    )
+    seen: list[list[str]] = []
+
+    def hook() -> None:
+        """记录触发时的 transcript 形态。"""
+        seen.append([message.role for message in agent.state.messages])
+
+    agent = Agent(
+        llm=llm,
+        registry=echo_registry,
+        cwd=tmp_path,
+        prepare_next_turn=hook,
+    )
+    agent.run("hello")
+
+    assert seen == [["system", "user", "assistant", "tool"]]

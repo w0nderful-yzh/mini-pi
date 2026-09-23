@@ -8,7 +8,12 @@ from pathlib import Path
 from mini_pi.agent.events import AgentEvent
 from mini_pi.agent.loop import run_loop
 from mini_pi.agent.prompt import build_sections
-from mini_pi.agent.state import AgentState, MessageCommit, commit_message
+from mini_pi.agent.state import (
+    AgentState,
+    MessageCommit,
+    PrepareNextTurn,
+    commit_message,
+)
 from mini_pi.context.project import load_project_instructions
 from mini_pi.context.sections import diff_sections, replay_system_messages
 from mini_pi.llm.base import LLMClient
@@ -30,6 +35,7 @@ class Agent:
         max_run_input_tokens: int | None = None,
         on_event: Callable[[AgentEvent], None] | None = None,
         on_message_commit: MessageCommit | None = None,
+        prepare_next_turn: PrepareNextTurn | None = None,
     ) -> None:
         """注入依赖与构建 Workspace/State；预算与回调在此固定，多次 run 复用。"""
         if max_steps <= 0:
@@ -42,6 +48,7 @@ class Agent:
         self._max_run_input_tokens = max_run_input_tokens
         self._on_event = on_event
         self._on_message_commit = on_message_commit
+        self._prepare_next_turn = prepare_next_turn
         self._workspace = Workspace(cwd)
         self.state = AgentState()
 
@@ -59,6 +66,7 @@ class Agent:
             max_run_input_tokens=self._max_run_input_tokens,
             on_event=self._on_event,
             on_message_commit=self._on_message_commit,
+            prepare_next_turn=self._prepare_next_turn,
         )
 
     def _refresh_system_prompt(self) -> None:
