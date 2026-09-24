@@ -137,6 +137,11 @@ def _run_bounded(
         timed_out = True
         _kill_group(process)
         process.wait()
+    except BaseException:
+        # 用户中断（Ctrl+C）：子进程在独立会话/进程组里，收不到终端的 SIGINT，
+        # 必须先整组杀掉再冒泡，否则命令会脱离 mini-pi 继续运行
+        _cleanup_interrupted(process, threads)
+        raise
 
     _join_with_deadline(threads, 1.0)
     if any(thread.is_alive() for thread in threads):
@@ -155,6 +160,23 @@ def _run_bounded(
         stdout_truncated=stdout_truncated,
         stderr_truncated=stderr_truncated,
     )
+
+
+def _cleanup_interrupted(
+    process: subprocess.Popen[bytes], threads: list[threading.Thread]
+) -> None:
+    """中断清理：整组杀进程并排空管道；连续 Ctrl+C 也不放弃清理。"""
+    while True:
+        try:
+            _kill_group(process)
+            process.wait()
+            break
+        except KeyboardInterrupt:
+            # 收尾期间再次中断只重复清理，不让子进程留在后台
+            continue
+    _join_with_deadline(threads, 1.0)
+    _close(process.stdout)
+    _close(process.stderr)
 
 
 def _join_with_deadline(threads: list[threading.Thread], timeout_s: float) -> None:

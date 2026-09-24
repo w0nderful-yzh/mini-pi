@@ -6,8 +6,9 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-# 停止原因：stop=正常结束，length=输出截断，tool_calls=请求工具，error=调用失败
-StopReason = Literal["stop", "length", "tool_calls", "error"]
+# 停止原因：stop=正常结束，length=输出截断，tool_calls=请求工具，error=调用失败，
+# cancelled=用户取消本次 run（只由 Loop 在中断边界合成，不来自 Provider）
+StopReason = Literal["stop", "length", "tool_calls", "error", "cancelled"]
 SystemPromptSectionId = Literal[
     "preamble",
     "environment",

@@ -86,6 +86,7 @@ Python Coding Agent Harness
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
 | 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3 已完成 CLI 新建、恢复、`/new` 与同链 `/model` 切换；M7.4 已完成 compaction 投影，M7.5 已完成手动 `/compact`；M7.6 接入窗口与成本触发；M7.D1 的 `/sessions` 与 `--continue` 复用全部候选的严格加载和活动路径元数据，不跳过损坏文件 |
+| 终端输入与取消 | TUI 提供多行编辑、历史与中断 | M7.D2 用可选 `prompt_toolkit` 提供历史/多行/`/` 补全/Ctrl+L，非 tty 或库缺失回退内建 `input()`；Ctrl+C 在 Loop 的工具/流式边界转成 `cancelled`，已提交消息与文件改动保留，连续两次才退出 |
 
 ---
 
@@ -145,6 +146,7 @@ Pydantic v2
 openai SDK（同步 client）
 Typer
 Rich
+prompt_toolkit（CLI 行编辑；非 tty 或缺失时回退内建 input）
 ripgrep-bin（search 工具内置 rg）
 pytest
 ```
@@ -352,6 +354,8 @@ mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入
 - 同一套判定也会自动运行：M7.6b 起每次 `run()` 提交新 user 消息前按窗口策略（当前投影估算 > `context_window - reserve`）检查，需要时先压缩再追加这一条消息；M7.6c 起每个完整工具批次提交后、下一次请求前也用同一判定检查，压缩成功后同一次任务继续，已执行的工具不重放。窗口未知的模型不启用自动压缩，未超阈值不产生任何写入。M7.6d 起自动压缩失败（无安全切点、摘要或写盘失败、压缩后仍超阈值）以 agent error 结束这次任务：不追加假 assistant、不改投影、不再发出越界的下一次请求；已提交的消息与工具结果保留，一次性 CLI 调用返回非零码。M7.6f 起工具轮之间还有第二个触发：窗口内但旧工具结果占被摘要区域一半以上、且按 3 次后续请求算得摘要成本小于预计节省时提前压缩（旧输出按 2000 字符截断进入摘要请求，因此摘要成本与日志长度无关）；每次任务最多尝试一次，摘要阶段失败只放弃这次优化、不终止任务，写盘或重建失败仍以 agent error 终止；仅离线估算验证过收益（[记录](docs/benchmarks/m7-6f-cost-aware-compaction.md)），没有真实计费结论
 - 流式打印模型正文，默认工具事件根据已知命令形态显示操作标题、真实退出码、超时/截断与简短 stderr；未知或含凭据的 shell 命令采用保守标题，不推断任务成败。`--verbose` 展示参数及 Tool 层已截断日志并脱敏已知凭据。任务结束只打印一行请求、用量覆盖率、工具数和耗时；缺失 usage 明确标为不可用或部分实测。耗时在恢复后是 JSONL 消息时间的近似跨度
 - `--max-steps` 控制单次任务的最大循环步数（默认 50）
+- 交互输入默认使用 `prompt_toolkit`：Enter 提交、Ctrl+J 或 Alt+Enter 换行、`/` 补全命令、Ctrl+L 清屏；输入历史保存在 `~/.mini-pi/history`（目录 0700、文件 0600，不写入项目目录，Key 输入走独立的隐藏提示因此不进入历史）。stdin/stdout 不是 tty 或输入库不可用时自动回退内建 `input()` 的单行 REPL，此时按行读取、每行一次提交
+- Ctrl+C 取消当前任务：任务中的中断由 Loop 在流式与工具边界转成 `cancelled`（不是 `completed`），已提交的消息、工具结果与文件改动保留；工具轮里被中断和未执行的调用会补 cancelled observation 保持 call/result 配对，`bash` 的独立进程组会被整组杀掉。空闲时第一次 Ctrl+C 只提示、连续第二次退出；刚取消任务后的下一次空闲 Ctrl+C 直接退出。一次性模式被中断返回退出码 130。tty 人工记录见 [`docs/benchmarks/m7-d2-tty-input-cancel.md`](docs/benchmarks/m7-d2-tty-input-cancel.md)
 - `--max-run-input-tokens` 显式启用每次 `run()` 的累计输入预算，默认关闭。Loop 在下一次模型请求前用 Provider 已报告 input 加当前投影估算检查；接近上限时只提示模型收敛一次，预计超限则以 `budget_limit` 停止。它是请求边界控制，单次请求仍可能超过预测；已提交的消息、工具结果和文件改动保留，交互模式下一条任务获得新预算
 
 ---
@@ -386,7 +390,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C8、M7.5、M7.6、M7.D1 已完成；下一项 M7.D2 输入与取消） |
+| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C8、M7.5、M7.6、M7.D1-D2 已完成；下一项 M7.7 回归与总验收） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

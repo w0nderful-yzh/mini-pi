@@ -79,10 +79,10 @@ class BudgetWarningEvent(BaseModel):
 
 
 class AgentEndEvent(BaseModel):
-    """一次 run 结束，reason 说明终止原因。"""
+    """一次 run 结束，reason 说明终止原因；cancelled 表示用户主动中断。"""
 
     type: Literal["agent_end"] = "agent_end"
-    reason: Literal["completed", "step_limit", "budget_limit", "error"]
+    reason: Literal["completed", "step_limit", "budget_limit", "error", "cancelled"]
     message: AssistantMessage | None = None
     error: str | None = None
     budget_limit: int | None = None

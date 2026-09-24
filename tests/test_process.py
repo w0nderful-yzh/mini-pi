@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import _thread
+import os
 import sys
+import threading
 import time
 from pathlib import Path
+
+import pytest
 
 from mini_pi.tools.process import run_process, run_shell
 
@@ -107,3 +112,38 @@ def test_orphan_descendant_is_killed_with_pid_as_pgid(tmp_path: Path) -> None:
     # 孙进程继承管道会拖住读取线程，此时 group kill 必须生效
     time.sleep(3)
     assert not marker.exists()
+
+
+def _interrupt_after_child_starts(marker: Path) -> threading.Thread:
+    """等子进程写出 PID 标记后再中断主线程，避免打断 Popen 建组本身。"""
+
+    def run() -> None:
+        """轮询标记文件，出现后向主线程发 KeyboardInterrupt。"""
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not marker.exists():
+            time.sleep(0.05)
+        _thread.interrupt_main()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    return thread
+
+
+def test_interrupt_kills_process_group_and_reraises(tmp_path: Path) -> None:
+    """Ctrl+C 中断等待时必须整组杀掉子进程再冒泡，不能留下脱离终端的后台命令。"""
+    marker = tmp_path / "child.pid"
+    # shell 把自身 PID（start_new_session 后即进程组组长）写盘后长睡眠
+    watcher = _interrupt_after_child_starts(marker)
+    with pytest.raises(KeyboardInterrupt):
+        run_shell(f"echo $$ > {marker}; sleep 30", cwd=tmp_path, timeout_s=30)
+    watcher.join(timeout=5)
+
+    pid = int(marker.read_text(encoding="utf-8").strip())
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return
+        time.sleep(0.05)
+    pytest.fail(f"process group leader {pid} survived the interrupt")

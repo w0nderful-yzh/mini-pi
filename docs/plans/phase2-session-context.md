@@ -1,6 +1,6 @@
 # Phase 2：Session、Context 与 CLI 成本控制
 
-> 状态：实施中。M7.1–M7.4、M7.C1–C8、M7.5、M7.6、M7.D1 已完成；下一任务是 **M7.D2：输入与取消**。本文件先列待开发任务，已完成交付放在末尾。
+> 状态：实施中。M7.1–M7.4、M7.C1–C8、M7.5、M7.6、M7.D1–D2 已完成；下一任务是 **M7.7：回归、真实验收与文档同步**。本文件先列待开发任务，已完成交付放在末尾。
 
 **目标：** 在已有 Coding Agent 闭环上，控制单次任务的重复探索和累计模型输入，完成安全的手动/自动上下文压缩，并让终端清楚展示进度、失败和真实用量。只支持 OpenAI、DeepSeek；不引入 Agent 框架、额外规划模型或并行工具执行。
 
@@ -10,7 +10,7 @@
 
 ## 1. 当前基线与优先级
 
-M7.1–M7.6 已交付 JSONL Session、项目 `AGENTS.md`、严格恢复、Context 投影、任务预算及手动/自动 compaction；M7.C1–C8 与 M7.D1 已交付 thinking 状态图、语义化工具事件、用量展示、`/status` `/context` `/tools` `/sessions` 和紧凑启动页。**尚未交付**：增强输入、取消语义与 M7 总验收。
+M7.1–M7.6 已交付 JSONL Session、项目 `AGENTS.md`、严格恢复、Context 投影、任务预算及手动/自动 compaction；M7.C1–C8、M7.D1–D2 已交付 thinking 状态图、语义化工具事件、用量展示、`/status` `/context` `/tools` `/sessions`、紧凑启动页以及多行输入与 Ctrl+C 取消语义。**尚未交付**：M7.7 回归与总验收。
 
 ### 1.1 真实成本样本
 
@@ -34,7 +34,7 @@ M7.1–M7.6 已交付 JSONL Session、项目 `AGENTS.md`、严格恢复、Contex
 - `157k / 1M = 15.7%` 是把累计消耗误当窗口占用。上述样本最后一次输入约 21k，对 1M 窗口约 2.1%；自动压缩即使按 70% 触发，也无法解决这次的主要浪费。
 - Provider usage 是请求用量，缓存命中与实际计费不在当前模型协议中；没有对应字段和验证前不显示“节省费用”。
 
-**近期顺序：M7.D2 → M7.7。** 基准见 [M7.C6 用量记录](../benchmarks/m7-c6-usage-baseline.md)；任务预算与压缩保持独立。UI 小修不冒充成本下降。
+**近期顺序：M7.7。** 基准见 [M7.C6 用量记录](../benchmarks/m7-c6-usage-baseline.md)；任务预算与压缩保持独立。UI 小修不冒充成本下降。
 
 ---
 
@@ -97,14 +97,14 @@ CLI → AgentSession → Agent → run_loop → (LLM, ToolRegistry) → Tool →
 
 ---
 
-## 4. M7.D2 交互体验与 M7.7 总验收
+## 4. M7.D2 交互体验（已完成）与 M7.7 总验收
 
 ### M7.D2：输入与取消
 
-- [ ] 评估 `prompt_toolkit` 的历史、多行、补全、Ctrl+L 和 `/` 提示；输入提交前不写 Session。
-- [ ] 先定义取消边界，再实现 Ctrl+C 取消当前任务、连续两次退出。已提交消息/工具改动保留；非 tty 保持可用。中断不伪装成 `completed`。
+- [x] 评估 `prompt_toolkit` 的历史、多行、补全、Ctrl+L 和 `/` 提示；输入提交前不写 Session。
+- [x] 先定义取消边界，再实现 Ctrl+C 取消当前任务、连续两次退出。已提交消息/工具改动保留；非 tty 保持可用。中断不伪装成 `completed`。
 
-验收：输入历史、多行、取消及进程组场景有 tty 人工记录；非 tty 回归通过，输入库不可用时仍可使用原单行 REPL。
+验收：输入历史、多行、取消及进程组场景有 tty 人工记录（[记录](../benchmarks/m7-d2-tty-input-cancel.md)）；非 tty 回归通过，输入库不可用时仍可使用原单行 REPL。
 
 ### M7.7：回归、真实验收与文档同步
 
@@ -151,11 +151,12 @@ M7 完成标准：会话可恢复；项目规则生效；单任务累计成本�
 | M7.6d | 自动压缩失败语义：钩子抛出的 `MiniPiError` 在 Loop 内转成 `AgentEndEvent(reason="error")` 与 error assistant 消息（不追加假消息、不改投影），prompt 前的同类失败在 `AgentSession.run()` 内发成对 start/end 事件并返回 error 消息；无安全切点、摘要失败、写盘失败以及**压缩后仍超阈值**都不再发出下一次请求；一次性 CLI 以 error 结束时返回非零码。此处收紧 M7.6b 的旧行为（当时允许带着仍超阈值的投影继续） | `tests/session/test_auto_compact_errors.py` 7 passed（工具轮摘要失败仍保工具结果、无切点、已压缩仍超、单轮即超阈值、写盘失败、失败后可恢复、夹具窗口关系）、`tests/agent/test_loop.py` 钩子 agent error 用例、`tests/cli/test_compact_command.py` REPL 展示与一次性非零码；M7.6b/M7.6c 的失败用例同步改为新语义；去掉“压缩后仍超阈值”分支会打挂对应用例；全量 491 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`a6d9d9f` |
 | M7.6e | 离线端到端：新增 `tests/integration/`（不加 `integration` marker——那是真实 API 专用，目录名与 marker 无关）走生产装配路径（`build_default_registry` + 真实 `Workspace` + 真实 `read`/`write` + 真实 JSONL + `--resume`）：旧回复约 25k token 时用真实日志（read 回 1000 行、约 11k token）把投影推过阈值，压缩后同一次 run 继续；退出后 `AgentSession.resume` 的投影、stepCount、modifiedFiles 与内存一致，首个请求即压缩后投影加新任务；CliRunner 跨进程验证 `--resume` 用的也是压缩后投影 | `tests/integration/test_auto_compaction.py` 4 passed（工具批次真实执行且不重放、恢复一致并沿同一 leaf 续写、CLI 两次调用跨进程、夹具阈值关系与 read 双限自证）；停用工具轮钩子后 3 个用例失败；全量 495 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`87a826a` |
 | M7.6f | 旧工具结果的成本感知提前压缩：新增 `mini_pi/context/cost.py` 纯函数成本模型（区域规模、摘要请求 input、摘要体积、每次请求净节省、盈亏平衡请求数、净收益），在工具轮之间的钩子里作为**独立于窗口阈值**的第二触发；生效条件全部满足才压缩——位置在工具轮后、`ToolMessage` 占被摘要区域 ≥ 50%、摘要不比区域大、按 `ASSUMED_REMAINING_REQUESTS=3` 次后续请求净收益为正、有安全切点且窗口已知（沿用 M7.4g 边界）；摘要体积首次按 `ASSUMED_SUMMARY_TOKENS=2000` 上界估计、重复压缩用上次实测；每次 run 最多尝试一次；**摘要阶段失败**（LLMError/CompactionError，尚未写盘）只放弃优化、run 继续，**写盘或重建失败**（SessionError/OSError）与窗口触发一样转 agent error 终止，避免投影与 JSONL 分叉；不新增 `ToolResult.raw/summary` 双写，当前工具轮 observation 原样，旧历史只在安全切点后进入摘要 | `tests/context/test_tool_result_lifecycle.py` 6 passed（长 pytest/git diff/search 样本的关键事实与截断标记、计划分区与 modifiedFiles、摘要输入只含区域、成本模型正负两侧、输入校验）、`tests/session/test_cost_aware_compaction.py` 7 passed（旧工具结果主导时触发且旧输出不再重发、对话主导/历史过短/窗口未知不触发、摘要失败不终止 run 且不再重试、写盘失败终止且无分叉、离线前后成本记录）；去掉 share 下限或每次 run 一次的守卫会打挂对应用例；离线记录 4→5 次请求、累计输入估算 91,062→66,960（[记录](../benchmarks/m7-6f-cost-aware-compaction.md)，非 Provider 实测）；全量 508 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`c0fd3a7` |
-| M7.D1 | `/sessions` 严格加载当前 workspace 全部候选，按活动时间展示短 id、活动模型、摘要状态与当前标记，不请求 LLM；`--continue` 复用同一元数据投影并保留并列失败；启动页保留 Banner/思考状态，只显示版本、模型、项目、短 id 与 `/help`，窄屏/非 tty 分行降级，交互完整路径仅由 `/status full` 展示 | 新增专项 9 passed；会话/启动/恢复聚焦 58 passed；全量 517 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；本提交 |
+| M7.D1 | `/sessions` 严格加载当前 workspace 全部候选，按活动时间展示短 id、活动模型、摘要状态与当前标记，不请求 LLM；`--continue` 复用同一元数据投影并保留并列失败；启动页保留 Banner/思考状态，只显示版本、模型、项目、短 id 与 `/help`，窄屏/非 tty 分行降级，交互完整路径仅由 `/status full` 展示 | 新增专项 9 passed；会话/启动/恢复聚焦 58 passed；全量 517 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`57dd5a2` |
+| M7.D2 | 新增 `mini_pi/cli/input.py` 输入层：tty 上用 `prompt_toolkit`（`~/.mini-pi/history` 目录 0700/文件 0600、Enter 提交、Ctrl+J/Alt+Enter 换行、`/` 命令补全、Ctrl+L 清屏），stdin/stdout 非 tty 或库缺失/不可写时回退内建单行 `input()`；输入在提交前不接触 Session。取消语义下沉到 Loop：流式轮中断不补假 assistant，工具轮为被中断及未执行的调用补 cancelled observation 保持 call/result 配对，`run_loop` 以 `agent_end(reason="cancelled")` 结束并返回 `stop_reason="cancelled"`；`process.py` 在 KeyboardInterrupt 时整组杀掉独立进程组再冒泡；CLI 用连续两次 Ctrl+C 退出（取消任务后的下一次空闲 Ctrl+C 直接退出），一次性调用返回 130。重复 Ctrl+C 不伪装成 `completed`，已提交消息/工具结果/文件改动保留 | 新增 19 passed（输入层回退与历史权限、补全/键位契约、REPL 取消与多行单条 user 消息、Loop 配对与 prepare_next_turn 中断、进程组中断清理）；tty 人工记录 [m7-d2-tty-input-cancel](../benchmarks/m7-d2-tty-input-cancel.md)；全量 537 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；本提交 |
 
 ### 实施与审查规则
 
 1. 每个新编号是一批可审查的最小行为；不提前创建后续编号的接口或占位实现。代码、必要测试、README 与本计划状态在**同一提交**；中文 `feat/fix/docs` 消息。
 2. 每批运行针对性测试、全量离线测试和 `git diff --check`，再更新状态；真实模型测试只有执行过才能记“通过”。文件测试用 `tmp_path`，默认测试不联网。
 3. 若设计改变 Session/Context/CLI 边界，同步 README 第 2 节与 AGENTS.md。发现文档与代码不一致，先修文档再继续实现。
-4. 下一批只做 **M7.D2**；先定义输入提交与取消边界，再评估输入组件。
+4. 下一批只做 **M7.7**：先跑离线回归与真实/人工验收，再同步 README、`--help` 与本文件状态。

@@ -360,10 +360,17 @@ class ConsoleRenderer:
             )
 
     def _render_end(self, event: AgentEndEvent) -> None:
-        """根据终止原因输出结束提示（completed/step_limit/error/budget_limit）。"""
+        """根据终止原因输出结束提示（completed/step_limit/error/budget_limit/cancelled）。"""
         if event.reason == "step_limit":
             self.console.print(
                 "Reached the step limit before finishing the task.", style="yellow", markup=False
+            )
+        elif event.reason == "cancelled":
+            # 中断不是完成：明确说明保留了什么，避免把 Ctrl+C 当成任务成功
+            self.console.print(
+                "Task cancelled by user. Committed messages and file changes were kept.",
+                style="yellow",
+                markup=False,
             )
         elif event.reason == "error":
             self.console.print(

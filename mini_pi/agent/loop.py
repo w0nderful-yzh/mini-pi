@@ -49,6 +49,11 @@ _TRUNCATED_MESSAGE = (
     "Re-issue the call with complete arguments."
 )
 
+_CANCELLED_MESSAGE = (
+    "Tool execution was cancelled by the user (Ctrl+C). "
+    "The command may have been terminated; re-run it if the result is still needed."
+)
+
 BudgetSource = Literal["provider", "estimated", "mixed"]
 
 
@@ -138,6 +143,10 @@ def run_loop(
     （stop_reason=length）没有真实工具批次，不触发该钩子。钩子抛出的 `MiniPiError`
     是可预期失败（例如自动压缩没能把投影降到阈值内）：以 agent error 结束本次 run，
     且不发送下一次请求；其他异常是程序缺陷，直接冒泡。
+
+    用户中断（KeyboardInterrupt）是可预期的终止：流式轮尚未提交的 assistant 不补写，
+    工具轮已发出的 tool_call 会补 cancelled observation 保持配对，已提交的消息与
+    文件改动全部保留，并以 `AgentEndEvent(reason="cancelled")` 结束，绝不伪装成 completed。
     """
     if max_steps <= 0:
         raise ValueError("max_steps must be > 0")
@@ -184,14 +193,20 @@ def run_loop(
         state.step_count += 1
         step = state.step_count
         emit(TurnStartEvent(step=step))
-        assistant = _stream_assistant(
-            state,
-            llm,
-            registry,
-            emit,
-            on_message_commit,
-            request_messages=request_messages,
-        )
+        try:
+            assistant = _stream_assistant(
+                state,
+                llm,
+                registry,
+                emit,
+                on_message_commit,
+                request_messages=request_messages,
+            )
+        except KeyboardInterrupt:
+            # 流已开始但完整消息尚未提交：不追加假 assistant，只按已发生的事实收尾
+            emit(TurnEndEvent(step=step))
+            emit(AgentEndEvent(reason="cancelled", message=last))
+            return _cancelled_message()
         if budget is not None:
             budget.record(assistant, predicted_input)
         last = assistant
@@ -210,8 +225,14 @@ def run_loop(
             emit(TurnEndEvent(step=step))
             emit(AgentEndEvent(reason="completed", message=assistant))
             return assistant
-        _execute_tool_calls(state, registry, assistant.tool_calls, emit, on_message_commit)
+        cancelled = _execute_tool_calls(
+            state, registry, assistant.tool_calls, emit, on_message_commit
+        )
         emit(TurnEndEvent(step=step))
+        if cancelled:
+            # 当前与剩余 tool call 已补齐 cancelled observation，配对完整后结束本次 run
+            emit(AgentEndEvent(reason="cancelled", message=assistant))
+            return _cancelled_message()
         if prepare_next_turn is not None:
             try:
                 # 工具批次已提交、turn 已收尾：下一次请求会重新读取 state.messages
@@ -222,6 +243,10 @@ def run_loop(
                 stopped = AssistantMessage(stop_reason="error", error_message=str(exc))
                 emit(AgentEndEvent(reason="error", message=stopped, error=str(exc)))
                 return stopped
+            except KeyboardInterrupt:
+                # 钩子（如摘要压缩的模型调用）被中断：事务未写盘，投影保持原样
+                emit(AgentEndEvent(reason="cancelled", message=assistant))
+                return _cancelled_message()
     # 循环由 max_steps 截断：保留最后消息供调用方检查
     assert last is not None
     emit(AgentEndEvent(reason="step_limit", message=last))
@@ -261,15 +286,20 @@ def _stream_assistant(
     return final
 
 
+def _cancelled_message() -> AssistantMessage:
+    """合成取消标记；它只用于表达本次 run 被中断，不作为模型消息提交。"""
+    return AssistantMessage(stop_reason="cancelled")
+
+
 def _execute_tool_calls(
     state: AgentState,
     registry: ToolRegistry,
     calls: list[ToolCall],
     emit: EventSink,
     on_message_commit: MessageCommit | None,
-) -> None:
-    """顺序执行工具调用；ToolError 转 observation，其他异常冒泡。"""
-    for call in calls:
+) -> bool:
+    """顺序执行工具调用；ToolError 转 observation，用户中断补齐配对后返回 True。"""
+    for index, call in enumerate(calls):
         emit(ToolExecutionStartEvent(tool_call=call))
         is_error = False
         try:
@@ -277,8 +307,35 @@ def _execute_tool_calls(
         except ToolError as exc:
             result = ToolResult(content=f"{type(exc).__name__}: {exc}")
             is_error = True
+        except KeyboardInterrupt:
+            # 中断发生在当前调用内部：先补当前结果，再补齐剩余调用，
+            # 保证 assistant tool_calls 与 ToolMessage 一一配对后才结束这次 run
+            _append_cancelled_calls(state, calls[index:], emit, on_message_commit)
+            return True
         _append_tool_message(state, call, result, is_error, on_message_commit)
         emit(ToolExecutionEndEvent(tool_call=call, result=result, is_error=is_error))
+    return False
+
+
+def _append_cancelled_calls(
+    state: AgentState,
+    calls: list[ToolCall],
+    emit: EventSink,
+    on_message_commit: MessageCommit | None,
+) -> None:
+    """为被中断的当前调用及其余调用补 cancelled observation。
+
+    调用方已发出第一个 tool_execution_start，这里只补它的 end 与后续调用的 start/end，
+    避免出现只有 tool_call 没有 tool_result 的历史。
+    """
+    for offset, call in enumerate(calls):
+        if offset > 0:
+            emit(ToolExecutionStartEvent(tool_call=call))
+        result = ToolResult(content=_CANCELLED_MESSAGE)
+        _append_tool_message(
+            state, call, result, is_error=True, on_message_commit=on_message_commit
+        )
+        emit(ToolExecutionEndEvent(tool_call=call, result=result, is_error=True))
 
 
 def _record_truncated_calls(

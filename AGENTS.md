@@ -52,6 +52,7 @@ pytest
 openai SDK（同步 client）
 Typer
 Rich
+prompt_toolkit（CLI 行编辑；非 tty 或缺失时回退内建 input）
 ripgrep-bin（search 工具内置 rg，Python 扫描兜底）
 OpenAI-Compatible API
 ```
@@ -242,6 +243,7 @@ while steps_this_run < max_steps:
 LLM 错误（stop_reason == error）
 达到 max_steps（默认 50）
 显式任务输入预算阻止下一次模型请求（budget_limit）
+用户在流式或工具边界中断本次 run（cancelled）
 ```
 
 ### 事件
@@ -252,7 +254,7 @@ Loop 通过 `on_event: Callable[[AgentEvent], None]` 发出事件，CLI 是纯�
 agent_start / turn_start / message_start / message_delta
 message_end / tool_execution_start / tool_execution_end
 turn_end / budget_warning
-agent_end(reason: completed | step_limit | budget_limit | error)
+agent_end(reason: completed | step_limit | budget_limit | error | cancelled)
 ```
 
 规则：
@@ -262,6 +264,7 @@ agent_end(reason: completed | step_limit | budget_limit | error)
 - M7.C 起 CLI 默认只显示 thinking 状态图标，不显示 raw `thinking_delta`；图标、spinner、token 文案、Session 路径不进入模型消息或 JSONL message。DeepSeek `reasoning_content` 按 Provider 协议保留回放，不为隐藏终端内容改写持久化历史
 - M7.C7 起 CLI 仅按工具名、结构化参数和明确命令形态生成确定性操作标题；非零退出码、超时、截断和 stderr 只按实际结果展示。未知/组合/含凭据命令不推断执行意图或任务最终成败；默认工具事件单行有界且脱敏，`--verbose` 仍限于工具已捕获内容。展示不改 ToolMessage 或 Agent 决策
 - M7.C8 起 `--max-run-input-tokens` 可显式启用单次 `run()` 累计输入预算，默认关闭。Loop 在完整工具批次后、下一请求前检查 Provider 已报告 input 与下一投影估算；接近上限只发一次未持久化收敛提示，预计超限发 `budget_limit`。这是请求边界控制，Session、tool pair、`modified_files` 和已执行修改必须保留；下一次 `run()` 重新计预算
+- M7.D2 起 CLI 输入层默认用 `prompt_toolkit`（历史、多行、`/` 补全、Ctrl+L），非 tty 或输入库缺失时回退内建单行 `input()`；输入在提交前只存在于终端侧，不写 Session。用户在流式或工具边界中断（KeyboardInterrupt）由 Loop 转成 `agent_end(reason="cancelled")`：不补假 assistant，工具轮为被中断及未执行的调用补 cancelled observation 保持 call/result 配对，已提交消息、工具结果与文件改动全部保留；`bash` 的独立进程组必须先整组杀掉再冒泡。CLI 侧连续两次 Ctrl+C 才退出、中断绝不记为 `completed`，一次性调用返回退出码 130
 - `on_event` 为可选参数，测试时传 None 或列表收集器
 - `on_message_commit` 仅在完整 system / user / assistant / tool 消息上触发；回调成功后才追加内存历史，失败直接冒泡；tool 改动文件随已提交的 ToolMessage 记录
 - M7.6a 起 `run_loop` 支持可选 `prepare_next_turn`：只在完整工具批次提交、turn 收尾之后调用，下一次请求重新读取 `state.messages`，因此钩子可替换投影（压缩）；`None` 保持原事件行为，截断轮没有真实工具批次不触发，钩子异常直接冒泡。M7.6c 起 `AgentSession` 用该钩子运行同一套窗口判定与 M7.5 压缩事务，与 prompt 前检查共用入口；M7.6d 起钩子抛出的 `MiniPiError` 转为 `agent_end(reason="error")` 并返回 error assistant 消息（不追加假消息、不改投影、不再请求模型），其他异常仍是程序缺陷、直接冒泡
@@ -385,6 +388,7 @@ return exit code
 
 - 非 0 exit code 必须如实返回给 Agent（属于正常 Observation，不抛 ToolError）
 - timeout 必须杀掉整个进程组（`start_new_session=True` + `os.killpg`）
+- 用户中断（KeyboardInterrupt）同样必须先整组杀掉子进程再冒泡；独立会话收不到终端的 SIGINT，漏杀会让命令脱离 mini-pi 继续运行
 - stdout / stderr 分离捕获，进程层有界（默认 1MB/流，超出按 head/tail 方向丢弃并标记），工具层再按 2000 行 / 50KB 双限截断并附提示
 - 返回结构化 `ProcessResult(exit_code, stdout, stderr, timed_out, stdout_truncated, stderr_truncated)`
 

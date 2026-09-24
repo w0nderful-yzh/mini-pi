@@ -20,6 +20,7 @@ from mini_pi.auth import (
 )
 from mini_pi.cli.banner import render_banner, render_startup
 from mini_pi.cli.console import ConsoleRenderer
+from mini_pi.cli.input import create_repl_reader
 from mini_pi.cli.sessions import render_sessions
 from mini_pi.cli.status import (
     current_context_tokens,
@@ -56,6 +57,9 @@ _HELP_TEXT = """Available commands:
   /tools                     list available tools
   /help                      show this help
   /exit                      quit mini-pi
+
+Input: Enter submits, Ctrl+J or Alt+Enter starts a new line, Ctrl+L clears the screen.
+Ctrl+C cancels the running task; press it twice in a row to exit.
 
 /connect is kept as an alias of /model."""
 
@@ -464,9 +468,16 @@ def cli(
             if renderer.last_end_reason == "budget_limit":
                 # 一次性调用未完成必须返回非零；Session 已保留，可继续恢复。
                 raise typer.Exit(code=2)
+            if renderer.last_end_reason == "cancelled":
+                # 用户中断按 128+SIGINT 退出；已提交的消息与改动仍在 Session 中
+                raise typer.Exit(code=130)
             if renderer.last_end_reason == "error":
                 # Agent 以 agent error 结束（含自动压缩失败）同样不能伪装成成功
                 raise typer.Exit(code=1)
+        except KeyboardInterrupt:
+            # 中断可能落在渲染边界之外：按同一约定退出，不伪装成成功
+            Console(stderr=True).print("interrupted", style="yellow")
+            raise typer.Exit(code=130) from None
         except MiniPiError as exc:
             # 一次性任务失败以非零码退出，避免把可预期错误伪装成成功
             Console(stderr=True).print(f"error: {exc}", style="red", soft_wrap=True)
@@ -516,11 +527,21 @@ def cli(
             style="red" if startup_error.startswith("session creation failed:") else "yellow",
         )
 
+    reader = create_repl_reader()
+    # 连续 Ctrl+C 计数：第一次取消当前输入或任务，连续第二次才退出进程
+    interrupt_streak = 0
     while True:
         try:
-            line = input("mini-pi> ")
-        except (EOFError, KeyboardInterrupt):
+            line = reader.read()
+        except EOFError:
             break
+        except KeyboardInterrupt:
+            interrupt_streak += 1
+            if interrupt_streak >= 2:
+                console.print("exiting mini-pi.", markup=False)
+                break
+            console.print("Press Ctrl+C again to exit.", style="yellow", markup=False)
+            continue
         except UnicodeDecodeError as exc:
             # 终端字节不是有效 UTF-8：拒绝并提示，避免代理项污染 Session
             console.print(
@@ -528,6 +549,8 @@ def cli(
                 style="red",
             )
             continue
+        # 成功提交一次输入即清零：只有连续中断才退出
+        interrupt_streak = 0
         stripped = line.strip()
         if stripped in {"/exit", "/quit"}:
             break
@@ -627,14 +650,19 @@ def cli(
         try:
             agent.run(stripped)
         except KeyboardInterrupt:
-            # 只中断当前任务，不退出交互
+            # Loop 已在流式/工具边界把中断转成 cancelled；这里只在渲染边界兜底
             console.print("interrupted", style="yellow")
+            interrupt_streak = 1
         except Exception as exc:
             # REPL 顶层边界：程序缺陷要完整可见，但不因此终止整个会话
             console.print(f"unexpected error: {type(exc).__name__}: {exc}", style="red")
             console.print_exception()
         finally:
             renderer.close()
+        if renderer.last_end_reason == "cancelled":
+            # 任务刚被 Ctrl+C 取消：下一次空闲 Ctrl+C 直接退出，符合连续两次语义
+            interrupt_streak = 1
+
 
 def _force_utf8(stream: object, *, errors: str) -> None:
     """把文本流重配为 UTF-8，使 stdio 不依赖进程 locale。"""
