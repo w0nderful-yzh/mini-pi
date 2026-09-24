@@ -43,7 +43,8 @@ LLM 继续决策
 - 支持本地代码读取、搜索、修改和命令执行
 - Workspace 安全边界：所有文件操作限制在工作区内，路径逃逸直接报错
 - 任务过程中持续观察、修复、验证
-- 逐步加入 Session、Context、LSP、MCP、Task、Memory、Multi-Agent
+- Session 与 Context 已完成（M7）：JSONL 会话、项目 `AGENTS.md`、恢复、任务预算与 compaction
+- 逐步加入 LSP、MCP、Task、Memory、Multi-Agent
 
 最终形态：
 
@@ -70,7 +71,7 @@ Python Coding Agent Harness
 
 | 设计点 | pi 的做法 | mini-pi 的选择 |
 | --- | --- | --- |
-| 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 第一阶段单层循环，只处理 tool batch；队列、steering 留到 Session 阶段 |
+| 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 仍是单层循环，只处理 tool batch；M7 只新增 `prepare_next_turn` 钩子（供压缩替换投影），steering / follow-up 队列仍未实现 |
 | 事件驱动 | `AgentEvent` 事件流驱动 TUI/print/RPC，UI 是纯消费者 | Loop 发 `AgentEvent`，CLI 只做渲染；M7.C7 的命令标题和失败提示不进入 ToolMessage，也不改变 Agent 决策 |
 | 思考与终端展示 | thinking 事件可供 UI 展示，Provider 保留必要回放字段 | M7.C 默认只显示思考状态图标；CLI 元数据不进入消息历史，DeepSeek 的 `reasoning_content` 回放保持协议兼容 |
 | 用量与上下文 | 模型请求返回 usage，compaction 缩短后续模型投影 | M7.C6 已区分单次任务累计 Provider 用量和当前上下文估算；M7.C8 提供默认关闭、显式启用的请求边界任务预算，窗口阈值只负责压缩安全 |
@@ -78,61 +79,55 @@ Python Coding Agent Harness
 | LLM 流式 | provider 无关的 `AssistantMessageEvent` 事件流，错误编码进流 | 复刻：同步 SDK + `stream=True`，`ErrorEvent` 不裸抛给 Loop |
 | Tool Call 拼装 | 按 `index` 聚合 SSE 增量，结束后解析 JSON | 复刻：`_AssistantAccumulator`，解析失败显式报错（不静默返回 `{}`） |
 | 工具错误 | 所有异常转成 `isError` ToolResult 回传模型 | ToolError 转 `is_error` observation；非预期异常直接冒泡（Fail Fast） |
-| 工具执行 | prepare 串行 + execute 并行 | 第一阶段全部串行，预留 `execution_mode` |
+| 工具执行 | prepare 串行 + execute 并行 | 全部串行，未实现并行执行 |
 | 工具定义 | Schema → Definition → AgentTool → Renderer 四层 | 简化为 `pydantic Args + Tool` 单层，渲染由 CLI 事件层承担 |
 | 输出截断 | 行数 + 字节双限，附可操作续读提示 | 复刻（read / bash / search） |
-| edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 第一阶段只做精确唯一匹配，fuzzy 后置 |
+| edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 只做精确唯一匹配，fuzzy 后置 |
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
-| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3 已完成 CLI 新建、恢复、`/new` 与同链 `/model` 切换；M7.4 已完成 compaction 投影，M7.5 已完成手动 `/compact`；M7.6 接入窗口与成本触发；M7.D1 的 `/sessions` 与 `--continue` 复用全部候选的严格加载和活动路径元数据，不跳过损坏文件 |
-| 终端输入与取消 | TUI 提供多行编辑、历史与中断 | M7.D2 用可选 `prompt_toolkit` 提供历史/多行/`/` 补全/Ctrl+L，非 tty 或库缺失回退内建 `input()`；Ctrl+C 在 Loop 的工具/流式边界转成 `cancelled`，已提交消息与文件改动保留，连续两次才退出 |
+| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3-M7.5 已完成 CLI 新建/恢复/`/new`/同链 `/model` 切换、compaction 投影与手动 `/compact`；M7.6 接入窗口与成本触发；M7.D1 的 `/sessions` 与 `--continue` 严格加载全部候选；M7.7 已通过离线回归、真实 DeepSeek 与人工 CLI 验收 |
+| 终端输入与取消 | TUI 提供多行编辑、历史与中断 | M7.D2 用可选 `prompt_toolkit` 提供历史/多行/`/` 补全/Ctrl+L，非 tty 或库缺失回退内建 `input()`（交互终端缺库会打印降级原因）；唯一匹配时 Enter 先补全再提交；Ctrl+C 在 Loop 的工具/流式边界转成 `cancelled`，已提交消息与文件改动保留，连续两次才退出 |
 
 ---
 
 ## 3. 架构
 
 ```text
-┌────────────────────────────────────┐
-│               CLI                  │
-│    Typer 参数解析 / Rich 渲染       │
-│    用户输入 / 流式输出 / 事件消费     │
-└────────────────┬───────────────────┘
-                 ↓  Agent.run(task)
-┌────────────────────────────────────┐
-│              Agent                 │
-│  AgentState: messages / step_count │
-│              modified_files        │
-└────────────────┬───────────────────┘
-                 ↓  run_loop()
-┌────────────────────────────────────┐
-│          LLM Client (Protocol)      │
-│  OpenAIClient / DeepSeekClient      │
-│  stream() -> StreamEvent            │
-└────────────────┬───────────────────┘
-                 ↓  tool_calls
-┌────────────────────────────────────┐
-│           ToolRegistry             │
-│  schema 校验 / execute / 错误分类    │
-└────────────────┬───────────────────┘
-                 ↓  **kwargs
-┌────────────────────────────────────┐
-│               Tool                 │
-│ read / write / edit / search       │
-│ bash / git_diff             │
-└────────────────┬───────────────────┘
-                 ↓  path
-┌────────────────────────────────────┐
-│             Workspace              │
-│  resolve / read / write / cwd      │
-│  路径逃逸 Fail Fast                 │
-└────────────────────────────────────┘
+CLI（Typer 参数解析 / Rich 事件渲染 / 可选 prompt_toolkit 输入）
+ │
+ │  AgentSession.run(task)        --no-session 时直接 Agent.run(task)
+ ▼
+AgentSession
+ ├── JsonlSession：完整、追加式事实（message / compaction entry，durable-first 提交）
+ ├── Context：AGENTS.md sections / 活动链投影 / token 估算 / 压缩事务
+ │
+ │  Agent.run(task)
+ ▼
+Agent（AgentState：messages / step_count / modified_files）
+ │
+ │  run_loop()
+ ▼
+LLM Client（Protocol：OpenAIClient / DeepSeekClient，stream() -> StreamEvent）
+ │
+ │  tool_calls
+ ▼
+ToolRegistry（schema 校验 / 调度 / 错误分类）
+ │
+ │  **kwargs
+ ▼
+Tool（read / write / edit / search / bash / git_diff）
+ │
+ │  path（只经 Workspace）
+ ▼
+Workspace（resolve / read / write / cwd，路径逃逸 Fail Fast）
 ```
 
 依赖方向单向向下，禁止反向依赖：
 
 ```text
-CLI → Agent → (LLM, ToolRegistry) → Tool → Workspace
+CLI → AgentSession → Agent → (LLM, ToolRegistry) → Tool → Workspace
+            └── Context / JsonlSession 只由 Session 层驱动
 ```
 
 ---
@@ -170,7 +165,7 @@ Agent Runtime 自己实现。
 
 ## 5. 目录结构
 
-当前实现范围（M1-M6 + M7.1-M7.4 + M7.C1-C8 + M7.5）：
+当前实现范围（M1-M7 全部完成，M8 未开始）：
 
 ```text
 mini-pi/
@@ -181,15 +176,18 @@ mini-pi/
 ├── docs/
 │   ├── design/
 │   │   └── pi-production-architecture.md  # Pi 生产架构参考
-│   └── plans/
-│       ├── phase1-core-runtime.md     # M1-M6 实施计划
-│       └── phase2-session-context.md  # M7 设计与实施计划
+│   ├── plans/
+│   │   ├── phase1-core-runtime.md     # M1-M6 实施计划
+│   │   └── phase2-session-context.md  # M7 设计与实施计划
+│   └── benchmarks/                    # M7 用量 / 成本 / 验收记录与离线 tty 驱动器
 │
 ├── mini_pi/
 │   ├── errors.py                      # Tool / LLM / Workspace / Session 错误
+│   ├── auth.py                        # API Key 与上次连接的安全持久化
 │   │
 │   ├── cli/
 │   │   ├── app.py                     # Typer 入口：一次性 / 交互式
+│   │   ├── input.py                   # prompt_toolkit 行编辑与单行回退
 │   │   ├── banner.py                  # 启动图案与紧凑元数据
 │   │   ├── console.py                 # AgentEvent -> Rich 渲染
 │   │   ├── sessions.py                # 严格 Session 列表展示
@@ -216,7 +214,7 @@ mini-pi/
 │   │   ├── base.py                    # Tool / ToolResult
 │   │   ├── registry.py                # 注册、schema 校验、调度
 │   │   ├── truncate.py                # 行/字节双限截断
-│   │   ├── process.py                 # subprocess 执行与超时杀进程组
+│   │   ├── process.py                 # subprocess 执行、超时/中断杀进程组
 │   │   ├── read.py
 │   │   ├── write.py
 │   │   ├── edit.py
@@ -227,7 +225,8 @@ mini-pi/
 │   ├── session/
 │   │   ├── models.py                 # Header / MessageEntry / CompactionEntry
 │   │   ├── jsonl.py                  # create / load / append / leaf / 路径发现
-│   │   └── runtime.py                # AgentSession 创建 / 恢复 / 新会话 / 模型切换
+│   │   ├── runtime.py                # AgentSession 创建 / 恢复 / 新会话 / 模型切换
+│   │   └── usage.py                  # 从活动链重建最近任务用量
 │   │
 │   ├── context/
 │   │   ├── project.py                # 项目 AGENTS.md 发现与读取
@@ -246,6 +245,8 @@ mini-pi/
 │
 └── tests/
     ├── conftest.py                    # FakeLLMClient / workspace fixtures
+    ├── integration/                   # 离线端到端（真实工具 + 真实 JSONL + FakeLLM）
+    ├── test_integration_*.py          # 真实 API 用例（integration marker，默认排除）
     └── ...
 ```
 
@@ -281,13 +282,14 @@ LLM → Tool Call → Tool → Observation → LLM → ...
 - `run_loop()` 是纯函数：输入 `AgentState + LLMClient + ToolRegistry`，输出最终 `AssistantMessage`
 - 每轮通过 `on_event` 回调发出 `AgentEvent`，CLI 是纯消费者
 - M7.6a 起可选 `prepare_next_turn` 钩子在完整工具批次提交后、下一次请求前调用，供 Session 层替换 `state.messages`（压缩投影）；`None` 时行为与 Phase 1 一致，截断轮不触发。M7.6c 起 `AgentSession` 把该钩子接到与 prompt 前检查同一套策略判定和压缩事务上；M7.6d 起钩子的可预期失败（`MiniPiError`）在 Loop 内转成 `agent_end(error)`，不再向模型发出越界的下一次请求，其他异常仍直接冒泡
-- 终止条件：无 tool call / LLM error / 达到 max_steps / 显式任务预算阻止下一请求 / `length` 截断后的修复轮结束
+- 终止条件：无 tool call（`completed`）/ LLM error / 达到 `max_steps`（`step_limit`）/ 显式任务预算阻止下一请求（`budget_limit`）/ 用户中断（`cancelled`）
 - `stop_reason == "length"` 时**不执行**任何 tool call，全部转 error observation 让模型重发
+- M7.D2 起用户中断（KeyboardInterrupt）是可预期终止：未提交的流式 assistant 不补写，工具轮为被中断及未执行的调用补 cancelled observation 保持 call/result 配对，以 `agent_end(reason="cancelled")` 结束，已提交消息与文件改动不回滚
 - 不做 `read → edit → test` 固定流程，下一步由模型根据 Observation 自主决定
 
 ### 6.3 Tool System
 
-第一阶段工具：
+当前工具：
 
 ```text
 read     读文件（offset/limit、二进制识别、截断续读）
@@ -328,14 +330,16 @@ symlink 指向外部     → 报错
 ```bash
 mini-pi "修复某个 bug"          # 一次性执行
 mini-pi                         # 交互式 REPL，默认创建 JSONL Session
+mini-pi --cwd <dir>             # 指定 workspace（默认当前目录）
 mini-pi --provider deepseek --model deepseek-flash
+mini-pi --max-steps 80          # 单次任务最大循环步数（默认 50）
 mini-pi --no-session            # 保留纯内存模式（/model /reset /exit）
 mini-pi --resume <session.jsonl> # 恢复指定会话
 mini-pi --continue              # 继续当前 workspace 最近的会话
 mini-pi --no-banner             # 交互启动时不打印 ASCII Banner
 mini-pi --verbose               # 显示工具参数与有界日志
 mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入预算
-# REPL 支持 /sessions；持久化模式另有 /new、/compact，纯内存模式支持 /reset
+# REPL 支持 /status /context /tools /sessions /help；持久化模式另有 /new、/compact，纯内存模式支持 /reset
 ```
 
 - 新建会话时的模型选择顺序：显式 `--provider/--model` > 上次连接（其 provider 有可用 Key 时）> 第一个已配 Key 的 provider > 内置默认值；恢复时默认使用会话活动路径最后的 provider/model，显式参数仅覆盖后续新消息
@@ -343,7 +347,7 @@ mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入
 - 启动时若已保存 Key 直接复用；当前 provider 缺 Key 时优先切到已配 Key 的 provider，交互式（tty）缺 Key 则直接隐藏输入并单次验证后原子保存，无需先记住命令
 - `/model [provider] [model]` 切换 provider/model：已有 Key 直接复用、不重复落盘，仅缺 Key 时输入并验证；`/connect` 为兼容别名
 - 一次性模式缺少 Key 时明确报错，并提示环境变量与 `/model`（`/connect`）两种方式
-- 默认在 `~/.mini-pi/sessions/` 下按 workspace 保存 JSONL；交互启动只显示项目名和短会话 id，完整 cwd 与当前 Session 路径由 `/status full` 展示；一次性任务结束仍显示可恢复文件路径；创建失败不会静默回退到内存模式
+- 默认在 `~/.mini-pi/sessions/` 下按 workspace 保存 JSONL；交互启动页只显示短会话 id，完整 cwd 与当前 Session 路径由 `/status full` 展示；一次性任务结束仍显示可恢复文件路径；创建失败不会静默回退到内存模式
 - `--resume <path>` 严格加载指定会话；`--continue` 严格校验当前 workspace 的所有候选，按最后 entry 的活动时间选最新（空会话用 header 时间）。候选损坏、cwd 不匹配或最新时间并列会报错，不静默退回旧会话；两者不可并用，也不可与 `--no-session` 并用
 - `--no-session` 不创建持久化文件，保留原有 `/reset` 与 `/model` 行为；持久化模式用 `/new` 开启独立会话，`/model` 在当前链切换模型且仅让后续 entry 使用新配置；`/reset` 在持久化模式下提示改用 `/new`
 - 交互启动显示 ASCII Banner 与标语（`mini_pi/assets/banner.txt` 原样输出），随后只列版本、模型、项目名、短会话 id 和 `/help`；终端宽度不足或非 tty 时 Banner 降为单行、启动元数据按字段分行；`--no-banner` 可关闭
@@ -370,6 +374,8 @@ export OPENAI_API_KEY=sk-...        # 或 DEEPSEEK_API_KEY
 uv run mini-pi "介绍一下这个仓库"
 uv run mini-pi --provider deepseek "运行 pytest 并修复失败用例"
 ```
+
+> 用 `uv tool install` 安装过 `mini-pi` 的话，新增依赖后要重新同步，否则独立环境会缺少 `prompt_toolkit`（CLI 会打印降级原因、补全与历史不可用）：`uv tool upgrade mini-pi`。
 
 测试：
 
@@ -459,11 +465,13 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 
 > 由模型在 Agent Loop 中根据当前上下文和 Tool Result 自主决定下一步行动。
 
-### 已知限制（Phase 1）
+### 已知限制（当前实现）
 
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行；`bash` 无危险命令确认机制
-- CLI 可创建、恢复和切换会话（含 compaction entry 的恢复走 M7.4 投影）；手动 `/compact`、prompt 前与工具轮之间的自动压缩，以及旧工具结果的成本感知提前压缩都已可用；成本收益只有离线估算记录，真实模型对照（M7.7b）尚未执行
+- 手动 `/compact`、prompt 前与工具轮之间的窗口触发，以及旧工具结果的成本感知提前压缩都已可用；摘要成本收益只有离线估算记录，未做真实计费对照
+- 已知模型的窗口都是 1M 级，窗口触发的自动压缩没有真实长任务样本；M7.7b 只用 DeepSeek 验证了手动 `/compact` 事务后的继续与 resume，OpenAI 因未配置 Key 未测
+- `prompt_toolkit` 是可降级能力：非 tty 或未安装时回退单行 REPL；交互终端缺依赖会在 REPL 顶部打印降级原因（补全/历史/多行编辑不可用）
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
 - 进程组与文件权限语义依赖 POSIX，未适配 Windows
 - LSP / MCP / Task / Memory / Multi-Agent 属于后续阶段
@@ -472,12 +480,13 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 
 ## 10. 测试
 
-- 核心链路（Loop / Registry / Workspace / Tool / 截断 / 超时）全部用 pytest 覆盖
+- 核心链路（Loop / Registry / Workspace / Tool / 截断 / 超时 / 取消）全部用 pytest 覆盖
 - Agent 测试使用 `FakeLLMClient`（脚本化事件流），不调用真实 API
-- 真实 API 测试标记 `@pytest.mark.integration`，默认排除
+- 真实 API 测试标记 `@pytest.mark.integration`，默认排除；当前有基础连通性与「压缩后继续 + resume」用例
+- `tests/integration/` 是离线端到端目录：走生产装配路径（真实工具、真实 JSONL、FakeLLM），不加 `integration` marker
 - 文件工具测试使用 `tmp_path`，不触碰真实项目文件
 
-详见 [`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md) 的测试步骤。
+详见 [`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md) 与 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md) 的验收命令。
 
 ---
 
@@ -504,3 +513,4 @@ Test Core Runtime
 - Pi 生产架构参考：[`docs/design/pi-production-architecture.md`](docs/design/pi-production-architecture.md)
 - Phase 1 计划：[`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)
 - Phase 2 计划：[`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)
+- M7 成本与验收记录：[`docs/benchmarks/`](docs/benchmarks/)（用量基准、成本感知压缩、真实压缩验收、tty 输入与取消记录）
