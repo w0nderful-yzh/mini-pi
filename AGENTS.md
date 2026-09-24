@@ -392,6 +392,15 @@ return exit code
 - stdout / stderr 分离捕获，进程层有界（默认 1MB/流，超出按 head/tail 方向丢弃并标记），工具层再按 2000 行 / 50KB 双限截断并附提示
 - 返回结构化 `ProcessResult(exit_code, stdout, stderr, timed_out, stdout_truncated, stderr_truncated)`
 
+边界说明：
+
+```text
+文件 Tool -> 强 Workspace Boundary（resolve 后必须仍在 root 内）
+bash      -> 无沙箱本地 shell（只约束 cwd；可读写 root 之外、可联网）
+```
+
+`bash` 不是沙箱，README 与 CLI 说明不得把它描述成隔离环境；Docker / VM 沙箱与 Permission / Capability 系统留到出现真实需求。
+
 禁止：
 
 ```text
@@ -769,12 +778,13 @@ M4 文件 / Shell Tool
 M5 真实代码修改闭环
 M6 pytest 完善
 M7 Session / Context
+M7.8 Runtime Hardening（请求口径、Token 估算、窗口配置、RunContext、CI）
 M8 LSP / MCP
 M9 Task / Memory
 M10 Multi-Agent
 ```
 
-M1-M7 已完成；M7（Session / Context 与 CLI）于 2026-09-24 通过离线回归、真实 Provider 与人工 CLI 验收，M8 准入条件见 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md) 第 5 节。路线图状态表以 `README.md` 第 8 节为准。
+M1-M7 已完成；M7（Session / Context 与 CLI）于 2026-09-24 通过离线回归、真实 Provider 与人工 CLI 验收。下一阶段从 M7.8 Runtime Hardening 开始，任务拆解、验收标准与 M8-M10 路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)；路线图状态表以 `README.md` 第 8 节为准。
 
 不要跨阶段同时开太多功能。
 
@@ -854,7 +864,8 @@ User → 固定 Workflow
 ```text
 docs/design/pi-production-architecture.md   Pi 生产架构参考（Agent/AgentSession/Loop/Tool/Session 链路）
 docs/plans/phase1-core-runtime.md           Phase 1（M1-M6）交付物与验收
-docs/plans/phase2-session-context.md        Phase 2（M7）设计与子里程碑；M8-M10 准入条件
+docs/plans/phase2-session-context.md        Phase 2（M7）设计与子里程碑
+docs/plans/phase3-runtime-hardening.md      M7.8 Runtime Hardening 实施计划与 M8-M10 路线
 README.md 第 2 节                            与 pi 的设计取舍对照
 ```
 

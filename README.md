@@ -84,6 +84,8 @@ Python Coding Agent Harness
 | 输出截断 | 行数 + 字节双限，附可操作续读提示 | 复刻（read / bash / search） |
 | edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 只做精确唯一匹配，fuzzy 后置 |
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
+| Shell 边界 | `bash` 是无沙箱本地 shell | 同样是无沙箱本地 shell：`bash` 只约束 `cwd`，可读写 workspace 之外、可联网；文件工具的边界不适用于它，也不打算在 M7.8 引入 Docker/VM 沙箱 |
+| 上下文估算 | usage 锚点 + 其后消息的字符估算 | 复刻同一策略；当前字符规则是 4 字符 ≈ 1 token，会低估中文、只在 usage 锚点里间接计入工具 schema，M7.8.2 补 CJK 安全估算与工具 schema 计量 |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
 | 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3-M7.5 已完成 CLI 新建/恢复/`/new`/同链 `/model` 切换、compaction 投影与手动 `/compact`；M7.6 接入窗口与成本触发；M7.D1 的 `/sessions` 与 `--continue` 严格加载全部候选；M7.7 已通过离线回归、真实 DeepSeek 与人工 CLI 验收 |
@@ -146,11 +148,14 @@ ripgrep-bin（search 工具内置 rg）
 pytest
 ```
 
+支持平台：macOS / Linux（依赖 POSIX 进程组与文件权限语义）；Windows 未支持。
+
 后续阶段再引入：
 
 ```text
-asyncio / 并行工具执行
 LSP / MCP
+静态检查（ruff）与 CI
+asyncio / 并行工具执行
 ```
 
 不使用：
@@ -165,7 +170,7 @@ Agent Runtime 自己实现。
 
 ## 5. 目录结构
 
-当前实现范围（M1-M7 全部完成，M8 未开始）：
+当前实现范围（M1-M7 已完成，M7.8 规划中，M8 未开始）：
 
 ```text
 mini-pi/
@@ -177,8 +182,9 @@ mini-pi/
 │   ├── design/
 │   │   └── pi-production-architecture.md  # Pi 生产架构参考
 │   ├── plans/
-│   │   ├── phase1-core-runtime.md     # M1-M6 实施计划
-│   │   └── phase2-session-context.md  # M7 设计与实施计划
+│   │   ├── phase1-core-runtime.md         # M1-M6 实施计划
+│   │   ├── phase2-session-context.md      # M7 设计与实施计划
+│   │   └── phase3-runtime-hardening.md    # M7.8-M10 路线与实施计划
 │   └── benchmarks/                    # M7 用量 / 成本 / 验收记录与离线 tty 驱动器
 │
 ├── mini_pi/
@@ -397,17 +403,21 @@ uv run pytest -m integration        # 需要 API Key
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
+| M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 规划完成，未开始 |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
 
 M1-M6 的详细任务拆解见 [`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)。
-M7 的架构设计、子里程碑与 M8-M10 准入条件见 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)。
+M7 的架构设计、子里程碑与验收见 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)。
+M7.8 的任务拆解、验收标准与 M8-M10 路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)。
 
 MVP 后的实施顺序保持为：先让会话可恢复、上下文可控，再扩展外部能力。
 
 ```text
-M7 Session / Context
+M7 Session / Context（已完成）
+  ↓
+M7.8 Runtime Hardening
   ↓
 M8 LSP / MCP
   ↓
@@ -468,13 +478,15 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 ### 已知限制（当前实现）
 
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
-- 工具串行执行，无并行；`bash` 无危险命令确认机制
+- 工具串行执行，无并行
+- **`bash` 不是沙箱**：文件工具的 Workspace 边界只约束 read/write/edit/search/git_diff，`bash` 是 `cwd = workspace root` 的无沙箱本地 shell（可以读写 workspace 之外、可以联网），也没有危险命令确认机制
+- Token 估算按字符规则（4 字符 ≈ 1 token）计算，中文会低估、工具 schema 只通过 usage 锚点间接计入；M7.8.2 会做 CJK 安全估算与实测校准
 - 手动 `/compact`、prompt 前与工具轮之间的窗口触发，以及旧工具结果的成本感知提前压缩都已可用；摘要成本收益只有离线估算记录，未做真实计费对照
 - 已知模型的窗口都是 1M 级，窗口触发的自动压缩没有真实长任务样本；M7.7b 只用 DeepSeek 验证了手动 `/compact` 事务后的继续与 resume，OpenAI 因未配置 Key 未测
 - `prompt_toolkit` 是可降级能力：非 tty 或未安装时回退单行 REPL；交互终端缺依赖会在 REPL 顶部打印降级原因（补全/历史/多行编辑不可用）
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
-- 进程组与文件权限语义依赖 POSIX，未适配 Windows
-- LSP / MCP / Task / Memory / Multi-Agent 属于后续阶段
+- 支持平台为 macOS / Linux；进程组与文件权限语义依赖 POSIX，Windows 未支持
+- LSP / MCP / Task / Memory / Multi-Agent 属于后续阶段，路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)
 
 ---
 
@@ -513,4 +525,5 @@ Test Core Runtime
 - Pi 生产架构参考：[`docs/design/pi-production-architecture.md`](docs/design/pi-production-architecture.md)
 - Phase 1 计划：[`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)
 - Phase 2 计划：[`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)
+- Phase 3 计划（M7.8-M10）：[`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)
 - M7 成本与验收记录：[`docs/benchmarks/`](docs/benchmarks/)（用量基准、成本感知压缩、真实压缩验收、tty 输入与取消记录）
