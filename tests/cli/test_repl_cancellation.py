@@ -29,6 +29,8 @@ class ScriptedReader:
         """保存脚本项；读完返回 EOFError，与真实 reader 的结束语义一致。"""
         self._items = list(items)
         self.reads = 0
+        # 满足 ReplReader 契约：脚本化输入没有降级原因
+        self.notice: str | None = None
 
     def read(self) -> str:
         """返回下一项文本或抛出脚本化异常。"""

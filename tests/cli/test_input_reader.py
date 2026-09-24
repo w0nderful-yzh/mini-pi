@@ -27,16 +27,20 @@ def test_non_interactive_streams_fall_back_to_single_line() -> None:
     """非 tty（管道/测试）使用内建 input，不进入行编辑模式。"""
     reader = create_repl_reader(interactive=False)
     assert isinstance(reader, BasicReplReader)
+    # 非 tty 是正常回退路径，不向用户报降级原因
+    assert reader.notice is None
 
 
 def test_missing_library_falls_back_to_single_line(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """输入库不可用是可预期降级：仍然返回可用的单行 reader。"""
+    """输入库不可用是可预期降级：仍返回单行 reader，但交互终端要说明原因。"""
     # sys.modules 中的 None 会让 import prompt_toolkit 抛 ImportError
     monkeypatch.setitem(sys.modules, "prompt_toolkit", None)
     reader = create_repl_reader(interactive=True, history_path=tmp_path / "history")
     assert isinstance(reader, BasicReplReader)
+    assert reader.notice is not None
+    assert "prompt_toolkit" in reader.notice
 
 
 def test_basic_reader_uses_builtin_input(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -109,3 +113,52 @@ def test_slash_completer_supports_async_contract() -> None:
     completer = build_slash_completer(SLASH_COMMANDS)
     assert isinstance(completer, Completer)
     assert hasattr(completer, "get_completions_async")
+
+
+def _prompt_with_chunks(chunks: list[str], *, timeout: float = 8.0) -> str:
+    """在管道输入上分段回放按键，返回 prompt_toolkit 最终提交的文本。
+
+    分段之间留出事件循环处理补全的时间，否则一次性灌入按键时补全状态可能尚未建立。
+    """
+    import threading
+    import time
+
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    with create_pipe_input() as pipe:
+        session = PromptSession(
+            input=pipe,
+            output=DummyOutput(),
+            multiline=True,
+            completer=build_slash_completer(SLASH_COMMANDS),
+            complete_while_typing=True,
+            key_bindings=_build_key_bindings(),
+        )
+        results: list[str] = []
+        thread = threading.Thread(
+            target=lambda: results.append(session.prompt()), daemon=True
+        )
+        thread.start()
+        for chunk in chunks:
+            time.sleep(0.3)
+            pipe.send_text(chunk)
+        thread.join(timeout=timeout)
+        assert results, "prompt did not finish"
+        return results[0]
+
+
+def test_enter_completes_unique_match_before_submitting() -> None:
+    """唯一匹配时 Enter 先补全，第二次 Enter 才提交，避免半截命令变 unknown command。"""
+    assert _prompt_with_chunks(["/com", "\r", "\r"]) == "/compact"
+
+
+def test_enter_with_multiple_matches_submits_raw_text() -> None:
+    """多匹配不替用户做选择：仍提交原文，菜单只作提示。"""
+    assert _prompt_with_chunks(["/", "\r"]) == "/"
+
+
+def test_enter_on_complete_command_submits_immediately() -> None:
+    """已是完整命令时不插入额外字符，一次 Enter 提交。"""
+    assert _prompt_with_chunks(["/context", "\r"]) == "/context"

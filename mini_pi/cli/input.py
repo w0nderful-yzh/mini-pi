@@ -33,10 +33,19 @@ SLASH_COMMANDS: tuple[str, ...] = (
 _REPL_PROMPT = "mini-pi> "
 # 多行输入的第二行起使用续行提示，明确当前还在同一次提交中
 _CONTINUATION_PROMPT = "   ... "
+# 交互终端缺 prompt_toolkit 时的降级说明；非 tty 回退属于正常路径，不提示
+_MISSING_LIBRARY_NOTICE = (
+    "input library prompt_toolkit is not installed; history, multi-line editing, "
+    "completion and Ctrl+L are disabled. Reinstall dependencies (uv sync / "
+    "uv tool upgrade mini-pi) to enable them."
+)
 
 
 class ReplReader(Protocol):
     """REPL 输入契约：返回一次提交的完整文本，EOF/中断按异常冒泡。"""
+
+    # 非 None 时说明当前 reader 是降级实现，CLI 需要把原因告诉用户
+    notice: str | None
 
     def read(self) -> str:
         """读取一次用户提交；EOFError 表示输入结束，KeyboardInterrupt 表示取消。"""
@@ -46,9 +55,10 @@ class ReplReader(Protocol):
 class BasicReplReader:
     """无依赖回退实现：调用内建 input()，保持原有单行 REPL 语义。"""
 
-    def __init__(self, prompt: str = _REPL_PROMPT) -> None:
-        """记录提示符；不预读、不缓存任何输入。"""
+    def __init__(self, prompt: str = _REPL_PROMPT, *, notice: str | None = None) -> None:
+        """记录提示符与可选降级原因；不预读、不缓存任何输入。"""
         self._prompt = prompt
+        self.notice = notice
 
     def read(self) -> str:
         """读取一行；UnicodeDecodeError/EOFError/KeyboardInterrupt 原样冒泡给调用方。"""
@@ -103,6 +113,7 @@ class PromptToolkitReplReader:
         from prompt_toolkit.history import FileHistory, InMemoryHistory
 
         self._prompt = prompt
+        self.notice: str | None = None
         self.history_path = history_path
         try:
             _prepare_history_file(history_path)
@@ -126,7 +137,7 @@ class PromptToolkitReplReader:
 
 
 def _build_key_bindings() -> Any:
-    """构造输入键位：Enter 提交、Ctrl+J 换行、Ctrl+L 清屏。"""
+    """构造输入键位：Enter 提交（唯一匹配先补全）、Ctrl+J/Alt+Enter 换行、Ctrl+L 清屏。"""
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.key_binding.bindings.named_commands import get_by_name
 
@@ -134,22 +145,31 @@ def _build_key_bindings() -> Any:
 
     @bindings.add("enter")
     def _submit(event: Any) -> None:
-        # 多行模式默认 Enter 换行；这里改为提交，换行改由 Ctrl+J 提供
-        event.current_buffer.validate_and_handle()
+        """Enter：唯一匹配先把候选补全，其余情况提交当前文本。"""
+        buffer = event.current_buffer
+        state = buffer.complete_state
+        # 打了一半的命令直接回车不应变成 unknown command，先补全再让用户确认
+        if state is not None and len(state.completions) == 1:
+            before = buffer.text
+            buffer.apply_completion(state.completions[0])
+            if buffer.text != before:
+                return
+        # 多匹配或已是完整命令：沿用默认语义直接提交
+        buffer.validate_and_handle()
 
     @bindings.add("c-j")
     def _newline(event: Any) -> None:
-        # Ctrl+J 与 Alt+Enter 都是显式换行，不提交也不写历史
+        """Ctrl+J：在当前输入中插入换行，不提交也不写历史。"""
         event.current_buffer.insert_text("\n")
 
     @bindings.add("escape", "enter")
     def _alt_newline(event: Any) -> None:
-        # Alt+Enter 与 Ctrl+J 语义一致，便于不同终端习惯
+        """Alt+Enter：与 Ctrl+J 一致的显式换行，照顾不同终端习惯。"""
         event.current_buffer.insert_text("\n")
 
     @bindings.add("c-l")
     def _clear_screen(event: Any) -> None:
-        # 复用 prompt_toolkit 自带清屏：只重绘终端，不影响已输入文本
+        """Ctrl+L：复用 prompt_toolkit 自带清屏，只重绘终端不动文本。"""
         get_by_name("clear-screen").run(event)
 
     return bindings
@@ -181,8 +201,8 @@ def create_repl_reader(
     try:
         return PromptToolkitReplReader(history_path=history_path or DEFAULT_HISTORY_PATH)
     except ImportError:
-        # 输入库不可用是可预期降级：原单行 REPL 仍然完整可用
-        return BasicReplReader()
+        # 交互终端缺输入库是异常安装状态：仍回退单行 REPL，但必须让用户知道
+        return BasicReplReader(notice=_MISSING_LIBRARY_NOTICE)
 
 
 def _interactive_terminal() -> bool:

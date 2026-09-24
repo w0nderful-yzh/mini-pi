@@ -58,7 +58,8 @@ _HELP_TEXT = """Available commands:
   /help                      show this help
   /exit                      quit mini-pi
 
-Input: Enter submits, Ctrl+J or Alt+Enter starts a new line, Ctrl+L clears the screen.
+Input: Enter submits (a unique command completion is inserted first), Tab accepts the
+menu, Ctrl+J or Alt+Enter starts a new line, Ctrl+L clears the screen.
 Ctrl+C cancels the running task; press it twice in a row to exit.
 
 /connect is kept as an alias of /model."""
@@ -528,6 +529,9 @@ def cli(
         )
 
     reader = create_repl_reader()
+    if reader.notice is not None:
+        # 降级原因必须可见：否则用户会以为补全/历史/多行编辑本身坏掉了
+        console.print(reader.notice, style="yellow", markup=False, soft_wrap=True)
     # 连续 Ctrl+C 计数：第一次取消当前输入或任务，连续第二次才退出进程
     interrupt_streak = 0
     while True:

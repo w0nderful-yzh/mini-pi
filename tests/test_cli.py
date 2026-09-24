@@ -416,3 +416,21 @@ def test_prompt_and_build_cancels_on_empty_key(
     )
 
     assert agent is None
+
+
+def test_repl_shows_input_fallback_notice(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """交互终端缺少输入库时必须说明降级原因，而不是静默失去补全与历史。"""
+    from mini_pi.cli.input import BasicReplReader
+
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "mini_pi.cli.app.create_repl_reader",
+        lambda: BasicReplReader(notice="line editing disabled for test"),
+    )
+
+    result = runner.invoke(app, ["--cwd", str(tmp_path), "--no-banner"], input="/exit\n")
+
+    assert result.exit_code == 0, result.output
+    assert "line editing disabled for test" in result.output
