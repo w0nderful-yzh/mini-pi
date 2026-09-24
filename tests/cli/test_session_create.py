@@ -103,7 +103,8 @@ def test_interactive_exit_leaves_loadable_file(
     assert len(files) == 1
     session = JsonlSession.load(files[0], expected_cwd=tmp_path)
     assert session.replay().messages[-1].content == "done"
-    assert f"Session path: {files[0]}" in result.output
+    assert f"session {str(session.header.id)[:8]}" in result.output
+    assert "Session path:" not in result.output
 
 
 def test_first_model_switch_creates_default_session(
@@ -137,7 +138,8 @@ def test_first_model_switch_creates_default_session(
     files = list((tmp_path / "sessions").rglob("*.jsonl"))
     assert len(files) == 1
     assert JsonlSession.load(files[0]).replay().messages[-1].content == "done"
-    assert "Session storage:" in result.output
+    session = JsonlSession.load(files[0])
+    assert f"session: {str(session.header.id)[:8]}" in result.output
 
 
 def test_saved_session_reset_is_refused_without_changing_history(

@@ -539,6 +539,7 @@ type:   message | compaction
 - M7.3b 创建模式由 `AgentSession` 装配 Agent 与 JsonlSession；完整消息先写 JSONL 再进内存，entry 记录 provider、model、stepCount，工具改动由 `ToolMessage.modified_files` 承载；旧 M7.1 entry 可缺少 stepCount
 - M7.3c 基础回放只沿指定 leaf 的 parent 链读取消息；旧 entry 缺少 stepCount 时按 assistant 数推导；M7.4 已用统一投影支持活动路径中的 compaction
 - M7.3d `AgentSession.resume()` 恢复活动分支并沿原 leaf 追加；默认凭据仅从环境变量或用户认证文件解析，Key 不进入 Session；CLI 已通过 M7.3f 接入 `--resume` / `--continue`
+- M7.D1 `/sessions` 与 `--continue` 共用当前 workspace 全部候选的严格加载、回放和活动时间排序；任一候选损坏都整体失败，列表不调用 LLM。启动页仅显示版本、模型、项目名、短会话 id 和 `/help`，完整 cwd / 当前 Session 路径放 `/status full`；窄屏及非 tty 按短字段分行
 - fork 留到后续
 
 M7 的详细设计、子里程碑与验收标准见 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)。

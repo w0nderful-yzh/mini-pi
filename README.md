@@ -85,7 +85,7 @@ Python Coding Agent Harness
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
-| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3 已完成 CLI 新建、恢复、`/new` 与同链 `/model` 切换；M7.4 已完成 compaction 投影，M7.5 已完成手动 `/compact`（摘要检查点、原 entry 不删、失败不改状态）；M7.6 起 prompt 前、工具轮之间与“旧工具结果主导且净收益为正”时都会触发同一事务，失败语义见 M7.6d/M7.6f |
+| 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3 已完成 CLI 新建、恢复、`/new` 与同链 `/model` 切换；M7.4 已完成 compaction 投影，M7.5 已完成手动 `/compact`；M7.6 接入窗口与成本触发；M7.D1 的 `/sessions` 与 `--continue` 复用全部候选的严格加载和活动路径元数据，不跳过损坏文件 |
 
 ---
 
@@ -188,8 +188,9 @@ mini-pi/
 │   │
 │   ├── cli/
 │   │   ├── app.py                     # Typer 入口：一次性 / 交互式
-│   │   ├── banner.py                  # 启动图案
+│   │   ├── banner.py                  # 启动图案与紧凑元数据
 │   │   ├── console.py                 # AgentEvent -> Rich 渲染
+│   │   ├── sessions.py                # 严格 Session 列表展示
 │   │   └── status.py                  # 状态、上下文与工具展示
 │   │
 │   ├── assets/
@@ -332,7 +333,7 @@ mini-pi --continue              # 继续当前 workspace 最近的会话
 mini-pi --no-banner             # 交互启动时不打印 ASCII Banner
 mini-pi --verbose               # 显示工具参数与有界日志
 mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入预算
-# 持久化 REPL 支持 /new、/compact、/model、/status、/context、/tools、/help、/exit；纯内存模式支持 /reset
+# REPL 支持 /sessions；持久化模式另有 /new、/compact，纯内存模式支持 /reset
 ```
 
 - 新建会话时的模型选择顺序：显式 `--provider/--model` > 上次连接（其 provider 有可用 Key 时）> 第一个已配 Key 的 provider > 内置默认值；恢复时默认使用会话活动路径最后的 provider/model，显式参数仅覆盖后续新消息
@@ -340,11 +341,12 @@ mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入
 - 启动时若已保存 Key 直接复用；当前 provider 缺 Key 时优先切到已配 Key 的 provider，交互式（tty）缺 Key 则直接隐藏输入并单次验证后原子保存，无需先记住命令
 - `/model [provider] [model]` 切换 provider/model：已有 Key 直接复用、不重复落盘，仅缺 Key 时输入并验证；`/connect` 为兼容别名
 - 一次性模式缺少 Key 时明确报错，并提示环境变量与 `/model`（`/connect`）两种方式
-- 默认在 `~/.mini-pi/sessions/` 下按 workspace 保存 JSONL；启动显示存储目录，退出显示实际文件路径；创建失败不会静默回退到内存模式
+- 默认在 `~/.mini-pi/sessions/` 下按 workspace 保存 JSONL；交互启动只显示项目名和短会话 id，完整 cwd 与当前 Session 路径由 `/status full` 展示；一次性任务结束仍显示可恢复文件路径；创建失败不会静默回退到内存模式
 - `--resume <path>` 严格加载指定会话；`--continue` 严格校验当前 workspace 的所有候选，按最后 entry 的活动时间选最新（空会话用 header 时间）。候选损坏、cwd 不匹配或最新时间并列会报错，不静默退回旧会话；两者不可并用，也不可与 `--no-session` 并用
 - `--no-session` 不创建持久化文件，保留原有 `/reset` 与 `/model` 行为；持久化模式用 `/new` 开启独立会话，`/model` 在当前链切换模型且仅让后续 entry 使用新配置；`/reset` 在持久化模式下提示改用 `/new`
-- 交互启动显示 ASCII Banner 与标语（`mini_pi/assets/banner.txt` 原样输出）；终端宽度不足或非 tty 时降级为单行；`--no-banner` 可关闭
+- 交互启动显示 ASCII Banner 与标语（`mini_pi/assets/banner.txt` 原样输出），随后只列版本、模型、项目名、短会话 id 和 `/help`；终端宽度不足或非 tty 时 Banner 降为单行、启动元数据按字段分行；`--no-banner` 可关闭
 - `/help` 列出可用命令；未知 `/命令` 只提示且不会作为任务发给模型
+- `/sessions` 严格加载当前 workspace 的全部候选，按活动时间显示短 id、活动模型、摘要状态和当前标记；任何候选损坏都会整体报错，不跳过后展示不完整列表。该命令只读本地 JSONL，不调用模型；恢复仍使用 `--continue` 或 `--resume <session.jsonl>`
 - `/status` 分开显示当前投影估算与最近任务的请求数、累计 Provider 用量、工具数和耗时；Session 恢复后从完整活动链重建统计，`/status full` 才显示完整路径。`/context` 分解当前投影，并单列最近请求输入与任务累计用量；`/tools` 列出工具
 - `/compact [instructions]` 手动压缩持久化会话：只在安全切点前生成摘要检查点，摘要请求不带工具，`instructions` 仅进入本次请求；输出摘要消息数、保留 entry 数、切点边界、压缩前后当前上下文估算与摘要调用的实测 usage。原始 message entry 一条不删，失败时不改 JSONL 与内存投影；`--no-session` 明确拒绝，不隐式建 JSONL
 - 同一套判定也会自动运行：M7.6b 起每次 `run()` 提交新 user 消息前按窗口策略（当前投影估算 > `context_window - reserve`）检查，需要时先压缩再追加这一条消息；M7.6c 起每个完整工具批次提交后、下一次请求前也用同一判定检查，压缩成功后同一次任务继续，已执行的工具不重放。窗口未知的模型不启用自动压缩，未超阈值不产生任何写入。M7.6d 起自动压缩失败（无安全切点、摘要或写盘失败、压缩后仍超阈值）以 agent error 结束这次任务：不追加假 assistant、不改投影、不再发出越界的下一次请求；已提交的消息与工具结果保留，一次性 CLI 调用返回非零码。M7.6f 起工具轮之间还有第二个触发：窗口内但旧工具结果占被摘要区域一半以上、且按 3 次后续请求算得摘要成本小于预计节省时提前压缩（旧输出按 2000 字符截断进入摘要请求，因此摘要成本与日志长度无关）；每次任务最多尝试一次，摘要阶段失败只放弃这次优化、不终止任务，写盘或重建失败仍以 agent error 终止；仅离线估算验证过收益（[记录](docs/benchmarks/m7-6f-cost-aware-compaction.md)），没有真实计费结论
@@ -384,7 +386,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C8、M7.5、M7.6 已完成；下一项 M7.D1 会话列表与启动页） |
+| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C8、M7.5、M7.6、M7.D1 已完成；下一项 M7.D2 输入与取消） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

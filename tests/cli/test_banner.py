@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import re
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from mini_pi.cli.banner import (
     banner_width,
     load_banner,
     render_banner,
+    render_startup,
 )
 from tests.conftest import FakeLLMClient, assistant
 
@@ -57,7 +59,7 @@ def test_wide_terminal_prints_art_and_tagline() -> None:
 
     render_banner(console)
 
-    output = console.file.getvalue()
+    output = re.sub(r"\x1b\[[0-9;]*m", "", console.file.getvalue())
     assert "No Bullshit," in output
     assert TAGLINE in output
 
@@ -144,3 +146,28 @@ def test_one_shot_does_not_print_banner(
 
     assert result.exit_code == 0
     assert TAGLINE not in result.output
+
+
+@pytest.mark.parametrize(("width", "terminal"), [(80, True), (28, True), (80, False)])
+def test_startup_summary_is_compact_across_terminal_modes(
+    width: int, terminal: bool
+) -> None:
+    """宽屏、窄屏与非 tty 都只展示紧凑元数据和帮助入口。"""
+    console = make_console(width=width, terminal=terminal)
+
+    render_startup(
+        console,
+        version="0.1.0",
+        provider="deepseek",
+        model="deepseek-flash",
+        project="sample",
+        session="12345678",
+    )
+
+    output = re.sub(r"\x1b\[[0-9;]*m", "", console.file.getvalue())
+    assert "mini-pi 0.1.0" in output
+    assert "deepseek/deepseek-flash" in output
+    assert "sample" in output
+    assert "session 12345678" in output
+    assert "/help for commands" in output
+    assert "commands:" not in output

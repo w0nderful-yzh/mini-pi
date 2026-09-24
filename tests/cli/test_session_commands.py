@@ -65,7 +65,7 @@ def test_new_creates_independent_session_and_keeps_old_file(
         isinstance(message, UserMessage) and message.content == "old task"
         for message in llm.calls[1]
     )
-    assert f"new session: {new.path}" in result.output
+    assert f"new session: {str(new.header.id)[:8]}" in result.output
 
 
 def test_new_creation_failure_preserves_current_session(

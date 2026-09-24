@@ -18,8 +18,9 @@ from mini_pi.auth import (
     save_connection,
     save_last_connection,
 )
-from mini_pi.cli.banner import render_banner
+from mini_pi.cli.banner import render_banner, render_startup
 from mini_pi.cli.console import ConsoleRenderer
+from mini_pi.cli.sessions import render_sessions
 from mini_pi.cli.status import (
     current_context_tokens,
     render_compaction,
@@ -47,6 +48,7 @@ API_KEY_ENV = {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
 _HELP_TEXT = """Available commands:
   /model [provider] [model]  switch provider/model (reuse saved key; ask only if missing)
   /compact [instructions]    summarize older context into a checkpoint (saved sessions only)
+  /sessions                  list validated sessions for this workspace
   /new                       start a new session (saved sessions only)
   /reset                     clear in-memory context (memory-only sessions)
   /status [full]             show model, workspace, session, and context
@@ -345,7 +347,7 @@ def _switch_connection(
                 no_session=no_session,
             )
             if isinstance(new_agent, AgentSession):
-                console.print(f"Session storage: {new_agent.path.parent}", soft_wrap=True)
+                console.print(f"session: {new_agent.session_id[:8]}", markup=False)
         else:
             new_agent = agent
             if isinstance(new_agent, AgentSession):
@@ -475,11 +477,6 @@ def cli(
                 console.print(f"Session path: {agent.path}", soft_wrap=True)
         return
 
-    commands = (
-        "/model, /reset, /status, /context, /tools, /help, /exit"
-        if no_session
-        else "/model, /compact, /new, /reset, /status, /context, /tools, /help, /exit"
-    )
     render_banner(console, enabled=not no_banner)
     if (
         agent is None
@@ -500,15 +497,19 @@ def cli(
         if agent is not None:
             startup_error = None
             renderer.set_secrets(_configured_keys())
-    console.print(
-        f"  mini-pi {_version()} · {provider}/{model} · {workspace.root}",
-        style="dim",
-        markup=False,
-        soft_wrap=True,
+    session_label = (
+        agent.session_id[:8]
+        if isinstance(agent, AgentSession)
+        else "memory" if isinstance(agent, Agent) else "not connected"
     )
-    console.print(f"  commands: {commands}", style="dim", markup=False, soft_wrap=True)
-    if isinstance(agent, AgentSession):
-        console.print(f"Session storage: {agent.path.parent}", soft_wrap=True)
+    render_startup(
+        console,
+        version=_version(),
+        provider=provider,
+        model=model,
+        project=workspace.root.name or str(workspace.root),
+        session=session_label,
+    )
     if startup_error is not None:
         console.print(
             startup_error,
@@ -550,6 +551,18 @@ def cli(
         if stripped == "/tools":
             render_tools(console, agent=agent, cwd=workspace.root)
             continue
+        if stripped == "/sessions":
+            try:
+                render_sessions(
+                    console,
+                    cwd=workspace.root,
+                    current_session_id=(
+                        agent.session_id if isinstance(agent, AgentSession) else None
+                    ),
+                )
+            except SessionError as exc:
+                console.print(f"session listing failed: {exc}", style="red", markup=False)
+            continue
         if stripped == "/compact" or stripped.startswith("/compact "):
             # 可选 instructions 只随本次摘要请求发送，不写入 Session
             _run_compaction(
@@ -567,7 +580,7 @@ def cli(
                     console.print(f"session creation failed: {exc}", style="red")
                 else:
                     agent = new_agent
-                    console.print(f"new session: {agent.path}", soft_wrap=True)
+                    console.print(f"new session: {agent.session_id[:8]}", markup=False)
             elif agent is None:
                 console.print("configure a provider first with /model", style="yellow")
             else:
@@ -622,10 +635,6 @@ def cli(
             console.print_exception()
         finally:
             renderer.close()
-
-    if isinstance(agent, AgentSession):
-        console.print(f"Session path: {agent.path}", soft_wrap=True)
-
 
 def _force_utf8(stream: object, *, errors: str) -> None:
     """把文本流重配为 UTF-8，使 stdio 不依赖进程 locale。"""

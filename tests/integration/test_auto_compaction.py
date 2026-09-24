@@ -257,7 +257,7 @@ def test_cli_run_exits_then_resume_keeps_compacted_projection(
 
     assert first.exit_code == 0, first.output
     assert "done" in first.output
-    assert "Session path:" in first.output
+    assert "Session path:" not in first.output
     session_path = next((tmp_path / "sessions").rglob("*.jsonl"))
     entries = _entries(session_path)
     _assert_tool_pairs(entries)

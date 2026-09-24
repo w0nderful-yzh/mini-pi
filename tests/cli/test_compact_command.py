@@ -80,8 +80,8 @@ def test_compact_reports_estimates_and_keeps_original_entries(
     assert "Summary usage: in 26000 / out 400 tokens" in result.output
     before_tokens, after_tokens = _context_tokens(result.output)
     assert before_tokens > after_tokens
-    # 压缩输出不打印完整 Session 路径；只有退出时那一次
-    assert result.output.count("Session path:") == 1
+    # 交互默认输出不打印完整 Session 路径；需要时由 /status full 查看
+    assert "Session path:" not in result.output
 
     path = next((tmp_path / "sessions").rglob("*.jsonl"))
     session = JsonlSession.load(path)

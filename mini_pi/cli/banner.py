@@ -44,3 +44,30 @@ def render_banner(console: Console, *, enabled: bool = True) -> None:
         soft_wrap=True,
     )
     console.print(f"  {TAGLINE}", style="bold cyan", markup=False, highlight=False, soft_wrap=True)
+
+
+def render_startup(
+    console: Console,
+    *,
+    version: str,
+    provider: str,
+    model: str,
+    project: str,
+    session: str,
+) -> None:
+    """渲染紧凑启动信息；完整路径留给 `/status full`。"""
+    identity = f"mini-pi {version} · {provider}/{model}"
+    context = f"{project} · session {session}"
+    if console.is_terminal and console.width >= max(cell_len(identity), cell_len(context)):
+        lines = (identity, context, "/help for commands")
+    else:
+        # 窄屏和非 tty 使用短字段行，避免依赖终端自动折行破坏信息顺序。
+        lines = (
+            f"mini-pi {version}",
+            f"model {provider}/{model}",
+            f"project {project}",
+            f"session {session}",
+            "/help for commands",
+        )
+    for line in lines:
+        console.print(line, style="dim", markup=False, highlight=False)

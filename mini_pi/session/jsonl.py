@@ -52,6 +52,18 @@ class SessionReplay:
     model: str
 
 
+@dataclass(frozen=True, slots=True)
+class SessionSummary:
+    """一个已严格校验的 workspace Session 列表项。"""
+
+    id: UUID
+    path: Path
+    activity_time: datetime
+    provider: str
+    model: str
+    has_summary: bool
+
+
 def _resolved_workspace(cwd: str | Path, *, require_directory: bool) -> Path:
     """统一 cwd 身份；创建 Session 时要求目录真实存在。"""
     path = Path(cwd).expanduser().resolve()
@@ -395,17 +407,27 @@ def latest_session_path(
     cwd: str | Path, *, sessions_root: str | Path | None = None
 ) -> Path:
     """严格校验当前 workspace 的候选，按最后活动时间选最近可恢复会话。"""
-    candidates = discover_session_files(cwd, sessions_root=sessions_root)
-    if not candidates:
+    summaries = list_session_summaries(cwd, sessions_root=sessions_root)
+    if not summaries:
         workspace = _resolved_workspace(cwd, require_directory=False)
         raise SessionError(f"no session found for cwd: {workspace}")
 
-    latest: tuple[datetime, Path] | None = None
-    tied = False
+    latest = summaries[0]
+    if len(summaries) > 1 and summaries[1].activity_time == latest.activity_time:
+        raise SessionError("multiple sessions share the latest activity time; use --resume")
+    return latest.path
+
+
+def list_session_summaries(
+    cwd: str | Path, *, sessions_root: str | Path | None = None
+) -> list[SessionSummary]:
+    """严格加载当前 workspace 的所有 Session，并按活动时间从新到旧返回。"""
+    summaries: list[SessionSummary] = []
+    candidates = discover_session_files(cwd, sessions_root=sessions_root)
     for path in candidates:
         try:
             session = JsonlSession.load(path, expected_cwd=cwd)
-            session.replay()
+            replay = session.replay()
         except SessionError as exc:
             # 候选损坏不能被静默跳过，否则可能恢复到旧任务并继续写入错误历史。
             raise SessionError(f"invalid session candidate {path}: {exc}") from exc
@@ -413,12 +435,22 @@ def latest_session_path(
         activity_time = (
             session.entries[-1].timestamp if session.entries else session.header.timestamp
         )
-        if latest is None or activity_time > latest[0]:
-            latest = (activity_time, path)
-            tied = False
-        elif activity_time == latest[0]:
-            tied = True
-    assert latest is not None
-    if tied:
-        raise SessionError("multiple sessions share the latest activity time; use --resume")
-    return latest[1]
+        summaries.append(
+            SessionSummary(
+                id=session.header.id,
+                path=session.path,
+                activity_time=activity_time,
+                provider=replay.provider,
+                model=replay.model,
+                has_summary=any(
+                    isinstance(entry, CompactionEntry)
+                    for entry in session.active_entries()
+                ),
+            )
+        )
+    # 并列时间只影响 --continue 的唯一选择；列表用 id 提供稳定展示顺序。
+    return sorted(
+        summaries,
+        key=lambda item: (item.activity_time, str(item.id)),
+        reverse=True,
+    )
