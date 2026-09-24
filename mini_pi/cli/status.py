@@ -123,10 +123,17 @@ def render_context(
         + (" tokens" if latest is not None else ""),
         markup=False,
     )
-    if resolve_policy(model) is None:
+    policy = resolve_policy(model)
+    if policy is None:
         console.print("Auto-compaction: unavailable (context window unknown)", markup=False)
     else:
-        console.print("Auto-compaction: planned for M7.6", markup=False)
+        # 窗口阈值与成本触发是两条独立路径：这里只说明当前生效的配置
+        console.print(
+            f"Auto-compaction: window threshold {policy.threshold_tokens} tokens "
+            f"(window {policy.context_window} - reserve {policy.reserve_tokens}); "
+            "cost-aware early compaction for old tool results is enabled",
+            markup=False,
+        )
 
 
 def _summary_usage_label(usage: Usage | None) -> str:

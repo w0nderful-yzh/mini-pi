@@ -349,7 +349,7 @@ mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入
 - 交互启动显示 ASCII Banner 与标语（`mini_pi/assets/banner.txt` 原样输出），随后只列版本、模型、项目名、短会话 id 和 `/help`；终端宽度不足或非 tty 时 Banner 降为单行、启动元数据按字段分行；`--no-banner` 可关闭
 - `/help` 列出可用命令；未知 `/命令` 只提示且不会作为任务发给模型
 - `/sessions` 严格加载当前 workspace 的全部候选，按活动时间显示短 id、活动模型、摘要状态和当前标记；任何候选损坏都会整体报错，不跳过后展示不完整列表。该命令只读本地 JSONL，不调用模型；恢复仍使用 `--continue` 或 `--resume <session.jsonl>`
-- `/status` 分开显示当前投影估算与最近任务的请求数、累计 Provider 用量、工具数和耗时；Session 恢复后从完整活动链重建统计，`/status full` 才显示完整路径。`/context` 分解当前投影，并单列最近请求输入与任务累计用量；`/tools` 列出工具
+- `/status` 分开显示当前投影估算与最近任务的请求数、累计 Provider 用量、工具数和耗时；Session 恢复后从完整活动链重建统计，`/status full` 才显示完整路径。`/context` 分解当前投影，单列最近请求输入与任务累计用量，并显示当前模型的窗口压缩阈值与成本触发状态；`/tools` 列出工具
 - `/compact [instructions]` 手动压缩持久化会话：只在安全切点前生成摘要检查点，摘要请求不带工具，`instructions` 仅进入本次请求；输出摘要消息数、保留 entry 数、切点边界、压缩前后当前上下文估算与摘要调用的实测 usage。原始 message entry 一条不删，失败时不改 JSONL 与内存投影；`--no-session` 明确拒绝，不隐式建 JSONL
 - 同一套判定也会自动运行：M7.6b 起每次 `run()` 提交新 user 消息前按窗口策略（当前投影估算 > `context_window - reserve`）检查，需要时先压缩再追加这一条消息；M7.6c 起每个完整工具批次提交后、下一次请求前也用同一判定检查，压缩成功后同一次任务继续，已执行的工具不重放。窗口未知的模型不启用自动压缩，未超阈值不产生任何写入。M7.6d 起自动压缩失败（无安全切点、摘要或写盘失败、压缩后仍超阈值）以 agent error 结束这次任务：不追加假 assistant、不改投影、不再发出越界的下一次请求；已提交的消息与工具结果保留，一次性 CLI 调用返回非零码。M7.6f 起工具轮之间还有第二个触发：窗口内但旧工具结果占被摘要区域一半以上、且按 3 次后续请求算得摘要成本小于预计节省时提前压缩（旧输出按 2000 字符截断进入摘要请求，因此摘要成本与日志长度无关）；每次任务最多尝试一次，摘要阶段失败只放弃这次优化、不终止任务，写盘或重建失败仍以 agent error 终止；仅离线估算验证过收益（[记录](docs/benchmarks/m7-6f-cost-aware-compaction.md)），没有真实计费结论
 - 流式打印模型正文，默认工具事件根据已知命令形态显示操作标题、真实退出码、超时/截断与简短 stderr；未知或含凭据的 shell 命令采用保守标题，不推断任务成败。`--verbose` 展示参数及 Tool 层已截断日志并脱敏已知凭据。任务结束只打印一行请求、用量覆盖率、工具数和耗时；缺失 usage 明确标为不可用或部分实测。耗时在恢复后是 JSONL 消息时间的近似跨度
@@ -390,7 +390,7 @@ uv run pytest -m integration        # 需要 API Key
 | M4 | 文件 / Shell Tool：Workspace、read/write/edit/search/bash/git_diff | 已完成 |
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
-| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 进行中（M7.1-M7.4、M7.C1-C8、M7.5、M7.6、M7.D1-D2 已完成；下一项 M7.7 回归与总验收） |
+| M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

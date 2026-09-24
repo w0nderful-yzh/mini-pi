@@ -38,7 +38,8 @@ def test_status_context_and_tools_after_run(
     assert f"Session: {str(session.header.id)[:8]}" in result.output
     assert f"Session path: {path}" in result.output
     assert "Total (estimated):" in result.output
-    assert "Auto-compaction: planned for M7.6" in result.output
+    assert "Auto-compaction: window threshold" in result.output
+    assert "cost-aware early compaction" in result.output
     assert "read:" in result.output
     assert [item.content for item in session.replay().messages if isinstance(item, UserMessage)] == ["task"]
     assert len(llm.calls) == 1

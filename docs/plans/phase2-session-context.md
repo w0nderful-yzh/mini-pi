@@ -1,6 +1,6 @@
 # Phase 2：Session、Context 与 CLI 成本控制
 
-> 状态：实施中。M7.1–M7.4、M7.C1–C8、M7.5、M7.6、M7.D1–D2 已完成；下一任务是 **M7.7：回归、真实验收与文档同步**。本文件先列待开发任务，已完成交付放在末尾。
+> 状态：**已完成**。M7.1–M7.7 全部交付并通过离线回归、真实 Provider 与人工 CLI 验收；下一阶段准入（M8 LSP / MCP）已满足。已完成交付的摘要与提交号见文末，历史细节由 Git 与测试保存。
 
 **目标：** 在已有 Coding Agent 闭环上，控制单次任务的重复探索和累计模型输入，完成安全的手动/自动上下文压缩，并让终端清楚展示进度、失败和真实用量。只支持 OpenAI、DeepSeek；不引入 Agent 框架、额外规划模型或并行工具执行。
 
@@ -10,7 +10,7 @@
 
 ## 1. 当前基线与优先级
 
-M7.1–M7.6 已交付 JSONL Session、项目 `AGENTS.md`、严格恢复、Context 投影、任务预算及手动/自动 compaction；M7.C1–C8、M7.D1–D2 已交付 thinking 状态图、语义化工具事件、用量展示、`/status` `/context` `/tools` `/sessions`、紧凑启动页以及多行输入与 Ctrl+C 取消语义。**尚未交付**：M7.7 回归与总验收。
+M7.1–M7.6 已交付 JSONL Session、项目 `AGENTS.md`、严格恢复、Context 投影、任务预算及手动/自动 compaction；M7.C1–C8、M7.D1–D2 已交付 thinking 状态图、语义化工具事件、用量展示、`/status` `/context` `/tools` `/sessions`、紧凑启动页以及多行输入与 Ctrl+C 取消语义；M7.7 已交付离线回归、真实 Provider 压缩后续跑、人工 CLI 闭环与文档收尾。**M7 已按完成标准验收通过**，无待交付项。
 
 ### 1.1 真实成本样本
 
@@ -108,18 +108,25 @@ CLI → AgentSession → Agent → run_loop → (LLM, ToolRegistry) → Tool →
 
 ### M7.7：回归、真实验收与文档同步
 
-- [ ] **M7.7a 离线回归：** 全量 `uv run pytest -q`、compileall、`git diff --check`；验证 `--no-session`、append-only、tool pair、预算停止与 compaction 不变量。
-- [ ] **M7.7b 真实模型：** 至少一个已配置 Provider 验证长任务压缩后续跑；缺 Key 时 integration skip，不输出凭据，未测 Provider 明确标注。
-- [ ] **M7.7c 人工 CLI：** create → 工具调用 → exit → resume → `/compact` → continue → `/new`，加 `/status`、`/context`、`/sessions`、预算提示、语义化工具事件、窄屏/非 tty、输入历史与 Ctrl+C；只保存脱敏结果。
-- [ ] **M7.7d 文档收尾：** README 路线图、CLI `--help`、AGENTS.md 与实现一致；已完成任务只保留交付物、验收、提交号摘要。
+- [x] **M7.7a 离线回归：** 全量 `uv run pytest -q`、compileall、`git diff --check`；验证 `--no-session`、append-only、tool pair、预算停止与 compaction 不变量。
+- [x] **M7.7b 真实模型：** 至少一个已配置 Provider 验证长任务压缩后续跑；缺 Key 时 integration skip，不输出凭据，未测 Provider 明确标注。
+- [x] **M7.7c 人工 CLI：** create → 工具调用 → exit → resume → `/compact` → continue → `/new`，加 `/status`、`/context`、`/sessions`、预算提示、语义化工具事件、窄屏/非 tty、输入历史与 Ctrl+C；只保存脱敏结果。
+- [x] **M7.7d 文档收尾：** README 路线图、CLI `--help`、AGENTS.md 与实现一致；已完成任务只保留交付物、验收、提交号摘要。
 
-M7 完成标准：会话可恢复；项目规则生效；单任务累计成本与当前上下文不混淆，预算可控且中断可续；compaction 保留原始历史、安全配对与修改事实；默认 CLI 清晰展示真实进度和失败。
+验收结果（2026-09-24）：
+
+- M7.7a：全量 538 passed, 5 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`compileall mini_pi tests docs` 通过；`git diff --check` 通过；不变量专项 `--no-session` 7 passed、append-only（`test_session_jsonl` + `test_replay`）20 passed、tool pair 25 passed、预算停止 10 passed、compaction 17 passed。
+- M7.7b：DeepSeek 冒烟通过、OpenAI 无 Key 明确 skip；新增 `tests/test_integration_compaction.py` 2 passed，真实压缩后投影 25,560 → 767 字符口径 tokens、`AgentSession.resume` 一致并继续真实请求；[脱敏记录](../benchmarks/m7-7b-real-compaction.md)。
+- M7.7c：真实 pty 驱动器 5 个阶段全部通过（create/工具/resume/`/compact`/`/new`、`/status` `/context` `/sessions`、budget_limit、40×24 窄屏降级、输入历史、连续 Ctrl+C、非 tty 回退）；[脱敏记录](../benchmarks/m7-7c-cli-acceptance.md)。
+- M7.7d：README 路线图标记 M7 已完成；`--help` 选项与 REPL `/help` 和实现一致；修正 `/context` 中过期的 `Auto-compaction: planned for M7.6`，改为显示实际窗口阈值与成本触发状态；AGENTS.md 与本文件状态同步。
+
+M7 完成标准：会话可恢复；项目规则生效；单任务累计成本与当前上下文不混淆，预算可控且中断可续；compaction 保留原始历史、安全配对与修改事实；默认 CLI 清晰展示真实进度和失败。以上标准已由离线回归、真实 Provider 与人工 CLI 记录逐条覆盖。
 
 ---
 
 ## 5. M8–M10 准入条件
 
-- **M8 LSP / MCP：** M7 验收完成后，LSP 先实现只读 definition/references/symbols/diagnostics，MCP 先做 stdio client；动态工具变更经 prompt section diff 持久化，resume 可重建同一工具集。Adapter 仍经 ToolRegistry 和 Workspace，服务崩溃应转可预期 ToolError。不开发 MCP server、OAuth 或远程 transport。
+- **M8 LSP / MCP：** M7 已验收完成（2026-09-24），准入已满足。LSP 先实现只读 definition/references/symbols/diagnostics，MCP 先做 stdio client；动态工具变更经 prompt section diff 持久化，resume 可重建同一工具集。Adapter 仍经 ToolRegistry 和 Workspace，服务崩溃应转可预期 ToolError。不开发 MCP server、OAuth 或远程 transport。
 - **M9 Task / Memory：** 出现真实跨 Session 工作流后，Task 先记录目标、状态、验收及关联 Session；Memory 仅从已完成工作提炼带来源、可核对的事实，默认人工确认后写入。按项目和明确 key 检索，不把 transcript 摘要当事实，不引入 RAG/Vector DB。
 - **M10 Multi-Agent：** 单 Agent 的成本、Session、Context 和工具权限稳定后，且有需要隔离上下文的并行任务；子 Agent 独立状态与 Session，父子只交换结构化任务/结果。写入先隔离 workspace/worktree，再用一个 worker 和 reviewer 的确定场景验证，不提前建通用调度器。
 
@@ -153,10 +160,11 @@ M7 完成标准：会话可恢复；项目规则生效；单任务累计成本�
 | M7.6f | 旧工具结果的成本感知提前压缩：新增 `mini_pi/context/cost.py` 纯函数成本模型（区域规模、摘要请求 input、摘要体积、每次请求净节省、盈亏平衡请求数、净收益），在工具轮之间的钩子里作为**独立于窗口阈值**的第二触发；生效条件全部满足才压缩——位置在工具轮后、`ToolMessage` 占被摘要区域 ≥ 50%、摘要不比区域大、按 `ASSUMED_REMAINING_REQUESTS=3` 次后续请求净收益为正、有安全切点且窗口已知（沿用 M7.4g 边界）；摘要体积首次按 `ASSUMED_SUMMARY_TOKENS=2000` 上界估计、重复压缩用上次实测；每次 run 最多尝试一次；**摘要阶段失败**（LLMError/CompactionError，尚未写盘）只放弃优化、run 继续，**写盘或重建失败**（SessionError/OSError）与窗口触发一样转 agent error 终止，避免投影与 JSONL 分叉；不新增 `ToolResult.raw/summary` 双写，当前工具轮 observation 原样，旧历史只在安全切点后进入摘要 | `tests/context/test_tool_result_lifecycle.py` 6 passed（长 pytest/git diff/search 样本的关键事实与截断标记、计划分区与 modifiedFiles、摘要输入只含区域、成本模型正负两侧、输入校验）、`tests/session/test_cost_aware_compaction.py` 7 passed（旧工具结果主导时触发且旧输出不再重发、对话主导/历史过短/窗口未知不触发、摘要失败不终止 run 且不再重试、写盘失败终止且无分叉、离线前后成本记录）；去掉 share 下限或每次 run 一次的守卫会打挂对应用例；离线记录 4→5 次请求、累计输入估算 91,062→66,960（[记录](../benchmarks/m7-6f-cost-aware-compaction.md)，非 Provider 实测）；全量 508 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`c0fd3a7` |
 | M7.D1 | `/sessions` 严格加载当前 workspace 全部候选，按活动时间展示短 id、活动模型、摘要状态与当前标记，不请求 LLM；`--continue` 复用同一元数据投影并保留并列失败；启动页保留 Banner/思考状态，只显示版本、模型、项目、短 id 与 `/help`，窄屏/非 tty 分行降级，交互完整路径仅由 `/status full` 展示 | 新增专项 9 passed；会话/启动/恢复聚焦 58 passed；全量 517 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`57dd5a2` |
 | M7.D2 | 新增 `mini_pi/cli/input.py` 输入层：tty 上用 `prompt_toolkit`（`~/.mini-pi/history` 目录 0700/文件 0600、Enter 提交、Ctrl+J/Alt+Enter 换行、`/` 命令补全、Ctrl+L 清屏），stdin/stdout 非 tty 或库缺失/不可写时回退内建单行 `input()`；输入在提交前不接触 Session。取消语义下沉到 Loop：流式轮中断不补假 assistant，工具轮为被中断及未执行的调用补 cancelled observation 保持 call/result 配对，`run_loop` 以 `agent_end(reason="cancelled")` 结束并返回 `stop_reason="cancelled"`；`process.py` 在 KeyboardInterrupt 时整组杀掉独立进程组再冒泡；CLI 用连续两次 Ctrl+C 退出（取消任务后的下一次空闲 Ctrl+C 直接退出），一次性调用返回 130。重复 Ctrl+C 不伪装成 `completed`，已提交消息/工具结果/文件改动保留 | 新增 21 passed（输入层回退与历史权限、补全/键位契约、REPL 取消与多行单条 user 消息、Loop 配对与 prepare_next_turn 中断、进程组中断清理）；tty 人工记录 [m7-d2-tty-input-cancel](../benchmarks/m7-d2-tty-input-cancel.md)；全量 538 passed, 3 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；`10b9aff` |
+| M7.7 | 离线回归、真实 Provider 与会话压缩验收、真实 pty 人工 CLI 闭环、文档收尾；新增 `tests/test_integration_compaction.py` 真实压缩用例，新增两个可复现的 tty 驱动器与脱敏记录，修正 `/context` 中过期的 `Auto-compaction: planned for M7.6` | 全量 538 passed, 5 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；不变量专项 `--no-session` 7、append-only 20、tool pair 25、预算 10、compaction 17；真实 DeepSeek 冒烟 1 passed / OpenAI skip，真实压缩用例 2 passed（投影 25,560 → 767 字符口径 tokens、resume 一致并继续真实请求，[记录](../benchmarks/m7-7b-real-compaction.md)）；人工 CLI 5 阶段通过（[记录](../benchmarks/m7-7c-cli-acceptance.md)）；本提交 |
 
 ### 实施与审查规则
 
 1. 每个新编号是一批可审查的最小行为；不提前创建后续编号的接口或占位实现。代码、必要测试、README 与本计划状态在**同一提交**；中文 `feat/fix/docs` 消息。
 2. 每批运行针对性测试、全量离线测试和 `git diff --check`，再更新状态；真实模型测试只有执行过才能记“通过”。文件测试用 `tmp_path`，默认测试不联网。
 3. 若设计改变 Session/Context/CLI 边界，同步 README 第 2 节与 AGENTS.md。发现文档与代码不一致，先修文档再继续实现。
-4. 下一批只做 **M7.7**：先跑离线回归与真实/人工验收，再同步 README、`--help` 与本文件状态。
+4. M7 已收尾；下一阶段从 **M8 LSP / MCP** 的只读能力开始，准入条件见第 5 节。

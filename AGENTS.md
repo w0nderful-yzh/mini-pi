@@ -774,6 +774,8 @@ M9 Task / Memory
 M10 Multi-Agent
 ```
 
+M1-M7 已完成；M7（Session / Context 与 CLI）于 2026-09-24 通过离线回归、真实 Provider 与人工 CLI 验收，M8 准入条件见 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md) 第 5 节。路线图状态表以 `README.md` 第 8 节为准。
+
 不要跨阶段同时开太多功能。
 
 每个里程碑的详细任务拆解见 `docs/plans/phase1-core-runtime.md`。
