@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -46,15 +47,17 @@ def test_missing_api_key_exits_with_error(
 
 
 def test_help_lists_options() -> None:
-    """帮助信息包含主要选项。"""
-    result = runner.invoke(app, ["--help"])
+    """帮助信息在彩色终端中仍包含主要选项。"""
+    result = runner.invoke(app, ["--help"], env={"FORCE_COLOR": "1", "NO_COLOR": None})
     assert result.exit_code == 0
-    assert "--provider" in result.output
-    assert "--max-steps" in result.output
-    assert "--no-session" in result.output
-    assert "--resume" in result.output
-    assert "--continue" in result.output
-    assert "--verbose" in result.output
+    # Rich 会在选项名的两个连字符之间插入 ANSI 样式码，先去色再校验文字。
+    help_text = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "--provider" in help_text
+    assert "--max-steps" in help_text
+    assert "--no-session" in help_text
+    assert "--resume" in help_text
+    assert "--continue" in help_text
+    assert "--verbose" in help_text
 
 
 def test_missing_api_key_raises_minipi_error(monkeypatch: pytest.MonkeyPatch) -> None:
