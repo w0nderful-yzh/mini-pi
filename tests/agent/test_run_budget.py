@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from mini_pi.agent.events import AgentEvent, AgentEndEvent, BudgetWarningEvent
+from mini_pi.agent.events import AgentEndEvent, AgentEvent, BudgetWarningEvent
 from mini_pi.agent.loop import run_loop
 from mini_pi.agent.state import AgentState
 from mini_pi.context.tokens import estimate_tokens

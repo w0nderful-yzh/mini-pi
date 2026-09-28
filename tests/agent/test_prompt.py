@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from mini_pi.agent.prompt import build_sections, build_system_prompt, render_sections
 from mini_pi.agent.agent import Agent
+from mini_pi.agent.prompt import build_sections, build_system_prompt, render_sections
 from mini_pi.llm.openai_client import to_openai_messages
 from mini_pi.llm.types import ToolSchema
 from mini_pi.tools.registry import ToolRegistry

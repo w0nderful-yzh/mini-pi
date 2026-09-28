@@ -136,7 +136,7 @@ def test_split_turn_keeps_pending_tool_round_out_of_summary() -> None:
     """切点落在 assistant 上时工具轮整体保留，摘要输入保留该轮请求作为上下文。"""
     path: list[SessionEntry] = []
     append_message(path, SystemMessage(sections={"preamble": "p"}))
-    user1 = append_message(path, UserMessage(content="a" * 1000))
+    append_message(path, UserMessage(content="a" * 1000))
     call = append_message(
         path,
         AssistantMessage(

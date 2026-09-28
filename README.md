@@ -146,6 +146,7 @@ Rich
 prompt_toolkit（CLI 行编辑；非 tty 或缺失时回退内建 input）
 ripgrep-bin（search 工具内置 rg）
 pytest
+ruff（静态检查；CI 使用 Python 3.12）
 ```
 
 支持平台：macOS / Linux（依赖 POSIX 进程组与文件权限语义）；Windows 未支持。
@@ -154,7 +155,6 @@ pytest
 
 ```text
 LSP / MCP
-静态检查（ruff）与 CI
 asyncio / 并行工具执行
 ```
 
@@ -403,7 +403,7 @@ uv run pytest -m integration        # 需要 API Key
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
-| M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 进行中（M7.8.0 完成；下一项 M7.8.5 CI 与静态检查） |
+| M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 进行中（M7.8.0、M7.8.5 完成；下一项 M7.8.1 RequestSnapshot） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

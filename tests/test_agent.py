@@ -7,7 +7,7 @@ import pytest
 from mini_pi.agent.agent import Agent
 from mini_pi.agent.prompt import build_system_prompt
 from mini_pi.llm.openai_client import to_openai_messages
-from mini_pi.llm.types import AssistantMessage, SystemMessage, UserMessage
+from mini_pi.llm.types import SystemMessage, UserMessage
 from mini_pi.tools.registry import ToolRegistry
 from tests.conftest import EchoTool, FakeLLMClient, assistant
 

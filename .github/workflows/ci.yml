@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          python-version: "3.12"
+      - name: Sync dependencies
+        run: uv sync --locked
+      - name: Test
+        run: env -u NO_COLOR TERM=xterm-256color uv run pytest
+      - name: Lint
+        run: uv run ruff check .
+      - name: Compile
+        run: uv run python -m compileall -q mini_pi

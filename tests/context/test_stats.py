@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from mini_pi.context.stats import context_stats
 from mini_pi.context.tokens import estimate_message_tokens
-from mini_pi.llm.types import AssistantMessage, SectionPatch, SystemMessage, ToolMessage, UserMessage
+from mini_pi.llm.types import (
+    AssistantMessage,
+    SectionPatch,
+    SystemMessage,
+    ToolMessage,
+    UserMessage,
+)
 
 
 def test_stats_replay_current_system_and_separate_summary() -> None:

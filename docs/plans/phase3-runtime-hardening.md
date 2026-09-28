@@ -1,6 +1,6 @@
 # Phase 3：Runtime Hardening 与外部能力（M7.8 / M8 / M9 / M10）
 
-> 状态：**M7.8.0 已完成，M7.8.5 为下一项**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
+> 状态：**M7.8.0、M7.8.5 已完成，M7.8.1 为下一项**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
 
 **目标：** 在接入 LSP / MCP 之前，先把「上下文有多少、预算怎么算、钩子挂在哪、改动怎么被守护」四件事定下来；之后按 LSP → MCP → 动态工具集 → 工具集恢复 → 基准的顺序扩展外部能力。
 
@@ -10,7 +10,7 @@
 
 ## 1. 评审核对：采纳、修正与推迟
 
-核对方式是逐条在仓库里定位证据，避免把评审的示意数字当成结论。
+以下证据针对规划时的 `58b0bb9` 基线；已交付项的当前状态以第 8 节为准。核对方式是逐条在仓库里定位证据，避免把评审的示意数字当成结论。
 
 ### 1.1 核对属实，采纳
 
@@ -78,19 +78,11 @@
 
 ### M7.8.0 前置小修
 
-**交付物与验收（本提交）：** `read` 对空文件返回 `[File is empty.]`，包括显式 `offset`；非空文件越界仍报 `ToolError`。`tests/test_read.py` 10 passed；全量离线回归 544 passed、5 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；README 的无沙箱 shell、macOS/Linux 与估算口径，及 `AGENTS.md` §9 边界说明已复核。
+**交付物与验收（`0e5848e`）：** `read` 对空文件返回 `[File is empty.]`，包括显式 `offset`；非空文件越界仍报 `ToolError`。`tests/test_read.py` 10 passed；全量离线回归 544 passed、5 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；README 的无沙箱 shell、macOS/Linux 与估算口径，及 `AGENTS.md` §9 边界说明已复核。
 
 ### M7.8.5 CI 与静态检查
 
-**改动：**
-
-- 新增 `.github/workflows/ci.yml`，在 macOS/Linux 支持范围内至少固定一套 Linux Python 3.12 环境，步骤：`uv sync --locked` → `uv run pytest` → `uv run ruff check .` → `uv run python -m compileall -q mini_pi`。`git diff --check` 仍作为本地提交前检查；CI 若检查提交差异，必须显式取得 base/head，不能在干净 checkout 上运行空的 `git diff --check` 假装守护。
-- `pyproject.toml`：dev 组加 `ruff`，提交最小 `[tool.ruff]` 配置（`target-version = "py312"`，行宽与现有风格一致）。
-- 首次接入会有存量告警：通过**选定能一次清零的规则集**处理，禁止 `# noqa` 批量掩盖；清理纳入本子项提交。
-
-**不做：** 不上 mypy（当前没有类型化基线，成本高于收益），不做自动发布。
-
-**验收：** 本地 `uv run ruff check .` 干净；CI 步骤在本地逐条复现结果一致；离线测试保持全绿。
+**交付物与验收（本提交）：** 新增 Linux/Python 3.12 GitHub Actions：`uv sync --locked`、离线 pytest、Ruff、编译检查；`uv.lock` 锁定 Ruff 0.16.9，启用 `E4/E7/E9/F/I`，清理对应存量导入与未使用变量，无批量 `noqa`。本地逐项复现通过：544 passed、5 deselected；Ruff 与编译检查通过，`git diff --check` 通过。GitHub 远端运行状态待推送后验证。
 
 ### M7.8.1 RequestSnapshot
 
@@ -270,8 +262,8 @@ RAG / Vector DB             通用 Agent Scheduler
 
 | 里程碑 | 内容 | 状态 |
 | --- | --- | --- |
-| M7.8.0 | 前置小修：`read` 空文件、`bash` 无沙箱与平台说明 | 已完成（本提交；10 passed，全量 544 passed、5 deselected） |
-| M7.8.5 | CI 与 ruff 静态检查 | 未开始 |
+| M7.8.0 | 前置小修：`read` 空文件、`bash` 无沙箱与平台说明 | 已完成（`0e5848e`；10 passed，全量 544 passed、5 deselected） |
+| M7.8.5 | CI 与 ruff 静态检查 | 已完成（本提交；本地 544 passed、5 deselected；远端待运行） |
 | M7.8.1 | RequestSnapshot 统一请求口径 | 未开始 |
 | M7.8.2 | Token 估算升级（CJK 安全 + 工具 schema + 实测校准） | 未开始 |
 | M7.8.3 | Context Window 配置化（`--context-window`） | 未开始 |

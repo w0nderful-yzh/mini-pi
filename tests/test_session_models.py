@@ -11,7 +11,6 @@ from pydantic import TypeAdapter, ValidationError
 from mini_pi.llm.types import SystemMessage, Usage, UserMessage
 from mini_pi.session.models import CompactionEntry, MessageEntry, SessionEntry, SessionHeader
 
-
 ENTRY_ADAPTER = TypeAdapter(SessionEntry)
 
 
