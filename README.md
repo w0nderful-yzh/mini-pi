@@ -405,7 +405,7 @@ uv run pytest -m integration        # 需要 API Key
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
 | M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；[远端 CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 已通过） |
-| M7.9 | 完成语义、工作区状态与真实任务基线 | 未开始 |
+| M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 未开始 |
 | M8 | 长任务交互、只读 LSP、按需 MCP、活动工具集与恢复 | 未开始；每项以真实任务收益或明确服务需求为准 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
@@ -421,7 +421,7 @@ M7 Session / Context（已完成）
   ↓
 M7.8 Runtime Hardening（已完成）
   ↓
-M7.9 完成语义与真实任务基线
+M7.9 完成语义、真实任务基线与 CLI 视觉整理
   ↓
 M8 长任务交互 / LSP / 按需 MCP
   ↓
