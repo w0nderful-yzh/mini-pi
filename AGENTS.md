@@ -1,57 +1,88 @@
 # AGENTS.md
 
-本文件只列 mini-pi 开发时必须遵守的约束。当前状态、下一步任务与验收标准看 [Phase 3 计划](docs/plans/phase3-runtime-hardening.md)；已交付能力和使用限制看 [README](README.md)。不要把旧里程碑的实现过程复制回本文件。
+Constraints for AI coding agents working on `mini-pi`. Current status, next tasks and
+acceptance criteria live in the [Phase 3 plan](docs/plans/phase3-runtime-hardening.md);
+delivered capabilities and usage limits live in the [README](README.md). Do not copy
+milestone history or delivery logs into this file.
 
-## 项目边界
+## Project boundaries
 
-- 目标是用 Python 自行实现轻量 Coding Agent Harness：模型根据工具 observation 自主决定下一步，不把任务写死为 `read → edit → test`。
-- 使用 Python 3.12+、uv、Pydantic v2、pytest、同步 openai SDK、Typer、Rich、prompt_toolkit 和 ripgrep-bin；仅支持 OpenAI 与 DeepSeek 的 OpenAI-Compatible API。
-- 不引入 LangGraph、AutoGen、CrewAI、Dify、Coze 等 Agent 框架；不为未来功能提前引入通用插件框架、数据库、RAG、向量库或并行工具执行。
-- 现阶段支持 macOS/Linux。需要 Windows、其他 Provider、MCP server、远程 transport、通用多 Agent 调度时，先有明确需求和独立设计。
+- Build a lightweight coding-agent harness in Python: the model decides the next step from tool observations. Never hard-code a `read → edit → test` flow.
+- Stack: Python 3.12+, uv, Pydantic v2, pytest, sync OpenAI SDK, Typer, Rich, prompt_toolkit, ripgrep-bin. Providers: the OpenAI and DeepSeek OpenAI-compatible APIs only.
+- No agent frameworks (LangGraph, AutoGen, CrewAI, Dify, Coze). Do not pull in a plugin framework, database, RAG, vector store, or parallel tool execution ahead of a real need.
+- macOS/Linux only. Windows, other providers, MCP servers, remote transports and general multi-agent scheduling require an explicit request and a separate design.
 
-## 架构与事实边界
+## Architecture and facts
 
 `CLI → AgentSession → Agent → run_loop → (LLM, ToolRegistry) → Tool → Workspace`
 
-- CLI 负责输入、参数和 AgentEvent 渲染，不决定工具、不直接调 Tool，也不把 UI 图案、spinner、用量文案或 Session 路径写入模型消息。
-- Agent 持有 `AgentState` 并调用 Loop；不直接读写文件或执行 Shell。Loop 控制 LLM/Tool 循环，不读 stdin、不渲染、不依赖 JSONL。
-- Session 负责装配、完整消息持久化与恢复；Context 负责项目规则、当前请求预测和压缩投影。LLM 层只处理 Provider 协议；Tool 经 Registry 调度，文件操作一律经 Workspace。
-- 完整 system/user/assistant/tool 消息先由 `on_message_commit` 写盘，再进入内存；写盘失败直接停止。JSONL 原始记录不因展示或压缩被改写，tool call/result 必须配对。
-- `RunContext` 只保存单次 `run()` 的临时状态。`prepare_next_turn` 仅在完整工具批次提交并结束 turn 后调用，可返回下一请求的替换投影；任务预算仍由 Loop 计算。不随意增加 Loop 分支或新钩子体系。
+- CLI handles input, arguments and AgentEvent rendering. It never selects tools, calls tools directly, or writes UI art, spinners, usage text or session paths into model messages.
+- Agent owns `AgentState` and calls the loop; it never reads or writes files or runs shell commands. The loop drives LLM/tool iterations and never reads stdin, renders output or depends on JSONL.
+- Session assembles the runtime and persists/restores complete messages; Context owns project rules, the next-request prediction and the compaction projection. The LLM layer speaks provider protocols only; tools are dispatched through the registry and every file operation goes through Workspace.
+- Complete system/user/assistant/tool messages are written to disk through `on_message_commit` before entering memory, and a failed write stops the run. JSONL records are never rewritten for display or compaction, and tool calls/results always stay paired.
+- `RunContext` holds per-`run()` state only. `prepare_next_turn` runs after a complete tool batch and turn end and may return a replacement projection for the next request; the loop still computes the task budget. Do not add loop branches or new hook systems casually.
 
-## Loop、错误与取消
+## Loop, errors, cancellation
 
-- 终止原因是 `completed / step_limit / budget_limit / error / cancelled`；CLI 与一次性进程退出语义必须如实反映，不能把未完成或取消当成功。
-- 预期的 `ToolError` 转为 `is_error` ToolMessage；LLM 预期错误编码为 `ErrorEvent`；其他异常视为程序缺陷直接冒泡，不静默兜底或自动修正参数。
-- 模型输出 `length` 时不执行可能截断的工具调用；补错误 observation 保持配对。用户中断时不补假 assistant，已提交消息、工具结果和文件改动保留；被中断及未执行的工具调用补 cancelled observation。
-- `bash` 超时或中断必须杀掉整个进程组；非零退出码和 stderr 如实回传。默认展示有界且脱敏，`--verbose` 也不能超出工具已捕获的内容。
+- Termination reasons are `completed / step_limit / budget_limit / error / cancelled`. CLI output and one-shot exit codes must reflect them; never present unfinished or cancelled work as success.
+- Expected `ToolError` becomes an `is_error` ToolMessage; expected LLM errors become `ErrorEvent`; anything else is a program defect that bubbles up. No swallowed exceptions, silent fallbacks or auto-corrected arguments.
+- A `length` stop must not execute possibly truncated tool calls; record error observations to keep pairing. A user interrupt must not fabricate an assistant message: keep committed messages, tool results and file changes, and record cancelled observations for interrupted and unexecuted tool calls.
+- `bash` timeouts and interrupts must kill the whole process group; non-zero exit codes and stderr are reported as-is. Default display is bounded and redacted; `--verbose` must not exceed what a tool captured.
 
-## Tool、Workspace 与 Shell
+## Tools, Workspace, shell
 
-- 每个 Tool 单一职责、独立文件，参数使用 Pydantic 模型；Registry 统一做名称查找与参数校验。`ToolResult.content` 回传模型，`details` 仅供 UI；`modified_files` 只列工具确知改动的 workspace 相对路径，未知不能猜。
-- Workspace 路径先 `Path.resolve()` 再检查仍在 root 内；`../`、绝对路径及 symlink 逃逸直接报 `WorkspaceViolationError`，不改写为安全路径。写文件原子替换。
-- `edit` 对原文精确且唯一匹配；空旧文本、无匹配、多匹配、重叠或无变化均显式失败，多项替换从后向前应用。`read`、`bash` 输出保持行数/字节上限和截断提示。
-- 文件 Tool 有 Workspace 边界；`bash` 是无沙箱的本地 Shell，只固定 cwd，可访问工作区外及网络。README、CLI 和计划不得把它称为沙箱。安全边界改变需有单独设计与验证。
+- One responsibility and one file per tool, with Pydantic argument models and registry lookup/validation. `ToolResult.content` goes to the model, `details` is UI-only, and `modified_files` lists only workspace-relative paths a tool actually changed — never guess.
+- Workspace resolves a path and then verifies it is still inside the root; `../`, absolute paths and symlink escapes raise `WorkspaceViolationError`. Never rewrite a bad path into a safe one. File writes replace atomically.
+- `edit` requires exact, unique matches: empty old text, no match, multiple matches, overlapping edits and no-op replacements all fail explicitly, applied back to front. `read` and `bash` keep their line/byte caps and truncation hints.
+- File tools are bounded by Workspace; `bash` is an unsandboxed local shell with only cwd fixed, and it can reach outside the workspace and the network. Never call it a sandbox in README, CLI output or plans. Changing a security boundary needs its own design and verification.
 
-## LLM、Session 与 Context
+## LLM, Session, Context
 
-- 流式 tool call 按 index 聚合，JSON 参数显式解析；已输出事件后不重试。408/409/429、5xx 和网络错误最多重试两次；认证与普通参数错误不重试。DeepSeek 的 `reasoning_content` 回放差异只放在 DeepSeekClient。
-- API Key 只从环境变量或用户级 `~/.mini-pi/auth.json` 读取；不得写入项目、日志或 Session。真实认证文件和输入历史保持限制权限。
-- JSONL Session 严格加载，损坏候选不能被静默跳过；恢复沿活动 parent 链构建投影。Session fork 尚未实现，需求和前置见 Phase 3。
-- 每次任务前只读取 git root 到 workspace 祖先链的 `AGENTS.md`；规则变化记录 prompt section patch，不启动时扫描整个仓库。读取失败在提交用户消息前报错。
-- 下一请求的窗口和任务预算使用同一批将发送的消息及工具 schema（RequestSnapshot）。Provider `usage.input_tokens` 是历史实测；当前请求预测是估算，不能把上轮 `usage.total_tokens` 当下一轮 input 真值。工具成本必须按工具数累加（一次性模式开销 + 每工具结构开销 + schema 文本），只算固定开销会随工具变多而系统性低估。未知窗口不启用自动压缩。
-- Compaction 只在安全切点替换可恢复的模型投影，不删原始 JSONL，不拆 tool call/result，也不丢 `modified_files`。窗口触发的摘要失败及写盘失败终止本次 run；成本触发的摘要失败只放弃优化，写盘失败仍终止。不把离线成本估算说成真实节费。
+- Streaming tool calls are aggregated by index with explicit JSON parsing, and nothing is retried after the first emitted event. Retry 408/409/429, 5xx and network errors at most twice; never retry auth or ordinary argument errors. DeepSeek `reasoning_content` replay differences stay inside `DeepSeekClient`.
+- API keys come only from environment variables or the user-level `~/.mini-pi/auth.json`, and never enter the project, logs or sessions. Auth files and input history keep restrictive permissions.
+- JSONL sessions load strictly: a corrupt candidate is never silently skipped, and resume replays the active parent chain. Session fork is not implemented; requirements and prerequisites are in Phase 3.
+- A task reads `AGENTS.md` only along the git-root-to-workspace ancestor chain, records rule changes as prompt section patches, and never scans the repository at startup. Read failures are reported before the user message is committed.
+- The next request's window decision and task budget share one snapshot of the messages and tool schemas about to be sent (`RequestSnapshot`). Provider `usage.input_tokens` is historical measurement; the next-request prediction is an estimate, and last turn's `usage.total_tokens` is not this turn's input. Tool cost must accumulate per tool (one-time tool-mode overhead + per-tool framing + schema text); a fixed overhead alone under-estimates as tools grow. Unknown windows disable automatic compaction.
+- Compaction replaces only a rebuildable model projection at a safe cut point: raw JSONL is never deleted, tool call/result pairs are never split, and `modified_files` is never lost. A window-triggered summary or write failure ends the run; a cost-triggered summary failure only drops the optimization, while a write failure still ends it. Never present offline cost estimates as real savings.
 
-## 编码与验证
+## Coding and verification
 
-- 完整类型标注，职责明确，优先小函数与组合；无真实需求不引入 Manager、Factory、Adapter 等抽象。
-- 每个方法/函数（含私有函数、property、`__init__`）写一行中文 docstring；模块级和公共类写一行中文说明。非直觉的协议、重试、截断及安全边界用中文注释解释原因；关键测试断言和特殊场景同样说明原因，不留废话或死代码。
-- 默认 pytest 不联网；Agent/Loop 用 FakeLLM，文件用 `tmp_path`。真实 API 用 `@pytest.mark.integration`；`tests/integration/` 是不加 marker 的离线端到端测试。
-- 代码变更做针对性测试，再运行 `uv run pytest`、`uv run ruff check .`、`uv run python -m compileall -q mini_pi` 和 `git diff --check`；真实 Provider 或人工 CLI 只记录实际执行的结果。
+- Full type annotations, clear responsibilities, small functions, composition. No Manager/Factory/Adapter abstractions without a real need.
+- Give every function, method and property (including private ones and `__init__`) a one-line Chinese docstring, and every module and public class a one-line Chinese summary. Non-obvious protocol, retry, truncation and safety-boundary logic needs an inline comment explaining why. No filler comments and no dead commented-out code.
+- Default pytest runs offline: Agent/Loop tests use a fake LLM and file tests use `tmp_path`. Real API tests carry `@pytest.mark.integration`; `tests/integration/` is offline end-to-end and marker-free.
+- After a code change, run the focused tests and then `uv run pytest`, `uv run ruff check .`, `uv run python -m compileall -q mini_pi` and `git diff --check`. Record real-provider or manual CLI results only when they actually ran.
 
-## 文档与提交
+## Documentation policy
 
-- README 第 8 节是里程碑状态表，Phase 3 计划记录下一步任务和验收；已完成事项保留交付物、验证与提交号，不在 AGENTS.md 维护历史流水账。
-- 同一任务的代码、测试、README 与计划状态放在同一个提交；提交消息格式 `<type>: <中文说明>`，type 仅用 `feat`、`fix`、`docs`。未验证不得写“通过”。
-- 修改 Agent Core、Session、Context 的设计前，读 [Pi 生产架构参考](docs/design/pi-production-architecture.md)对应章节并核对 README 第 2 节；发现文档与代码不一致，先修文档再继续。
-- 历史交付与当前路线分别见 [Phase 1](docs/plans/phase1-core-runtime.md)、[Phase 2](docs/plans/phase2-session-context.md)、[Phase 3](docs/plans/phase3-runtime-hardening.md)。用户提出的明确需求优先于本文的一般开发顺序。
+Do not create or update documentation for routine code changes.
+
+Only update persistent documentation when:
+
+- architecture changes;
+- public interfaces change;
+- an important design decision is made;
+- benchmark results establish a new baseline.
+
+Do not create per-task implementation reports, completion reports, acceptance reports or
+progress logs unless explicitly requested. Benchmark details stay under `docs/benchmarks/`
+and are not loaded during normal development unless relevant to the current task. Prefer
+updating an existing summary document over creating a new one. Documentation is not a
+substitute for code, tests or git history, and must not restate what the code trivially
+shows.
+
+README section 8 is the milestone status table, and the Phase 3 plan holds the next tasks
+and acceptance criteria; keep those two current when a milestone lands instead of writing a
+delivery log. Read the
+[Pi production architecture reference](docs/design/pi-production-architecture.md) and
+README section 2 before changing Agent Core, Session or Context design, and keep them in
+sync when a design decision changes.
+
+## Commits
+
+- Message format `<type>: <Chinese summary>`, with `type` limited to `feat`, `fix` or `docs`.
+- Keep code and any documentation the policy above requires in the same commit.
+- Never claim tests passed without running them.
+- Historical deliveries and the current route: [Phase 1](docs/plans/phase1-core-runtime.md),
+  [Phase 2](docs/plans/phase2-session-context.md),
+  [Phase 3](docs/plans/phase3-runtime-hardening.md). An explicit user request overrides the
+  general development order in this file.
