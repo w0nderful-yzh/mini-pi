@@ -76,7 +76,7 @@ mini-pi/
    - `LLMError` → LLM 层编码为 `ErrorEvent`
    - 其他异常 → 冒泡
 4. 测试命令统一 `uv run pytest <file> -v`；默认 `addopts = "-m 'not integration'"` 排除真实 API 测试。
-5. 代码必须按 AGENTS.md 第 18 节附带简要中文注释；本计划代码块为节省篇幅可能省略部分注释，落地时补齐。类型标注完整。
+5. 代码必须按 AGENTS.md「编码与验证」中的注释规范附带简要中文注释；本计划代码块为节省篇幅可能省略部分注释，落地时补齐。类型标注完整。
 6. 已完成的任务与里程碑在本文档中精简为「交付物 + 验收（含提交号）」摘要，删除完整代码块与步骤；未完成部分保留完整步骤与代码。
 6. 工具的文件操作只允许经过 `Workspace`，禁止直接 `open()` / `Path.read_text()`。
 
@@ -373,7 +373,7 @@ mini-pi/
 
 ## 计划自检
 
-**Spec coverage（对照 AGENTS.md 第 5、6、7、8、9、10、11、12、19、20、21 节）：**
+**Spec coverage（对照当前 AGENTS.md 的架构、Loop、Tool、Workspace、LLM 与验证约束）：**
 
 | 要求 | 覆盖任务 |
 | --- | --- |
@@ -397,4 +397,3 @@ mini-pi/
 - `AgentEvent` 判别字段 `type`、`reason ∈ {completed, step_limit, error}`：M2.3 定义，M3/M5 使用一致。
 - `ToolError` 子类：M1.3 定义（`errors.py`），M2.2 registry、M2.4 loop、M4.x tools 使用一致。
 - `Workspace.resolve/relative/read_text/write_text`：M4.1 定义，M4.4-M4.10、M3.3 使用一致。
-

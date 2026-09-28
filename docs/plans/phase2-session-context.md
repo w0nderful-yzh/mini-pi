@@ -1,6 +1,6 @@
 # Phase 2：Session、Context 与 CLI 成本控制
 
-> 状态：**已完成**。M7.1–M7.7 全部交付并通过离线回归、真实 Provider 与人工 CLI 验收；前置 M7.8 Runtime Hardening 也已完成，M8 LSP / MCP 准入满足。M7.8 验收见 [Phase 3 计划](phase3-runtime-hardening.md)；M7 交付摘要与提交号见文末。
+> 状态：**已完成**。M7.1–M7.7 全部交付并通过离线回归、真实 Provider 与人工 CLI 验收；M7.8 Runtime Hardening 也已完成。后续先做 M7.9 完成语义与真实任务基线，再按收益推进 M8；见 [Phase 3 计划](phase3-runtime-hardening.md)。M7 交付摘要与提交号见文末。
 
 **目标：** 在已有 Coding Agent 闭环上，控制单次任务的重复探索和累计模型输入，完成安全的手动/自动上下文压缩，并让终端清楚展示进度、失败和真实用量。只支持 OpenAI、DeepSeek；不引入 Agent 框架、额外规划模型或并行工具执行。
 
@@ -128,8 +128,8 @@ M7 完成标准：会话可恢复；项目规则生效；单任务累计成本�
 
 M8-M10 的准入条件、任务拆解与验收标准已移入 [`phase3-runtime-hardening.md`](phase3-runtime-hardening.md)。本节只保留结论与迁移说明。
 
-- **前置 M7.8 Runtime Hardening：已完成。** 请求口径（RequestSnapshot）、token 估算（CJK 安全 + 工具 schema）、窗口配置（`--context-window`）、turn 边界 `RunContext`、CI 与 ruff 均已交付；[本地最终验收](../benchmarks/m7-8-final-acceptance.md)通过，远端 CI 待推送后运行。理由与交付见 phase3 第 1、2 节。
-- **M8 LSP / MCP：** 准入已满足（M7 于 2026-09-24 验收完成）。LSP 先实现只读 definition/references/symbols/diagnostics，MCP 先做 stdio client；动态工具变更经 prompt section diff 持久化，resume 可重建同一工具集。Adapter 仍经 ToolRegistry 和 Workspace，服务崩溃应转可预期 ToolError。不开发 MCP server、OAuth 或远程 transport。
+- **M7.8 Runtime Hardening：已完成。** RequestSnapshot、token 估算、窗口策略、RunContext、CI 与 Ruff 均已交付；[本地最终验收](../benchmarks/m7-8-final-acceptance.md)通过，[远端 CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 已通过。交付记录见 Phase 3 第 5 节。
+- **M7.9 与 M8：** 先修 `step_limit` 一次性退出语义、补工作区状态观察及真实任务基线。长任务交互、只读 LSP、stdio MCP 按基线收益或明确服务需求推进；外部工具集需另有可恢复的非凭据状态，prompt section diff 不能单独重建完整 schema 和映射。细则见 Phase 3 第 1、2 节。
 - **M9 Task / Memory：** 出现真实跨 Session 工作流后，Task 先记录目标、状态、验收及关联 Session；Memory 仅从已完成工作提炼带来源、可核对的事实，默认人工确认后写入。按项目和明确 key 检索，不把 transcript 摘要当事实，不引入 RAG/Vector DB。
 - **M10 Multi-Agent：** 单 Agent 的成本、Session、Context 和工具权限稳定后，且有需要隔离上下文的并行任务；子 Agent 独立状态与 Session，父子只交换结构化任务/结果。写入先隔离 workspace/worktree，再用一个 worker 和 reviewer 的确定场景验证，不提前建通用调度器。**前置：Session 分叉/多 leaf 与经 Tool 实现的 worktree 隔离，需先排期。**
 
@@ -171,4 +171,4 @@ M8-M10 的准入条件、任务拆解与验收标准已移入 [`phase3-runtime-h
 1. 每个新编号是一批可审查的最小行为；不提前创建后续编号的接口或占位实现。代码、必要测试、README 与本计划状态在**同一提交**；中文 `feat/fix/docs` 消息。
 2. 每批运行针对性测试、全量离线测试和 `git diff --check`，再更新状态；真实模型测试只有执行过才能记“通过”。文件测试用 `tmp_path`，默认测试不联网。
 3. 若设计改变 Session/Context/CLI 边界，同步 README 第 2 节与 AGENTS.md。发现文档与代码不一致，先修文档再继续实现。
-4. M7 与 M7.8 均已收尾；下一阶段为 **M8 LSP / MCP** 只读能力，任务拆解与验收见 [`phase3-runtime-hardening.md`](phase3-runtime-hardening.md)，准入条件的结论保留在第 5 节。
+4. M7 与 M7.8 均已收尾；下一阶段从 **M7.9 完成语义与任务基线** 开始，再按收益进入 M8。任务拆解与验收见 [`phase3-runtime-hardening.md`](phase3-runtime-hardening.md)。

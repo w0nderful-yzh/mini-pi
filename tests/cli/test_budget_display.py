@@ -41,6 +41,11 @@ def test_one_shot_budget_limit_is_explicit_nonzero_and_session_is_resumable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """预算停止不显示完成态，一次性命令返回 2，完整工具结果已经落盘。"""
+    # 固定项目规则与工具输出规模，避免仓库自身 AGENTS.md 的编辑改变预算边界。
+    (tmp_path / "AGENTS.md").write_text(
+        "Workspace guidance for budget test.\n" * 1000, encoding="utf-8"
+    )
+    (tmp_path / "README.md").write_text("Read result for budget test.\n" * 200, encoding="utf-8")
     llm = FakeLLMClient(
         [
             _reply(10_000, calls=[tool_call("c1", "read", {"path": "README.md"})]),
@@ -53,7 +58,7 @@ def test_one_shot_budget_limit_is_explicit_nonzero_and_session_is_resumable(
         app,
         [
             "inspect",
-            "--cwd", str(Path.cwd()),
+            "--cwd", str(tmp_path),
             "--no-banner",
             "--max-run-input-tokens", "30000",
         ],

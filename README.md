@@ -71,7 +71,7 @@ Python Coding Agent Harness
 
 | 设计点 | pi 的做法 | mini-pi 的选择 |
 | --- | --- | --- |
-| 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 仍是单层循环，只处理 tool batch；M7 的 `prepare_next_turn` 在 M7.8.4 接收单次运行的 `RunContext` 并可返回替换投影，steering / follow-up 队列仍未实现 |
+| 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 当前是单层 tool batch 循环；`prepare_next_turn` 接收单次运行的 `RunContext` 并可替换投影。steering / follow-up 尚未实现，是否进入 M8.0 先由真实长任务基线验证 |
 | 事件驱动 | `AgentEvent` 事件流驱动 TUI/print/RPC，UI 是纯消费者 | Loop 发 `AgentEvent`，CLI 只做渲染；M7.C7 的命令标题和失败提示不进入 ToolMessage，也不改变 Agent 决策 |
 | 思考与终端展示 | thinking 事件可供 UI 展示，Provider 保留必要回放字段 | M7.C 默认只显示思考状态图标；CLI 元数据不进入消息历史，DeepSeek 的 `reasoning_content` 回放保持协议兼容 |
 | 用量与上下文 | 模型请求返回 usage，compaction 缩短后续模型投影 | M7.C6 已区分单次任务累计 Provider 用量和当前上下文估算；M7.C8 提供默认关闭、显式启用的请求边界任务预算，窗口阈值只负责压缩安全 |
@@ -84,7 +84,7 @@ Python Coding Agent Harness
 | 输出截断 | 行数 + 字节双限，附可操作续读提示 | 复刻（read / bash / search） |
 | edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 只做精确唯一匹配，fuzzy 后置 |
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
-| Shell 边界 | `bash` 是无沙箱本地 shell | 同样是无沙箱本地 shell：`bash` 只约束 `cwd`，可读写 workspace 之外、可联网；文件工具的边界不适用于它，也不打算在 M7.8 引入 Docker/VM 沙箱 |
+| Shell 边界 | `bash` 是无沙箱本地 shell | 同样是无沙箱本地 shell：`bash` 只约束 `cwd`，可读写 workspace 之外、可联网；文件工具的边界不适用于它。接入不可信外部工具前重新评估执行权限 |
 | 上下文估算 | usage 锚点 + 其后消息的字符估算 | M7.8.1 按当前 wire 消息与工具 schema 预测下一请求；M7.8.2 用字符类权重和一次性工具模式开销校准 DeepSeek 输入；M7.8.3 由运行时持有解析后的窗口策略，压缩决策与 CLI 展示共用。旧 `usage.total_tokens` 仅留在摘要切点与成本模型的消息区域估算中，历史 input usage 单独展示 |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
@@ -404,14 +404,15 @@ uv run pytest -m integration        # 需要 API Key
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
-| M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；远端 CI 待推送） |
-| M8 | LSP / MCP | 未开始 |
+| M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；[远端 CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 已通过） |
+| M7.9 | 完成语义、工作区状态与真实任务基线 | 未开始 |
+| M8 | 长任务交互、只读 LSP、按需 MCP、活动工具集与恢复 | 未开始；每项以真实任务收益或明确服务需求为准 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
 
 M1-M6 的详细任务拆解见 [`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)。
 M7 的架构设计、子里程碑与验收见 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)。
-M7.8 的任务拆解、验收标准与 M8-M10 路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)。
+M7.8 的交付记录及 M7.9-M10 的任务拆解、准入与验收见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)。
 
 MVP 后的实施顺序保持为：先让会话可恢复、上下文可控，再扩展外部能力。
 
@@ -420,7 +421,9 @@ M7 Session / Context（已完成）
   ↓
 M7.8 Runtime Hardening（已完成）
   ↓
-M8 LSP / MCP
+M7.9 完成语义与真实任务基线
+  ↓
+M8 长任务交互 / LSP / 按需 MCP
   ↓
 M9 Task / Memory
   ↓
@@ -431,7 +434,7 @@ M10 Multi-Agent
 
 1. 运行 `uv run pytest`
 2. 更新本表状态
-3. 勾选计划文档中对应任务
+3. 更新计划中的交付、验收与提交号
 
 ---
 
@@ -468,7 +471,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
   "运行 pytest，定位失败原因并修复，修复后再次运行 pytest 验证"
 ```
 
-要求：Agent 自主完成定位 → 修改 → 验证，且修改仅发生在 workspace 内。
+要求：Agent 自主完成定位 → 修改 → 验证；文件工具的修改受 workspace 边界约束，`bash` 的边界见下方已知限制。
 
 如果只是 `User → LLM → Answer`，或只是固定 Workflow，都不是本项目目标。
 
@@ -478,6 +481,10 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 
 ### 已知限制（当前实现）
 
+- 一次性任务触发 `step_limit` 时 Loop 报告未完成，CLI 尚未将其转为非零退出码；列入 M7.9.1
+- `git_diff` 不展示未跟踪文件，`bash` 的改动无法可靠填写 `modified_files`；工作区状态观察列入 M7.9.2
+- 长任务中不能追加 steering / follow-up 输入；当前只能等待或取消，M8.0 以前先用真实任务验证需求
+- `read` 分页输出前仍会读取整个文件；多候选 `/sessions` 与 `--continue` 会逐个完整加载会话，规模表现待 M7.9.3 测量。损坏候选会严格阻断列表和自动恢复，不静默跳过
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行
 - **`bash` 不是沙箱**：文件工具的 Workspace 边界只约束 read/write/edit/search/git_diff，`bash` 是 `cwd = workspace root` 的无沙箱本地 shell（可以读写 workspace 之外、可以联网），也没有危险命令确认机制
