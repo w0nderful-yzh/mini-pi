@@ -23,6 +23,12 @@ MARK_OK = "✓"
 MARK_FAILED = "✗"
 MARK_WARNING = "⚠"
 
+# 思考指示：单行、单格宽度的帧序列。这两点都是硬要求——只要渲染高度恒为 1 行、
+# 帧宽恒定，Live 区域清除时就只需回退一行，不会因为裁剪或折行留下残影。
+THINKING_FRAMES = ("◜", "◝", "◞", "◟")
+THINKING_LABEL = "Thinking…"
+THINKING_FPS = 8.0
+
 # "Label  value" 行的标签列宽：所有命令共用，保证跨命令数值对齐
 LABEL_WIDTH = 16
 
@@ -48,3 +54,9 @@ def spread(left: str, right: str, *, width: int) -> str | None:
 def count(value: int) -> str:
     """计数统一加千位分隔，便于一眼读出量级。"""
     return f"{value:,}"
+
+
+def thinking_line(elapsed: float) -> str:
+    """按经过秒数取帧，返回固定宽度的一行思考指示。"""
+    frame = THINKING_FRAMES[int(elapsed * THINKING_FPS) % len(THINKING_FRAMES)]
+    return f"{frame} {THINKING_LABEL}"

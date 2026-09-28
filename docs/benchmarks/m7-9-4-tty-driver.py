@@ -89,7 +89,7 @@ class Fake:
 
 app_mod.create_llm = lambda provider, model=None, **kwargs: Fake()
 app_mod.save_last_connection = lambda *args, **kwargs: None
-sys.argv = ["mini-pi", "--cwd", "__WORKDIR__", "--no-banner", "--provider", "openai",
+sys.argv = ["mini-pi", "--cwd", "__WORKDIR__", "--provider", "openai",
             "--model", "gpt-5.6-terra", *__EXTRA__]
 app_mod.app()
 '''
@@ -217,9 +217,14 @@ def make_workspace(root: Path) -> Path:
     return workdir
 
 
+THINKING_RUN = re.compile(r"(?:[◜◝◞◟] Thinking…)+")
+
+
 def strip_ansi(text: str) -> str:
-    """去掉 ANSI 控制序列；每行末尾空白也清掉，便于阅读转录。"""
-    return "\n".join(line.rstrip() for line in ANSI.sub("", text).replace("\r", "").split("\n"))
+    """去掉 ANSI 控制序列并把连续动画帧折叠成一个标记，便于阅读转录。"""
+    cleaned = ANSI.sub("", text).replace("\r", "")
+    cleaned = THINKING_RUN.sub("⟨thinking⟩", cleaned)
+    return "\n".join(line.rstrip() for line in cleaned.split("\n"))
 
 
 def flow_80(root: Path) -> tuple[str, dict[str, object]]:
@@ -255,7 +260,8 @@ def flow_80(root: Path) -> tuple[str, dict[str, object]]:
     checks["status_aligned"] = bool(re.search(r"^Session\s{9}\w{8}$", text, re.M))
     checks["cancel_line"] = "✗ Task cancelled by user." in text
     checks["cancel_summary"] = "\nCancelled · 1 tools · 1 requests" in text
-    checks["no_live_leftovers"] = "db         db" not in text
+    checks["thinking_frames_rendered"] = "⟨thinking⟩" in text
+    checks["old_art_removed"] = "db         db" not in text
     return text, checks
 
 
@@ -264,7 +270,7 @@ def flow_40(root: Path) -> tuple[str, dict[str, object]]:
     home = root / "home40"
     home.mkdir()
     workdir = make_workspace(root)
-    session = PtySession(build_bootstrap(workdir, []), home, cols=40)
+    session = PtySession(build_bootstrap(workdir, ["--no-banner"]), home, cols=40)
     try:
         session.read_until("›")
         session.command("inspect the failing test", "tests 通过。")
@@ -289,7 +295,9 @@ def flow_dumb_and_nocolor(root: Path) -> tuple[str, dict[str, object]]:
     home = root / "home-dumb"
     home.mkdir()
     workdir = make_workspace(root)
-    dumb = PtySession(build_bootstrap(workdir, []), home, cols=80, term="dumb")
+    dumb = PtySession(
+        build_bootstrap(workdir, ["--no-banner"]), home, cols=80, term="dumb"
+    )
     try:
         dumb.read_until("›")
         os.write(dumb.fd, b"/exit\r")
@@ -349,7 +357,7 @@ def flow_pipe(root: Path) -> tuple[str, dict[str, object]]:
         "no_ansi": "\x1b[" not in result.stdout,
         "tool_lines": "✓ Read app.py · completed" in text,
         "summary_line": "Completed ·" in text,
-        "no_live_leftovers": "db         db" not in text,
+        "old_art_removed": "db         db" not in text,
     }
     return text, checks
 

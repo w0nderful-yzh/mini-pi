@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import re
 import shlex
-from importlib import resources
 from pathlib import Path
 from time import perf_counter
 
+from rich.cells import cell_len
 from rich.console import Console
 from rich.live import Live
 
@@ -222,16 +222,24 @@ class ConsoleRenderer:
         self.last_tool_count = 0
 
     def _start_thinking(self) -> None:
-        """只在足够宽的交互终端显示瞬时状态，不把图案写进日志。"""
+        """只在交互终端显示单行帧动画；图案不写进日志，也不在滚动区留下残影。"""
         if not self._show_thinking or not self.console.is_terminal:
             return
-        art = resources.files("mini_pi").joinpath("assets/thinking.txt").read_text(encoding="utf-8")
-        if self.console.width < max(len(line) for line in art.splitlines()):
+        # 单行固定宽度是硬约束：多行图案在高度不足时会被裁剪，清除时光标回退量与
+        # 屏幕实际内容不一致，图案就残留成刷屏（M7.9.4 那版 18 行 ASCII 牛即如此）
+        if self.console.width < cell_len(style.thinking_line(0.0)):
             return
+        started = perf_counter()
         self._thinking = Live(
-            art.rstrip("\n"), console=self.console, auto_refresh=False, transient=True
+            get_renderable=lambda: style.thinking_line(perf_counter() - started),
+            console=self.console,
+            auto_refresh=True,
+            refresh_per_second=style.THINKING_FPS,
+            transient=True,
+            vertical_overflow="crop",
         )
-        self._thinking.start()
+        # 立刻画出第一帧，避免等第一个刷新周期时出现空白
+        self._thinking.start(refresh=True)
 
     def _print(self, *args: object, **kwargs: object) -> None:
         """事件行统一出口：tty 里按终端宽度折行，非 tty 保持单行确定性输出。"""

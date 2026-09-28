@@ -1,37 +1,74 @@
 # M7.9.4 CLI 视觉验收
 
-2026-09-28，基线 `672af3e`。运行
+2026-09-28，基线 `ea4d22a`。运行
 `uv run python docs/benchmarks/m7-9-4-tty-driver.py <out_dir>` 可重放：真实 pty、脚本化
 模型、临时 HOME，不联网，不触碰真实凭据、Session 与输入历史。本次运行 `failed checks: none`。
 
-覆盖：80 列任务流与状态页、40 列窄屏、`TERM=dumb`、`NO_COLOR` + `--no-banner`、非 tty
-一次性输出、任务中 Ctrl+C。全部状态标记（ToolError、shell 非零、超时、截断、预算、
-`step_limit`、取消）的展示契约由 `tests/cli/test_visual_layout.py` 覆盖；本记录只证明
-真实终端形态下的布局与降级行为。转录为原始 pty 输出，已去掉重复的提示符重绘行。
+覆盖：80 列启动页/任务流/状态页、40 列窄屏、`TERM=dumb`、`NO_COLOR` + `--no-banner`、
+非 tty 一次性输出、任务中 Ctrl+C。全部状态标记（ToolError、shell 非零、超时、截断、预算、
+`step_limit`、取消）的展示契约由 `tests/cli/test_visual_layout.py` 覆盖；本记录只证明真实
+终端形态下的布局与降级行为。
 
-## 80 列：任务流与状态页
+转录说明：`⟨thinking⟩` 是连续动画帧折叠后的标记（帧每秒刷 8 次，原文会淹没转录）；工具行在
+字节流里另起一行，实际终端上指示器是被**同一行覆盖**的——停止时的字节序列为
+`…Thinking…\r\n\x1b[?25h\r\x1b[1A\x1b[2K\x1b[36m● Read a.py…`，即光标上移一行、清行、再写工具行。
+
+## 思考指示器的硬约束
+
+指示器必须是**单行、帧宽恒定**：Live 区域清除时按渲染高度回退光标，高度为 1 时正好清掉那一行。
+此前用的 18 行 ASCII 图案（`assets/thinking.txt`，最宽 27 列）会触发 `vertical_overflow`
+裁剪，且停止前会以 `visible` 再渲染一次全高，光标回退量与屏幕内容不一致，图案就留在滚动区、
+每轮叠一次（用户截图里反复出现的 `db db / d88 88 / …` 即此）。因此改为 `style.THINKING_FRAMES`
+的 4 帧单格宽序列（`◜ ◝ ◞ ◟`，8 fps，`vertical_overflow="crop"`），并用
+`test_thinking_frames_cycle_at_constant_width` 钉住「帧宽守恒 + 每个字形单格宽」。
+
+## 80 列：启动页、任务流与状态页
 
 ```text
+   /                       \
+ /X/                       \X\
+|XX\         _____         /XX|
+|XXX\     _/       \_     /XXX|___________
+ \XXXXXXX             XXXXXXX/            \\\
+   \XXXX    /     \    XXXXX/                \\\
+        |   0     0   |                         \
+         |           |                           \
+          \         /                            |______//
+           \       /                             |
+            | O_O | \                            |
+             \ _ /   \________________           |
+                        | |  | |      \         /
+  No Bullshit,          / |  / |       \______/
+   Please...            \ |  \ |        \ |  \ |
+                      __| |__| |      __| |__| |
+                      |___||___|      |___||___|
+  牛人，就用牛的 coding agent！
+
 mini-pi 0.1.0 · openai/gpt-5.6-terra
-work · session 42d82df8                                       /help for commands
+work · session 38478f9c                                       /help for commands
 
 
  › inspect and fix the failing test
+⟨thinking⟩
 ● Read app.py
 ✓ Read app.py · completed
+⟨thinking⟩
 ● Run grep
 ✗ Run grep · shell exited 1
+⟨thinking⟩
 ● Edit app.py
 ✓ Edit app.py · completed · 1 file(s) changed
+⟨thinking⟩
 ● Run python3
 ✓ Run python3 · shell exited 0
+⟨thinking⟩
 add 现在返回 a + b，tests 通过。
 Completed · 4 tools · 5 requests · provider usage unavailable · 0.2s
 
  › /status
 Model           openai/gpt-5.6-terra
 Workspace       work
-Session         42d82df8
+Session         38478f9c
 Context         ~2,080 / 1,050,000 tokens (0.2%)
 Last run        unavailable (0/5 requests reported usage)
 Budget          disabled
@@ -64,12 +101,13 @@ git_status  Show the git working tree status of the workspace: branch plus stage
 
  › /sessions
 Saved sessions for work:
-* 42d82df8 · 2026-09-28 04:58:59Z · openai/gpt-5.6-terra · summary no
+* 38478f9c · 2026-09-28 05:25:49Z · openai/gpt-5.6-terra · summary no
 * current session
 --continue resumes the latest validated session; --resume <session.jsonl>
 resumes an exact file
 
  › run a long command
+⟨thinking⟩
 ● Run sleep
 ^C✗ Run sleep · failed: Tool execution was cancelled by the user (Ctrl+C). The
 command may have been terminated; re-run it if the result is still needed.
@@ -79,20 +117,13 @@ Cancelled · 1 tools · 1 requests · provider usage unavailable · 0.0s
  › /exit
 ```
 
-两次 Ctrl+C 之间还可能插入 `✗ Run sleep · failed: Tool execution was cancelled ...`，那是被中断工具的
-真实 observation 预览，不是额外状态。
-
-展示改动只落在 `mini_pi/cli/`（`style.py`、`banner.py`、`console.py`、`status.py`、`sessions.py`、`input.py`、
-`app.py` 的 Console 构造），未触碰 `mini_pi/agent`、`session`、`context`、`tools`，因此 `ToolMessage`、
-JSONL 与模型请求不随展示变化；全量 612 passed / 5 deselected 覆盖事实链未变。
-
 ## 40 列：窄屏
 
 ```text
 mini-pi 0.1.0
 model openai/gpt-5.6-terra
 project work
-session 9fdd8299
+session 451f7829
 /help for commands
 
 
@@ -119,7 +150,7 @@ provider usage unavailable · 0.2s
 mini-pi 0.1.0
 model openai/gpt-5.6-terra
 project work
-session 9ff9ad6e
+session 36ef1f59
 /help for commands
 
 /exit
@@ -127,7 +158,7 @@ session 9ff9ad6e
 --- NO_COLOR + --no-banner ---
 
 mini-pi 0.1.0 · openai/gpt-5.6-terra
-work · session edb1c211                                       /help for commands
+work · session e730a731                                       /help for commands
 
 
  › /exit

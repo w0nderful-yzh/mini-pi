@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 import pytest
+from rich.cells import cell_len
 from rich.console import Console
 
 from mini_pi.agent.events import (
@@ -154,6 +155,19 @@ def test_every_state_carries_a_textual_marker(case: _StateCase) -> None:
 
     output = stream.getvalue()
     assert case.mark in output, output
+
+
+def test_thinking_frames_cycle_at_constant_width() -> None:
+    """帧序列按时间推进，且每帧显示宽度一致——Live 精确清除依赖这一点。"""
+    period = len(style.THINKING_FRAMES) / style.THINKING_FPS
+    lines = [style.thinking_line(index * period / len(style.THINKING_FRAMES)) for index in
+             range(len(style.THINKING_FRAMES))]
+
+    assert [line[0] for line in lines] == list(style.THINKING_FRAMES)
+    assert len({cell_len(line) for line in lines}) == 1
+    # 帧宽度恒定还要求每个字形都是单格宽，否则终端里会折行、清除错位
+    assert all(cell_len(frame) == 1 for frame in style.THINKING_FRAMES)
+    assert style.thinking_line(0.0) == style.thinking_line(period)
 
 
 def test_tool_result_line_repeats_the_action_title() -> None:
