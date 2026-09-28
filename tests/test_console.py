@@ -109,10 +109,12 @@ def test_preview_skips_blank_lines() -> None:
 
 
 def test_renders_step_limit() -> None:
-    """达到步数上限要有明确提示。"""
+    """达到步数上限要显示上限值并明确未完成，不能读成完成态。"""
     renderer, stream = make_renderer()
-    renderer.handle(AgentEndEvent(reason="step_limit"))
-    assert "step limit" in stream.getvalue()
+    renderer.handle(AgentEndEvent(reason="step_limit", step_limit=7))
+    output = " ".join(stream.getvalue().split())
+    assert "Reached the step limit (7) before finishing the task." in output
+    assert "The task is incomplete" in output
 
 
 def test_renders_usage_when_present() -> None:

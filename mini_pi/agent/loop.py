@@ -255,9 +255,9 @@ def run_loop(
                 # 钩子（如摘要压缩的模型调用）被中断：事务未写盘，投影保持原样
                 emit(AgentEndEvent(reason="cancelled", message=assistant))
                 return _cancelled_message()
-    # 循环由 max_steps 截断：保留最后消息供调用方检查
+    # 循环由 max_steps 截断：保留最后消息供调用方检查，并带上实际生效的上限
     assert last is not None
-    emit(AgentEndEvent(reason="step_limit", message=last))
+    emit(AgentEndEvent(reason="step_limit", message=last, step_limit=max_steps))
     return last
 
 

@@ -162,6 +162,49 @@ def events() -> list:
     return []
 
 
+class ScriptedReader:
+    """脚本化 reader：按序返回文本；元素是异常时抛出，用于模拟 Ctrl+C 或 EOF。"""
+
+    def __init__(self, items: list[object]) -> None:
+        """保存脚本项；读完返回 EOFError，与真实 reader 的结束语义一致。"""
+        self._items = list(items)
+        self.reads = 0
+        # 满足 ReplReader 契约：脚本化输入没有降级原因
+        self.notice: str | None = None
+
+    def read(self) -> str:
+        """返回下一项文本或抛出脚本化异常。"""
+        if not self._items:
+            raise EOFError
+        self.reads += 1
+        item = self._items.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return str(item)
+
+
+class InterruptingStreamLLM:
+    """流式阶段抛 KeyboardInterrupt，模拟任务执行中的 Ctrl+C。"""
+
+    def __init__(self) -> None:
+        """记录调用次数，便于断言取消后不再请求。"""
+        self.calls: list[list[Message]] = []
+
+    def stream(
+        self, messages: list[Message], tools: list[ToolSchema] | None = None
+    ) -> Iterator[StreamEvent]:
+        """产出一次增量后中断，确认半截内容不进入 Session。"""
+        self.calls.append(list(messages))
+        yield TextDeltaEvent(delta="partial")
+        raise KeyboardInterrupt
+
+    def complete(
+        self, messages: list[Message], tools: list[ToolSchema] | None = None
+    ) -> AssistantMessage:
+        """取消场景不提供 complete。"""
+        raise AssertionError("complete must not be used")
+
+
 @pytest.fixture
 def echo_registry() -> ToolRegistry:
     registry = ToolRegistry()

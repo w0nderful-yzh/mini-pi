@@ -288,7 +288,7 @@ LLM → Tool Call → Tool → Observation → LLM → ...
 - `run_loop()` 是纯函数：输入 `AgentState + LLMClient + ToolRegistry`，输出最终 `AssistantMessage`
 - 每轮通过 `on_event` 回调发出 `AgentEvent`，CLI 是纯消费者
 - M7.6a 起可选 `prepare_next_turn` 钩子在完整工具批次提交后、下一次请求前调用，供 Session 层替换压缩投影；截断轮不触发。M7.6c 起 `AgentSession` 把该钩子接到与 prompt 前检查同一套策略判定和压缩事务上；M7.6d 起钩子的可预期失败（`MiniPiError`）在 Loop 内转成 `agent_end(error)`，不再向模型发出越界的下一次请求，其他异常仍直接冒泡。M7.8.4 起钩子接收每次 `run_loop` 新建的 `RunContext`，返回投影由 Loop 安装，返回 `None` 则保持原投影；成本压缩尝试标志按 run 隔离，任务预算仍由 Loop 计数
-- 终止条件：无 tool call（`completed`）/ LLM error / 达到 `max_steps`（`step_limit`）/ 显式任务预算阻止下一请求（`budget_limit`）/ 用户中断（`cancelled`）
+- 终止条件：无 tool call（`completed`）/ LLM error / 达到 `max_steps`（`step_limit`）/ 显式任务预算阻止下一请求（`budget_limit`）/ 用户中断（`cancelled`）。只有 `completed` 算成功，一次性模式按原因返回不同退出码（见 6.5）
 - `stop_reason == "length"` 时**不执行**任何 tool call，全部转 error observation 让模型重发
 - M7.D2 起用户中断（KeyboardInterrupt）是可预期终止：未提交的流式 assistant 不补写，工具轮为被中断及未执行的调用补 cancelled observation 保持 call/result 配对，以 `agent_end(reason="cancelled")` 结束，已提交消息与文件改动不回滚
 - 不做 `read → edit → test` 固定流程，下一步由模型根据 Observation 自主决定
@@ -364,7 +364,8 @@ mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入
 - `/compact [instructions]` 手动压缩持久化会话：只在安全切点前生成摘要检查点，摘要请求不带工具，`instructions` 仅进入本次请求；输出摘要消息数、保留 entry 数、切点边界、压缩前后当前上下文估算与摘要调用的实测 usage。原始 message entry 一条不删，失败时不改 JSONL 与内存投影；`--no-session` 明确拒绝，不隐式建 JSONL
 - 同一套判定也会自动运行：M7.6b 起每次 `run()` 提交新 user 消息前按窗口策略（当前投影估算 > `context_window - reserve`）检查，需要时先压缩再追加这一条消息；M7.6c 起每个完整工具批次提交后、下一次请求前也用同一判定检查，压缩成功后同一次任务继续，已执行的工具不重放。窗口未知的模型不启用自动压缩，未超阈值不产生任何写入。M7.6d 起自动压缩失败（无安全切点、摘要或写盘失败、压缩后仍超阈值）以 agent error 结束这次任务：不追加假 assistant、不改投影、不再发出越界的下一次请求；已提交的消息与工具结果保留，一次性 CLI 调用返回非零码。M7.6f 起工具轮之间还有第二个触发：窗口内但旧工具结果占被摘要区域一半以上、且按 3 次后续请求算得摘要成本小于预计节省时提前压缩（旧输出按 2000 字符截断进入摘要请求，因此摘要成本与日志长度无关）；每次任务最多尝试一次，摘要阶段失败只放弃这次优化、不终止任务，写盘或重建失败仍以 agent error 终止；仅离线估算验证过收益（[记录](docs/benchmarks/m7-6f-cost-aware-compaction.md)），没有真实计费结论
 - 流式打印模型正文，默认工具事件根据已知命令形态显示操作标题、真实退出码、超时/截断与简短 stderr；未知或含凭据的 shell 命令采用保守标题，不推断任务成败。`--verbose` 展示参数及 Tool 层已截断日志并脱敏已知凭据。任务结束只打印一行请求、用量覆盖率、工具数和耗时；缺失 usage 明确标为不可用或部分实测。耗时在恢复后是 JSONL 消息时间的近似跨度
-- `--max-steps` 控制单次任务的最大循环步数（默认 50）
+- `--max-steps` 控制单次任务的最大循环步数（默认 50）。用尽步数仍未给出最终回答时以 `step_limit` 结束：终端明确提示上限值与「任务未完成」，不会把最后一条 assistant 正文当成完成态；交互模式下只结束本次任务，下一条提问重新计数，也可用 `--max-steps` 提高上限
+- 一次性模式的退出码与终止原因一一对应，脚本可据此判断任务是否真的完成：`0` completed、`1` error、`2` budget_limit、`3` step_limit、`130` cancelled（128+SIGINT）。只有 `completed` 返回 0；其余情况不回滚已提交的消息、工具结果与文件改动，持久化会话保留，可用 `--resume` 继续；拿不到 `agent_end` 时按失败（1）处理，不因缺少终止事件报成功
 - 交互输入默认使用 `prompt_toolkit`：输入 `/` 时命令菜单自动出现在输入行下方，Tab（或 `→`）采纳高亮项；只剩**唯一匹配**时 Enter 会先补全、再按一次 Enter 才提交，其他情况 Enter 直接提交原文；Ctrl+J 或 Alt+Enter 换行、Ctrl+L 清屏。输入历史保存在 `~/.mini-pi/history`（目录 0700、文件 0600，不写入项目目录，Key 输入走独立的隐藏提示因此不进入历史）。stdin/stdout 不是 tty 时静默回退内建 `input()` 的单行 REPL（按行读取、每行一次提交）；交互终端但输入库缺失时同样回退，并在 REPL 顶部打印一行降级原因，避免静默失去补全与历史
 - Ctrl+C 取消当前任务：任务中的中断由 Loop 在流式与工具边界转成 `cancelled`（不是 `completed`），已提交的消息、工具结果与文件改动保留；工具轮里被中断和未执行的调用会补 cancelled observation 保持 call/result 配对，`bash` 的独立进程组会被整组杀掉。空闲时第一次 Ctrl+C 只提示、连续第二次退出；刚取消任务后的下一次空闲 Ctrl+C 直接退出。一次性模式被中断返回退出码 130。tty 人工记录见 [`docs/benchmarks/m7-d2-tty-input-cancel.md`](docs/benchmarks/m7-d2-tty-input-cancel.md)
 - `--max-run-input-tokens` 显式启用每次 `run()` 的累计输入预算，默认关闭。Loop 在下一次模型请求前用 Provider 已报告 input 加当前投影估算检查；接近上限时只提示模型收敛一次，预计超限则以 `budget_limit` 停止。它是请求边界控制，单次请求仍可能超过预测；已提交的消息、工具结果和文件改动保留，交互模式下一条任务获得新预算
@@ -405,7 +406,7 @@ uv run pytest -m integration        # 需要 API Key
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
 | M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；[远端 CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 已通过） |
-| M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 未开始 |
+| M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 进行中（M7.9.1 已完成） |
 | M8 | 长任务交互、只读 LSP、按需 MCP、活动工具集与恢复 | 未开始；每项以真实任务收益或明确服务需求为准 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
@@ -481,7 +482,6 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 
 ### 已知限制（当前实现）
 
-- 一次性任务触发 `step_limit` 时 Loop 报告未完成，CLI 尚未将其转为非零退出码；列入 M7.9.1
 - `git_diff` 不展示未跟踪文件，`bash` 的改动无法可靠填写 `modified_files`；工作区状态观察列入 M7.9.2
 - 长任务中不能追加 steering / follow-up 输入；当前只能等待或取消，M8.0 以前先用真实任务验证需求
 - `read` 分页输出前仍会读取整个文件；多候选 `/sessions` 与 `--continue` 会逐个完整加载会话，规模表现待 M7.9.3 测量。损坏候选会严格阻断列表和自动恢复，不静默跳过

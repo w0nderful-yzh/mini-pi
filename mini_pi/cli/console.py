@@ -14,6 +14,7 @@ from rich.live import Live
 
 from mini_pi.agent.events import (
     AgentEndEvent,
+    AgentEndReason,
     AgentEvent,
     AgentStartEvent,
     BudgetWarningEvent,
@@ -202,7 +203,7 @@ class ConsoleRenderer:
         self._measured_requests = 0
         self._started_at: float | None = None
         self.last_run_seconds: float | None = None
-        self.last_end_reason: str | None = None
+        self.last_end_reason: AgentEndReason | None = None
         self.last_tool_count = 0
 
     def _start_thinking(self) -> None:
@@ -362,8 +363,14 @@ class ConsoleRenderer:
     def _render_end(self, event: AgentEndEvent) -> None:
         """根据终止原因输出结束提示（completed/step_limit/error/budget_limit/cancelled）。"""
         if event.reason == "step_limit":
+            # 步数用尽不是完成：说明上限值与下一步动作，避免把最后一条正文当成最终回答
+            limit = f" ({event.step_limit})" if event.step_limit is not None else ""
             self.console.print(
-                "Reached the step limit before finishing the task.", style="yellow", markup=False
+                f"Reached the step limit{limit} before finishing the task. "
+                "The task is incomplete; continue in this session or raise --max-steps.",
+                style="yellow",
+                markup=False,
+                soft_wrap=True,
             )
         elif event.reason == "cancelled":
             # 中断不是完成：明确说明保留了什么，避免把 Ctrl+C 当成任务成功

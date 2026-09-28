@@ -78,13 +78,18 @@ class BudgetWarningEvent(BaseModel):
     source: Literal["provider", "estimated", "mixed"]
 
 
+# 终止原因的封闭集合：CLI 的退出码映射与展示分支都以此为唯一依据
+AgentEndReason = Literal["completed", "step_limit", "budget_limit", "error", "cancelled"]
+
+
 class AgentEndEvent(BaseModel):
     """一次 run 结束，reason 说明终止原因；cancelled 表示用户主动中断。"""
 
     type: Literal["agent_end"] = "agent_end"
-    reason: Literal["completed", "step_limit", "budget_limit", "error", "cancelled"]
+    reason: AgentEndReason
     message: AssistantMessage | None = None
     error: str | None = None
+    step_limit: int | None = None
     budget_limit: int | None = None
     budget_used: int | None = None
     predicted_next_input: int | None = None

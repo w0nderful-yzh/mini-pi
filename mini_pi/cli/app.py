@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.prompt import Prompt
 
 from mini_pi.agent.agent import Agent
+from mini_pi.agent.events import AgentEndReason
 from mini_pi.auth import (
     ConnectionPreference,
     load_last_connection,
@@ -46,6 +47,15 @@ PROVIDERS: tuple[str, ...] = ("openai", "deepseek")
 DEFAULT_MODELS = {"openai": "gpt-5.6-terra", "deepseek": "deepseek-flash"}
 API_KEY_ENV = {"openai": "OPENAI_API_KEY", "deepseek": "DEEPSEEK_API_KEY"}
 
+# 一次性进程退出码：0 只留给真正完成的任务，未完成、失败与取消都要能被脚本区分
+EXIT_CODES: dict[AgentEndReason, int] = {
+    "completed": 0,
+    "error": 1,
+    "budget_limit": 2,
+    "step_limit": 3,
+    "cancelled": 130,  # 128 + SIGINT，与 shell 对中断的约定一致
+}
+
 _HELP_TEXT = """Available commands:
   /model [provider] [model]  switch provider/model (reuse saved key; ask only if missing)
   /compact [instructions]    summarize older context into a checkpoint (saved sessions only)
@@ -71,6 +81,17 @@ def _version() -> str:
         return metadata.version("mini-pi")
     except metadata.PackageNotFoundError:
         return "0.0.0"
+
+
+def _exit_code_for(reason: AgentEndReason | None) -> int:
+    """把本次 run 的终止原因映射为一次性进程退出码。
+
+    `None` 表示没有观察到 `agent_end`（例如渲染边界中断）：状态未知，按失败处理，
+    不能因为缺少终止事件就报成功。
+    """
+    if reason is None:
+        return EXIT_CODES["error"]
+    return EXIT_CODES[reason]
 
 
 def create_llm(provider: str, model: str | None = None, *, api_key: str | None = None) -> LLMClient:
@@ -501,27 +522,24 @@ def cli(
             console.print(f"Session storage: {agent.path.parent}", soft_wrap=True)
         try:
             agent.run(prompt)
-            if renderer.last_end_reason == "budget_limit":
-                # 一次性调用未完成必须返回非零；Session 已保留，可继续恢复。
-                raise typer.Exit(code=2)
-            if renderer.last_end_reason == "cancelled":
-                # 用户中断按 128+SIGINT 退出；已提交的消息与改动仍在 Session 中
-                raise typer.Exit(code=130)
-            if renderer.last_end_reason == "error":
-                # Agent 以 agent error 结束（含自动压缩失败）同样不能伪装成成功
-                raise typer.Exit(code=1)
         except KeyboardInterrupt:
             # 中断可能落在渲染边界之外：按同一约定退出，不伪装成成功
             Console(stderr=True).print("interrupted", style="yellow")
-            raise typer.Exit(code=130) from None
+            raise typer.Exit(code=EXIT_CODES["cancelled"]) from None
         except MiniPiError as exc:
             # 一次性任务失败以非零码退出，避免把可预期错误伪装成成功
             Console(stderr=True).print(f"error: {exc}", style="red", soft_wrap=True)
-            raise typer.Exit(code=1) from exc
+            raise typer.Exit(code=EXIT_CODES["error"]) from exc
         finally:
+            # 先收尾展示，再决定退出码：Session 路径与结束原因都要打印后进程才结束
             renderer.close()
             if isinstance(agent, AgentSession):
                 console.print(f"Session path: {agent.path}", soft_wrap=True)
+        # 只有 completed 返回 0；step_limit / budget_limit / cancelled / error 都如实非零，
+        # 已提交的消息、工具结果、文件改动与 Session 保留，可用 --resume 继续。
+        code = _exit_code_for(renderer.last_end_reason)
+        if code != 0:
+            raise typer.Exit(code=code)
         return
 
     render_banner(console, enabled=not no_banner)

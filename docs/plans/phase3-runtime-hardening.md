@@ -1,6 +1,6 @@
 # Phase 3：可靠性、CLI 体验与外部能力
 
-> 状态：M7.8 已完成；M7.9、M8–M10 未开始。当前实施入口是 M7.9。已完成的 M7.8 交付与验收放在文末。
+> 状态：M7.8 与 M7.9.1 已完成；M7.9.2 起及 M8–M10 未开始。当前实施入口是 M7.9.2。已完成的交付与验收放在文末。
 
 本计划依据 mini-pi 当前源码、[Pi 本地生产链路](../design/pi-production-architecture.md)和已有验收记录。Pi 参考仓库基线为 `/Users/yzh666/workspace/pi` 的 `d1230ea`；它的能力是设计参考，不是必须逐项复制的清单。实现前核对当前代码，不能把计划写成已交付行为。
 
@@ -8,7 +8,7 @@
 
 | 顺序 | 里程碑 | 进入下一步的条件 |
 | --- | --- | --- |
-| 1 | M7.9.1–M7.9.3 完成语义与真实任务基线 | 未完成任务不会以成功退出；有可复现的任务成功率、用量与耗时记录 |
+| 1 | M7.9.1–M7.9.3 完成语义与真实任务基线 | M7.9.1 已完成；未完成任务不会以成功退出，M7.9.2–M7.9.3 仍需给出可复现的任务成功率、用量与耗时记录 |
 | 2 | M7.9.4 CLI 视觉整理 | 宽屏、窄屏、无颜色和非 tty 均清晰；展示不改变模型或 Session 事实 |
 | 3 | M8.0 长任务交互 | 在真实长任务中确认追加指令的价值；安全轮次边界和持久化语义经测试 |
 | 4 | M8.1 只读 LSP | 固定任务证明定位、引用或诊断收益；若没有收益，暂缓扩展 |
@@ -20,11 +20,9 @@ M7.9 是小批次修正与测量，不修改 Agent 架构；M8 按收益逐项�
 
 ### M7.9.1 未完成任务的退出语义
 
-**现状：** `run_loop` 达到 `max_steps` 发出 `agent_end(step_limit)`，一次性 CLI 只把 `budget_limit`、`cancelled` 和 `error` 转为非零退出码，故可能把未完成任务报告为成功。
+**已交付。** `run_loop` 在 `agent_end(step_limit)` 中带上实际生效的 `max_steps`；渲染层说明上限值与「任务未完成」，不会把最后一条 assistant 正文当作完成态。一次性 CLI 的退出码改为按终止原因集中映射（`mini_pi/cli/app.py` 的 `EXIT_CODES`）：`completed 0` / `error 1` / `budget_limit 2` / `step_limit 3` / `cancelled 130`；拿不到 `agent_end` 时按 1 处理。`step_limit` 与 `budget_limit` 一样只结束本次 run，已提交的消息、工具结果、文件改动与 Session 保留，交互模式下一条提问重新计数。
 
-**交付：** 一次性模式对 `step_limit` 返回非零码，明确显示终止原因；已提交消息、工具结果、文件改动与 Session 保留，交互模式可继续提问。不把最后一条 assistant 当作已完成回答。
-
-**验收：** FakeLLM 连续请求工具并达到步数上限的 CLI 用例；正常完成、预算限制、错误和取消的退出码回归；不调用真实 API。
+**验收：** `tests/cli/test_exit_semantics.py` 8 passed——五种终止原因的一次性退出码表（显式写死 0/1/2/3/130，并与 `EXIT_CODES` 对照）、`step_limit` 显示上限值与未完成并保留已提交的 tool 结果、REPL 在 `step_limit` 后继续接受输入、正常完成无未完成提示；`tests/test_console.py::test_renders_step_limit` 断言新文案。把 `EXIT_CODES["step_limit"]` 改回 0 会让专项用例失败。全部为 FakeLLM，不调用真实 API。
 
 ### M7.9.2 工作区状态与改动事实
 
@@ -122,7 +120,8 @@ Prompt section patch 只记录模型可见文本，无法单独恢复 server 配
 | --- | --- | --- |
 | M7.8 Runtime Hardening | 已完成 | `0e5848e`、`0517a4e`、`4fbedde`、`e19182b`、`2bc65ee`、`96c6279`；总验收 `5247b55`；[记录](../benchmarks/m7-8-final-acceptance.md) |
 | M7.8 CI 修补 | 已完成 | `fb5f387`；彩色帮助输出回归，566 passed / 5 deselected；[GitHub CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 的 Test/Lint/Compile 通过 |
-| M7.9.1–M7.9.4 | 未开始 | 完成语义、工作区状态、真实任务与规模基线、CLI 视觉整理 |
+| M7.9.1 未完成任务的退出语义 | 已完成 | `step_limit` 携带上限值、一次性退出码按终止原因映射（0/1/2/3/130）；`本任务提交` |
+| M7.9.2–M7.9.4 | 未开始 | 工作区状态、真实任务与规模基线、CLI 视觉整理 |
 | M8.0–M8.5 | 未开始 | 交互、只读 LSP、MCP、活动工具集、恢复、对照评测 |
 | M9 / M10 | 未开始 | 分别等待跨 Session 工作流和隔离并行任务 |
 
