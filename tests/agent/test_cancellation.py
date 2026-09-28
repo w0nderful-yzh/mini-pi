@@ -159,6 +159,43 @@ def test_interrupt_in_tool_batch_keeps_pairing_and_skips_remaining() -> None:
     assert [event.tool_call.id for event in ends] == ["c1", "c2"]
 
 
+def test_interrupt_while_emitting_tool_start_keeps_pairing() -> None:
+    """中断落在 start 事件渲染（CLI 的 I/O）时同样要补齐 observation。
+
+    渲染层是中断可能落下的窗口：start 事件在 try 之外时，这次中断会直接冒泡出
+    run_loop，历史里就只剩 assistant 的 tool_call，严格加载会判定配对损坏。
+    """
+    state = AgentState(messages=[UserMessage(content="run tools")])
+    llm = FakeLLMClient(
+        [
+            assistant(
+                tool_calls=[
+                    tool_call("c1", "echo", {"text": "one"}),
+                    tool_call("c2", "echo", {"text": "two"}),
+                ]
+            )
+        ]
+    )
+    seen: list[AgentEvent] = []
+    raised = False
+
+    def on_event(event: AgentEvent) -> None:
+        """只让第一次渲染中断，模拟用户的一次 Ctrl+C。"""
+        nonlocal raised
+        seen.append(event)
+        if event.type == "tool_execution_start" and not raised:
+            raised = True
+            raise KeyboardInterrupt
+
+    result = run_loop(state, llm, _registry(EchoTool()), max_steps=5, on_event=on_event)
+
+    assert result.stop_reason == "cancelled"
+    assert _end_event(seen).reason == "cancelled"
+    tool_messages = [message for message in state.messages if isinstance(message, ToolMessage)]
+    assert [message.tool_call_id for message in tool_messages] == ["c1", "c2"]
+    assert all(message.is_error for message in tool_messages)
+
+
 def test_interrupt_preserves_results_committed_before_cancel() -> None:
     """先完成的工具结果与 modified_files 必须保留，取消不回滚已提交事实。"""
     state = AgentState(messages=[UserMessage(content="run tools")])

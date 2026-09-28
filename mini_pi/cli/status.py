@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from rich.console import Console
 
 from mini_pi.agent.agent import Agent
 from mini_pi.cli import style
-from mini_pi.cli.console import ConsoleRenderer
+from mini_pi.cli.console import ConsoleRenderer, _preview, _tool_action
 from mini_pi.context.policy import ContextPolicy
 from mini_pi.context.stats import ContextStats, context_stats
 from mini_pi.llm.types import Usage
 from mini_pi.session.runtime import AgentSession, CompactionExecution
-from mini_pi.session.usage import RunUsage, recent_run_usage
+from mini_pi.session.usage import RunToolCall, RunUsage, recent_run_tools, recent_run_usage
 from mini_pi.tools import build_default_registry
 from mini_pi.workspace.workspace import Workspace
 
@@ -105,7 +106,8 @@ def render_status(
             _usage_label(current_context_tokens(agent), agent.context_policy if agent else None),
         ),
         markup=False,
-        soft_wrap=True,
+        highlight=False,
+        soft_wrap=not console.is_terminal,
     )
     usage = _run_usage(agent, renderer)
     console.print(style.row("Last run", _provider_label(usage)), markup=False, highlight=False, soft_wrap=not console.is_terminal)
@@ -125,7 +127,8 @@ def render_status(
             else f"{style.count(budget)} tokens (request-boundary, resets per task)",
         ),
         markup=False,
-        soft_wrap=True,
+        highlight=False,
+        soft_wrap=not console.is_terminal,
     )
     console.print(style.row("Compaction", _compaction_label(agent)), markup=False, highlight=False, soft_wrap=not console.is_terminal)
 
@@ -181,7 +184,8 @@ def render_context(
             f"(window {style.count(policy.context_window)} - reserve {style.count(policy.reserve_tokens)})",
         ),
         markup=False,
-        soft_wrap=True,
+        highlight=False,
+        soft_wrap=not console.is_terminal,
     )
     # 窗口阈值与成本触发是两条独立路径，第二行只说明后者是否生效
     console.print(
@@ -191,8 +195,9 @@ def render_context(
             else "automatic compaction unavailable (saved session required)"
         ),
         markup=False,
+        highlight=False,
         style=style.MUTED,
-        soft_wrap=True,
+        soft_wrap=not console.is_terminal,
     )
 
 
@@ -215,7 +220,7 @@ def render_compaction(
     result = execution.result
     if result is None:
         console.print(
-            style.row("Compaction", f"skipped: {execution.reason}"), markup=False, soft_wrap=True
+            style.row("Compaction", f"skipped: {execution.reason}"), markup=False, highlight=False, soft_wrap=not console.is_terminal
         )
         return
     plan = result.plan
@@ -226,7 +231,8 @@ def render_compaction(
             f"kept {len(plan.kept_entry_ids)} entries (cut boundary: {plan.cut.boundary})",
         ),
         markup=False,
-        soft_wrap=True,
+        highlight=False,
+        soft_wrap=not console.is_terminal,
     )
     console.print(
         style.row(
@@ -234,11 +240,79 @@ def render_compaction(
             f"~{style.count(tokens_before)} → {_usage_label(tokens_after, policy)}",
         ),
         markup=False,
-        soft_wrap=True,
+        highlight=False,
+        soft_wrap=not console.is_terminal,
     )
     console.print(
-        style.row("Summary usage", _summary_usage_label(result.usage)), markup=False, soft_wrap=True
+        style.row("Summary usage", _summary_usage_label(result.usage)), markup=False, highlight=False, soft_wrap=not console.is_terminal
     )
+
+
+def _last_run_tools(agent: Agent | AgentSession | None) -> tuple[RunToolCall, ...]:
+    """最近一次任务的工具调用；持久化会话走活动链，纯内存模式走内存消息。"""
+    if isinstance(agent, AgentSession):
+        return agent.last_run_tools
+    if isinstance(agent, Agent):
+        return recent_run_tools(agent.state.messages)
+    return ()
+
+
+def _shell_exit_code(content: str) -> int | None:
+    """从 bash observation 首行读回退出码；格式不符时返回 None，不猜。"""
+    match = re.match(r"exit_code:\s*(-?\d+)", content)
+    return int(match.group(1)) if match else None
+
+
+def _tool_result_line(item: RunToolCall) -> str:
+    """按落盘事实还原一行工具结果；details 不持久化，因此不假装有它。"""
+    result = item.result
+    exit_code = _shell_exit_code(result.content) if result.name == "bash" else None
+    # details 缺失时用 observation 首行判断 shell 失败，与实时视图保持同一结论
+    failed = result.is_error or (exit_code is not None and exit_code != 0)
+    mark = style.MARK_FAILED if failed else style.MARK_OK
+    title = _tool_action(item.call.name, item.call.arguments)
+    if failed or result.name == "bash":
+        # bash 首行固定是 exit_code（含超时标记）；错误的首行就是原因
+        detail = _preview(result.content, limit=90)
+    elif result.modified_files:
+        detail = f"{len(result.modified_files)} file(s) changed"
+    else:
+        detail = "completed"
+    if not failed and (
+        "[output truncated]" in result.content or "[Showing lines " in result.content
+    ):
+        detail += " (truncated)"
+    return f"{mark} {title} · {detail}"
+
+
+def render_last_run(
+    console: Console,
+    *,
+    agent: Agent | AgentSession | None,
+    full: bool = False,
+) -> None:
+    """重新展开最近一次任务的工具调用；默认折叠时这是唯一的完整视图。"""
+    items = _last_run_tools(agent)
+    if not items:
+        console.print("Last run tool calls: none", markup=False, highlight=False)
+        return
+    console.print(f"Last run tool calls ({len(items)}):", markup=False, highlight=False)
+    for item in items:
+        console.print(
+            _tool_result_line(item),
+            markup=False,
+            highlight=False,
+            soft_wrap=not console.is_terminal,
+        )
+        if full:
+            # 与 --verbose 同一有界口径：只展开工具已捕获的内容
+            console.print(
+                style.hanging(_preview(item.result.content, limit=200)),
+                style=style.MUTED,
+                markup=False,
+                highlight=False,
+                soft_wrap=not console.is_terminal,
+            )
 
 
 def render_tools(console: Console, *, agent: Agent | AgentSession | None, cwd: Path) -> None:
@@ -247,5 +321,5 @@ def render_tools(console: Console, *, agent: Agent | AgentSession | None, cwd: P
     width = max((len(schema.name) for schema in schemas), default=0) + 2
     for schema in schemas:
         console.print(
-            f"{schema.name:<{width}}{schema.description}", markup=False, soft_wrap=True
+            f"{schema.name:<{width}}{schema.description}", markup=False, highlight=False, soft_wrap=not console.is_terminal
         )

@@ -217,14 +217,21 @@ def make_workspace(root: Path) -> Path:
     return workdir
 
 
-THINKING_RUN = re.compile(r"(?:[◜◝◞◟] Thinking…)+")
+FRAME_CHARS = "◜◝◞◟"
+
+
+def _collapse_activity(line: str) -> str:
+    """同一行里反复重绘的活动帧只保留最后一次；单帧行原样保留。"""
+    frames = [index for index, char in enumerate(line) if char in FRAME_CHARS]
+    if len(frames) < 2:
+        return line
+    return "⟨activity⟩ " + line[frames[-1] + 1 :]
 
 
 def strip_ansi(text: str) -> str:
-    """去掉 ANSI 控制序列并把连续动画帧折叠成一个标记，便于阅读转录。"""
+    """去掉 ANSI 控制序列并折叠反复重绘的活动区，便于阅读转录。"""
     cleaned = ANSI.sub("", text).replace("\r", "")
-    cleaned = THINKING_RUN.sub("⟨thinking⟩", cleaned)
-    return "\n".join(line.rstrip() for line in cleaned.split("\n"))
+    return "\n".join(_collapse_activity(line.rstrip()) for line in cleaned.split("\n"))
 
 
 def flow_80(root: Path) -> tuple[str, dict[str, object]]:
@@ -236,13 +243,16 @@ def flow_80(root: Path) -> tuple[str, dict[str, object]]:
     checks: dict[str, object] = {}
     try:
         session.read_until("›")
-        session.command("inspect and fix the failing test", "tests 通过。")
+        session.command("inspect and fix the failing test", "/last for the")
+        session.command("/last", "Last run tool calls")
         session.command("/status", "Compaction")
         session.command("/context", "cost-aware early compaction")
         session.command("/tools", "git_status")
         session.command("/sessions", "Saved sessions for")
         # 长任务不等待提示符：工具还在运行时直接 Ctrl+C
         session.send_and_wait("run a long command", "Run sleep")
+        # 等工具真正开始执行再中断：start 事件渲染期间的中断属于另一条路径
+        time.sleep(0.6)
         session.interrupt("Task cancelled by user.")
         session.expect_prompt()
         os.write(session.fd, b"/exit\r")
@@ -252,15 +262,18 @@ def flow_80(root: Path) -> tuple[str, dict[str, object]]:
     text = strip_ansi(session.output)
     checks["startup_identity_bar"] = "mini-pi 0.1.0 · openai/gpt-5.6-terra" in text
     checks["help_right_aligned"] = bool(re.search(r"session \w+\s+/help for commands", text))
-    checks["tool_running_marker"] = "● Read app.py" in text
-    checks["tool_ok_title_repeated"] = "✓ Read app.py · completed" in text
+    # tty 默认折叠：成功的工具调用不占滚动区，失败与折叠入口必须可见
+    # 唯一一次出现来自 /last 的展开，滚动区里没有它
+    checks["success_calls_collapsed"] = text.count("✓ Read app.py · completed") == 1
     checks["shell_nonzero_marker"] = "✗ Run grep · shell exited 1" in text
-    checks["edit_reports_files"] = "1 file(s) changed" in text
+    checks["collapse_hint"] = "/last for the 3 collapsed tool calls" in text
+    checks["last_run_expands"] = "Last run tool calls (4):" in text
+    checks["last_run_keeps_files"] = "1 file(s) changed" in text
     checks["summary_line"] = "Completed · 4 tools · 5 requests" in text
     checks["status_aligned"] = bool(re.search(r"^Session\s{9}\w{8}$", text, re.M))
     checks["cancel_line"] = "✗ Task cancelled by user." in text
     checks["cancel_summary"] = "\nCancelled · 1 tools · 1 requests" in text
-    checks["thinking_frames_rendered"] = "⟨thinking⟩" in text
+    checks["activity_line_rendered"] = text.count("⟨activity⟩") >= 3
     checks["old_art_removed"] = "db         db" not in text
     return text, checks
 
@@ -284,7 +297,8 @@ def flow_40(root: Path) -> tuple[str, dict[str, object]]:
         "startup_field_lines": "model openai/gpt-5.6-terra" in text,
         "help_on_own_line": "/help for commands" in text,
         "identity_bar_absent": "mini-pi 0.1.0 · openai/gpt-5.6-terra" not in text,
-        "tool_lines_present": "✓ Read app.py · completed" in text,
+        "collapse_hint": "/last for the" in text,
+        "success_calls_collapsed": "✓ Read app.py · completed" not in text,
         "no_line_over_40": all(len(line) <= 40 for line in lines),
     }
     return text, checks
@@ -317,6 +331,8 @@ def flow_dumb_and_nocolor(root: Path) -> tuple[str, dict[str, object]]:
     )
     try:
         no_color.read_until("›")
+        # --no-banner 只关启动 Art：tty 内的活动区与折叠仍应生效
+        no_color.command("inspect the failing test", "/last for the")
         os.write(no_color.fd, b"/exit\r")
         no_color.wait_exit()
     finally:
@@ -329,6 +345,8 @@ def flow_dumb_and_nocolor(root: Path) -> tuple[str, dict[str, object]]:
         "no_banner_suppresses_art": "No Bullshit," not in nocolor_text,
         "no_color_still_readable": "mini-pi 0.1.0" in nocolor_text,
         "no_color_no_color": not COLOR_SGR.search(no_color.output),
+        "no_banner_keeps_activity": "⟨activity⟩" in nocolor_text,
+        "no_color_collapses": "/last for the" in nocolor_text,
     }
     return dumb_text + "\n--- NO_COLOR + --no-banner ---\n" + nocolor_text, checks
 

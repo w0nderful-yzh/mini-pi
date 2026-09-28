@@ -18,6 +18,8 @@ from mini_pi.agent.events import (
     AgentEndEvent,
     AgentStartEvent,
     BudgetWarningEvent,
+    MessageEndEvent,
+    MessageStartEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
@@ -26,7 +28,7 @@ from mini_pi.cli.banner import render_startup
 from mini_pi.cli.console import ConsoleRenderer
 from mini_pi.cli.sessions import render_sessions
 from mini_pi.cli.status import render_status
-from mini_pi.llm.types import ToolCall
+from mini_pi.llm.types import AssistantMessage, ToolCall
 from mini_pi.tools.base import ToolResult
 from mini_pi.workspace.workspace import Workspace
 from tests.conftest import assistant, tool_call
@@ -49,11 +51,11 @@ def make_console(*, width: int = 100, terminal: bool = False) -> tuple[Console, 
 
 
 def make_renderer(
-    *, width: int = 100, terminal: bool = False
+    *, width: int = 100, terminal: bool = False, verbose: bool = False
 ) -> tuple[ConsoleRenderer, io.StringIO]:
     """把渲染器与输出流成对返回，供事件级用例使用。"""
     console, stream = make_console(width=width, terminal=terminal)
-    return ConsoleRenderer(console), stream
+    return ConsoleRenderer(console, verbose=verbose), stream
 
 
 def render_events(renderer: ConsoleRenderer, *events: object) -> None:
@@ -335,6 +337,51 @@ def test_tool_result_titles_use_arguments_not_colour() -> None:
         f"{style.MARK_RUNNING} Run pytest with uv",
         f"{style.MARK_OK} Run pytest with uv · shell exited 0",
     ]
+
+
+def test_dumb_terminal_keeps_per_tool_lines(monkeypatch: pytest.MonkeyPatch) -> None:
+    """TERM=dumb 不跑活动区也不折叠：逐行事实是它唯一能保证的输出。"""
+    monkeypatch.setenv("TERM", "dumb")
+    renderer, stream = make_renderer(terminal=True)
+    call = ToolCall(id="c1", name="read", arguments={"path": "a.py"})
+
+    render_events(
+        renderer,
+        AgentStartEvent(),
+        ToolExecutionStartEvent(tool_call=call),
+        ToolExecutionEndEvent(tool_call=call, result=ToolResult(content="ok"), is_error=False),
+        AgentEndEvent(reason="completed"),
+    )
+
+    output = stream.getvalue()
+    assert f"{style.MARK_RUNNING} Read a.py" in output
+    assert f"{style.MARK_OK} Read a.py · completed" in output
+    assert "/last for the" not in output
+
+
+def test_verbose_tty_keeps_per_tool_lines_next_to_the_activity_line() -> None:
+    """--verbose 在 tty 上仍逐行打印：活动区只是补充，不替代审计线索。"""
+    renderer, stream = make_renderer(terminal=True, verbose=True)
+    call = ToolCall(id="c1", name="read", arguments={"path": "a.py"})
+
+    render_events(
+        renderer,
+        AgentStartEvent(),
+        MessageStartEvent(),
+        MessageEndEvent(message=AssistantMessage(content="thinking")),
+        ToolExecutionStartEvent(tool_call=call),
+        ToolExecutionEndEvent(tool_call=call, result=ToolResult(content="ok"), is_error=False),
+        AgentEndEvent(reason="completed"),
+    )
+
+    output = stream.getvalue()
+    # verbose 追加密钥已脱敏的参数，逐行事实完整保留
+    assert f"{style.MARK_RUNNING} Read a.py" in output
+    assert f"{style.MARK_OK} Read a.py" in output
+    assert "completed" in output
+    assert "/last for the" not in output
+    # 活动区同时存在：等待模型时显示思考帧
+    assert any(frame in output for frame in style.THINKING_FRAMES)
 
 
 def test_non_tty_flow_has_no_ansi_and_keeps_one_line_per_event() -> None:

@@ -304,15 +304,17 @@ def _execute_tool_calls(
 ) -> bool:
     """顺序执行工具调用；ToolError 转 observation，用户中断补齐配对后返回 True。"""
     for index, call in enumerate(calls):
-        emit(ToolExecutionStartEvent(tool_call=call))
         is_error = False
         try:
+            # start 事件也在 try 内：渲染层的 I/O 是中断可能落下的窗口之一，
+            # 落在那里同样必须补齐 cancelled observation，否则历史里只剩 tool_call
+            emit(ToolExecutionStartEvent(tool_call=call))
             result = registry.execute(call.name, call.arguments)
         except ToolError as exc:
             result = ToolResult(content=f"{type(exc).__name__}: {exc}")
             is_error = True
         except KeyboardInterrupt:
-            # 中断发生在当前调用内部：先补当前结果，再补齐剩余调用，
+            # 中断发生在当前调用内外：先补当前结果，再补齐剩余调用，
             # 保证 assistant tool_calls 与 ToolMessage 一一配对后才结束这次 run
             _append_cancelled_calls(state, calls[index:], emit, on_message_commit)
             return True

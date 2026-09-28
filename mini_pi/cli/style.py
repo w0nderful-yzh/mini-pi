@@ -56,7 +56,11 @@ def count(value: int) -> str:
     return f"{value:,}"
 
 
+def thinking_frame(elapsed: float) -> str:
+    """按经过秒数取帧；帧宽恒为 1 格，是活动区能精确清除的前提。"""
+    return THINKING_FRAMES[int(elapsed * THINKING_FPS) % len(THINKING_FRAMES)]
+
+
 def thinking_line(elapsed: float) -> str:
-    """按经过秒数取帧，返回固定宽度的一行思考指示。"""
-    frame = THINKING_FRAMES[int(elapsed * THINKING_FPS) % len(THINKING_FRAMES)]
-    return f"{frame} {THINKING_LABEL}"
+    """默认思考指示：帧 + 文案，固定宽度的一行。"""
+    return f"{thinking_frame(elapsed)} {THINKING_LABEL}"

@@ -35,11 +35,11 @@ def test_renders_text_deltas() -> None:
 
 
 def test_hides_thinking_and_clears_status_before_text() -> None:
-    """思考内容不能泄漏；单行帧指示在正文开始时清除。"""
+    """思考内容不能泄漏；单行活动区在正文开始时清除。"""
     stream = io.StringIO()
     renderer = ConsoleRenderer(Console(file=stream, force_terminal=True, width=80, no_color=True))
     renderer.handle(MessageStartEvent())
-    assert renderer._thinking is not None
+    assert renderer._activity is not None
     renderer.handle(MessageDeltaEvent(kind="thinking", delta="secret reasoning"))
     renderer.handle(MessageDeltaEvent(kind="text", delta="answer"))
     renderer.handle(MessageEndEvent(message=AssistantMessage(content="answer")))
@@ -50,11 +50,11 @@ def test_hides_thinking_and_clears_status_before_text() -> None:
     assert "\x1b[2K" in output
     assert "secret reasoning" not in output
     assert "answer" in output
-    assert renderer._thinking is None
+    assert renderer._activity is None
 
 
-def test_thinking_status_is_silent_without_tty_or_banner() -> None:
-    """非终端和禁用图案时，只保留正文输出。"""
+def test_activity_indicator_is_silent_without_tty_or_when_disabled() -> None:
+    """非终端与显式关闭活动区时，只保留确定性文本。"""
     for terminal, show_thinking in [(False, True), (True, False)]:
         stream = io.StringIO()
         renderer = ConsoleRenderer(
@@ -242,3 +242,52 @@ def test_verbose_redacts_common_credential_forms() -> None:
     assert "abc123" not in output
     assert "token123" not in output
     assert "[REDACTED]" in output
+
+def test_collapsed_mode_keeps_failures_and_defers_successes_to_last() -> None:
+    """tty 默认折叠：成功的工具调用只进活动区，失败照旧留在滚动区。"""
+    stream = io.StringIO()
+    renderer = ConsoleRenderer(Console(file=stream, force_terminal=True, width=80, no_color=True))
+    ok = ToolCall(id="c1", name="read", arguments={"path": "a.py"})
+    bad = ToolCall(id="c2", name="bash", arguments={"command": "false"})
+    renderer.handle(AgentStartEvent())
+    renderer.handle(MessageStartEvent())
+    renderer.handle(MessageEndEvent(message=AssistantMessage(content="working")))
+    renderer.handle(ToolExecutionStartEvent(tool_call=ok))
+    renderer.handle(
+        ToolExecutionEndEvent(tool_call=ok, result=ToolResult(content="ok"), is_error=False)
+    )
+    renderer.handle(ToolExecutionStartEvent(tool_call=bad))
+    renderer.handle(
+        ToolExecutionEndEvent(
+            tool_call=bad,
+            result=ToolResult(content="exit_code: 1", details={"exit_code": 1}),
+            is_error=False,
+        )
+    )
+    renderer.handle(AgentEndEvent(reason="completed"))
+    output = stream.getvalue()
+
+    # 成功的调用被折叠：滚动区没有它的永久行，只在活动区里出现过标题
+    assert f"{style.MARK_OK} Read a.py · completed" not in output
+    assert f"{style.MARK_RUNNING} Read a.py" not in output
+    # 失败必须可见，且结束行自带标题
+    assert f"{style.MARK_FAILED} Run false · shell exited 1" in output
+    # 折叠不是丢弃：给出完整视图入口
+    assert "/last for the 1 collapsed tool calls" in output
+
+
+def test_non_terminal_keeps_every_tool_line() -> None:
+    """非 tty（日志/管道）不折叠，逐行保留工具事实。"""
+    renderer, stream = make_renderer()
+    call = ToolCall(id="c1", name="read", arguments={"path": "a.py"})
+    renderer.handle(AgentStartEvent())
+    renderer.handle(ToolExecutionStartEvent(tool_call=call))
+    renderer.handle(
+        ToolExecutionEndEvent(tool_call=call, result=ToolResult(content="ok"), is_error=False)
+    )
+    renderer.handle(AgentEndEvent(reason="completed"))
+    output = stream.getvalue()
+
+    assert f"{style.MARK_RUNNING} Read a.py" in output
+    assert f"{style.MARK_OK} Read a.py · completed" in output
+    assert "/last for the" not in output

@@ -37,7 +37,12 @@ from mini_pi.llm.deepseek_client import DeepSeekClient
 from mini_pi.llm.openai_client import OpenAIClient
 from mini_pi.llm.types import AssistantMessage, Message, ToolSchema
 from mini_pi.session.jsonl import JsonlSession
-from mini_pi.session.usage import RunUsage, recent_session_run_usage
+from mini_pi.session.usage import (
+    RunToolCall,
+    RunUsage,
+    recent_session_run_tools,
+    recent_session_run_usage,
+)
 from mini_pi.tools.registry import ToolRegistry
 
 LLMFactory = Callable[[str, str], LLMClient]
@@ -272,6 +277,11 @@ class AgentSession:
     def last_run_usage(self) -> RunUsage | None:
         """只读活动链中的最近任务；resume 后仍可回看原始 usage。"""
         return recent_session_run_usage(self._session.active_entries())
+
+    @property
+    def last_run_tools(self) -> tuple[RunToolCall, ...]:
+        """只读活动链中最近任务的工具调用；与 last_run_usage 同一口径。"""
+        return recent_session_run_tools(self._session.active_entries())
 
     @property
     def max_run_input_tokens(self) -> int | None:

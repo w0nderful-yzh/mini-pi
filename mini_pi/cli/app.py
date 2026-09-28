@@ -27,6 +27,7 @@ from mini_pi.cli.status import (
     current_context_tokens,
     render_compaction,
     render_context,
+    render_last_run,
     render_status,
     render_tools,
 )
@@ -62,6 +63,7 @@ _HELP_TEXT = """Available commands:
   /sessions                  list validated sessions for this workspace
   /new                       start a new session (saved sessions only)
   /reset                     clear in-memory context (memory-only sessions)
+  /last [full]               show the last run's tool calls (collapsed ones included)
   /status [full]             show model, workspace, session, and context
   /context                   show estimated context categories
   /tools                     list available tools
@@ -458,7 +460,8 @@ def cli(
     workspace = Workspace(cwd)
     # 关闭 Rich 的自动高亮：它会按数字/字符串上色，切碎这里刻意设计的语义色
     console = Console(highlight=False)
-    renderer = ConsoleRenderer(console, show_thinking=not no_banner, verbose=verbose)
+    # --no-banner 只关启动 Art：思考/活动指示是 tty 内的瞬时状态，不应被它带走
+    renderer = ConsoleRenderer(console, verbose=verbose)
     agent: Agent | AgentSession | None = None
     startup_error: str | None = None
     config_error: MiniPiError | ValueError | None = None
@@ -630,6 +633,10 @@ def cli(
             continue
         if stripped == "/context":
             render_context(console, agent=agent, renderer=renderer)
+            continue
+        if stripped in {"/last", "/last full"}:
+            # 折叠模式下的完整视图；数据来自 Session 活动链，恢复后同样可用
+            render_last_run(console, agent=agent, full=stripped.endswith(" full"))
             continue
         if stripped == "/tools":
             render_tools(console, agent=agent, cwd=workspace.root)

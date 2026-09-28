@@ -207,10 +207,18 @@ class ConsoleRenderer:
         """初始化渲染器与本次 run 的用量/计时累加字段。"""
         self.console = console or Console()
         self._printing_text = False
-        self._show_thinking = show_thinking
         self._verbose = verbose
         self._secrets: tuple[str, ...] = ()
-        self._thinking: Live | None = None
+        self._activity: Live | None = None
+        self._activity_started = 0.0
+        self._activity_label = style.THINKING_LABEL
+        # 活动区只在真实 tty 上跑；折叠是它之上的策略：只有成功的工具调用被折叠，
+        # 失败、--verbose 与非 tty 都保留逐行事实。
+        self._can_animate = (
+            show_thinking and self.console.is_terminal and not self.console.is_dumb_terminal
+        )
+        self._collapsed = self._can_animate and not verbose
+        self._collapsed_tools = 0
         self._input_tokens = 0
         self._output_tokens = 0
         self._has_usage = False
@@ -221,40 +229,52 @@ class ConsoleRenderer:
         self.last_end_reason: AgentEndReason | None = None
         self.last_tool_count = 0
 
-    def _start_thinking(self) -> None:
-        """只在交互终端显示单行帧动画；图案不写进日志，也不在滚动区留下残影。"""
-        if not self._show_thinking or not self.console.is_terminal:
+    def _activity_text(self) -> str:
+        """活动区文本：帧 + 当前阶段 + 本次 run 已折叠的工具数。"""
+        frame = style.thinking_frame(perf_counter() - self._activity_started)
+        line = f"{frame} {self._activity_label}"
+        if self._collapsed_tools:
+            line += f" · {self._collapsed_tools} tools done"
+        return line
+
+    def _start_activity(self, label: str) -> None:
+        """启动单行活动区；已在运行时只更新阶段文案，不重建 Live 区域。"""
+        if not self._can_animate:
             return
-        # 单行固定宽度是硬约束：多行图案在高度不足时会被裁剪，清除时光标回退量与
+        self._activity_label = label
+        # 单行固定宽度是硬约束：多行内容在高度不足时会被裁剪，清除时光标回退量与
         # 屏幕实际内容不一致，图案就残留成刷屏（M7.9.4 那版 18 行 ASCII 牛即如此）
         if self.console.width < cell_len(style.thinking_line(0.0)):
             return
-        started = perf_counter()
-        self._thinking = Live(
-            get_renderable=lambda: style.thinking_line(perf_counter() - started),
-            console=self.console,
-            auto_refresh=True,
-            refresh_per_second=style.THINKING_FPS,
-            transient=True,
-            vertical_overflow="crop",
-        )
-        # 立刻画出第一帧，避免等第一个刷新周期时出现空白
-        self._thinking.start(refresh=True)
+        if self._activity is None:
+            self._activity_started = perf_counter()
+            self._activity = Live(
+                get_renderable=self._activity_text,
+                console=self.console,
+                auto_refresh=True,
+                refresh_per_second=style.THINKING_FPS,
+                transient=True,
+                vertical_overflow="crop",
+            )
+            # 立刻画出第一帧，避免等第一个刷新周期时出现空白
+            self._activity.start(refresh=True)
+        else:
+            self._activity.refresh()
 
     def _print(self, *args: object, **kwargs: object) -> None:
         """事件行统一出口：tty 里按终端宽度折行，非 tty 保持单行确定性输出。"""
         kwargs.setdefault("soft_wrap", not self.console.is_terminal)
         self.console.print(*args, **kwargs)
 
-    def _stop_thinking(self) -> None:
-        """在正文或工具输出前清理状态，避免残留和重复刷屏。"""
-        if self._thinking is not None:
-            self._thinking.stop()
-            self._thinking = None
+    def _stop_activity(self) -> None:
+        """在正文或永久输出前清除活动区，避免残留和重复刷屏。"""
+        if self._activity is not None:
+            self._activity.stop()
+            self._activity = None
 
     def close(self) -> None:
         """运行中断或抛错时清理终端状态。"""
-        self._stop_thinking()
+        self._stop_activity()
 
     def set_secrets(self, values: list[str]) -> None:
         """登记已配置凭据，避免 verbose 输出中直接出现其值。"""
@@ -293,16 +313,17 @@ class ConsoleRenderer:
             self.last_run_seconds = None
             self.last_end_reason = None
             self.last_tool_count = 0
+            self._collapsed_tools = 0
         elif isinstance(event, MessageStartEvent):
-            self._start_thinking()
+            self._start_activity(style.THINKING_LABEL)
         elif isinstance(event, MessageDeltaEvent):
             if event.kind == "thinking":
                 return
-            self._stop_thinking()
+            self._stop_activity()
             self._print(event.delta, end="", markup=False, highlight=False)
             self._printing_text = True
         elif isinstance(event, MessageEndEvent):
-            self._stop_thinking()
+            self._stop_activity()
             if self._printing_text:
                 self._print()
                 self._printing_text = False
@@ -315,13 +336,18 @@ class ConsoleRenderer:
                 self._has_usage = True
                 self._measured_requests += 1
         elif isinstance(event, ToolExecutionStartEvent):
-            self._stop_thinking()
-            self._print(
-                self._event_line(f"{style.MARK_RUNNING} {self._tool_title(event.tool_call)}"),
-                style=style.RUNNING,
-                markup=False,
-                highlight=False,
-            )
+            title = self._event_line(self._tool_title(event.tool_call))
+            if self._collapsed:
+                # 折叠模式：执行中只在活动区显示当前动作，不占滚动区
+                self._start_activity(title)
+            else:
+                self._stop_activity()
+                self._print(
+                    f"{style.MARK_RUNNING} {title}",
+                    style=style.RUNNING,
+                    markup=False,
+                    highlight=False,
+                )
         elif isinstance(event, ToolExecutionEndEvent):
             self.last_tool_count += 1
             details = event.result.details or {}
@@ -336,12 +362,20 @@ class ConsoleRenderer:
             line = self._event_line(
                 f"{self._tool_title(event.tool_call)} · {result}"
             )
-            self._print(
-                f"{style.MARK_FAILED if failed else style.MARK_OK} {line}",
-                style=style.FAILURE if failed else style.SUCCESS,
-                markup=False,
-                highlight=False,
-            )
+            if self._collapsed:
+                self._stop_activity()
+                if not failed:
+                    # 成功的调用只累计计数，正文与 /last 才是它们的出口
+                    self._collapsed_tools += 1
+                # 失败必须留在滚动区：折叠不能把错误一起藏起来
+            if not self._collapsed or failed:
+                self._stop_activity()
+                self._print(
+                    f"{style.MARK_FAILED if failed else style.MARK_OK} {line}",
+                    style=style.FAILURE if failed else style.SUCCESS,
+                    markup=False,
+                    highlight=False,
+                )
             if self._verbose:
                 # Tool 层已做有界截断；进程层丢弃的内容无法恢复。
                 self._print(
@@ -351,7 +385,7 @@ class ConsoleRenderer:
                     highlight=False,
                 )
         elif isinstance(event, AgentEndEvent):
-            self._stop_thinking()
+            self._stop_activity()
             self.last_end_reason = event.reason
             if self._started_at is not None:
                 self.last_run_seconds = perf_counter() - self._started_at
@@ -362,6 +396,14 @@ class ConsoleRenderer:
                 markup=False,
                 highlight=False,
             )
+            if self._collapsed_tools:
+                # 折叠不是丢弃：告诉用户完整视图在哪，并且它来自 Session 事实
+                self._print(
+                    f"/last for the {self._collapsed_tools} collapsed tool calls",
+                    style=style.MUTED,
+                    markup=False,
+                    highlight=False,
+                )
         elif isinstance(event, BudgetWarningEvent):
             qualifier = "estimated" if event.source == "estimated" else event.source
             self._print(
