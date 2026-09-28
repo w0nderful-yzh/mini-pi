@@ -612,6 +612,8 @@ M7.8.1 起，当前请求的窗口与任务预算预测使用同一次将发送�
 
 M7.8.2 起字符估算区分 ASCII、东亚文字及标点、其他宽字符和非 ASCII 窄字符；当前请求额外计一次请求框架开销，非空工具集额外计一次工具模式开销和实际 wire schema。系数来自固定 DeepSeek `usage.input_tokens` 对拍，记录在 `docs/benchmarks/m7-8-token-estimation.md`；其他模型及长任务未验证，预测仍标为 `estimated`。
 
+M7.8.3 起 CLI 可用 `--context-window` 与 `--reserve-tokens` 指定窗口策略（reserve 默认 8192，必须小于已配置窗口）。`AgentSession` 创建或恢复时解析并持有该策略，prompt 前和工具轮之间的自动压缩以及 `/status`、`/context` 展示读取同一份；`--no-session` 的 `Agent` 持有策略供展示，但没有 JSONL 压缩事务。`/model` 切换先解析新策略再更换客户端：显式窗口优先，否则按新模型查内置表；`/new` 继承本次配置，`--resume` 用本次参数重新解析。未知模型且无显式窗口保持自动压缩关闭，策略不写 JSONL。
+
 原始 `ToolMessage` 和 JSONL 记录保留真实、有界的 observation；展示摘要不写入模型消息。旧工具结果只在安全切点后通过 compaction 投影压缩，保持 tool call/result 配对和 `modified_files`；提前摘要需验证净成本收益（M7.6f 的成本模型与离线记录见 `docs/benchmarks/m7-6f-cost-aware-compaction.md`，没有真实计费结论前不声称节省费用）。
 
 ---

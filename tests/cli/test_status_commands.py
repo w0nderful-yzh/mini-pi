@@ -87,8 +87,78 @@ def test_context_displays_the_same_request_prediction_as_agent(tmp_path: Path) -
     console = Console(file=output, width=200)
 
     render_context(
-        console, agent=agent, model="custom-model", renderer=ConsoleRenderer(console)
+        console, agent=agent, renderer=ConsoleRenderer(console)
     )
 
     assert f"Next request input (estimated): ~{expected} tokens" in output.getvalue()
     assert "Tool schemas: ~" in output.getvalue()
+
+
+def test_explicit_window_survives_model_switch_and_new(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CLI 显式窗口和 reserve 在 /model、/new 后仍由同一策略展示。"""
+    monkeypatch.setattr("mini_pi.session.jsonl._sessions_root", lambda path: tmp_path / "sessions")
+    monkeypatch.setattr("mini_pi.cli.app.load_last_connection", lambda: None)
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: "sk-test")
+    monkeypatch.setattr("mini_pi.cli.app.save_last_connection", lambda *args: tmp_path / "auth.json")
+    monkeypatch.setattr("mini_pi.cli.app.create_llm", lambda *args, **kwargs: FakeLLMClient([]))
+
+    result = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "--no-banner", "--model", "custom-model",
+         "--context-window", "32000", "--reserve-tokens", "2000"],
+        input="/status\n/context\n/model deepseek deepseek-flash\n/new\n/status\n/context\n/exit\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.output.count("window threshold 30000 tokens (window 32000 - reserve 2000)") == 2
+    assert result.output.count("/ 32000 tokens") == 4  # /status 与 /context 各读两次同一窗口。
+    assert "new session:" in result.output
+
+
+def test_no_session_explicit_window_and_builtin_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """纯内存模式使用同一配置，未显式覆盖时切模型重算内置窗口。"""
+    monkeypatch.setattr("mini_pi.cli.app.load_last_connection", lambda: None)
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: "sk-test")
+    monkeypatch.setattr("mini_pi.cli.app.save_last_connection", lambda *args: tmp_path / "auth.json")
+    monkeypatch.setattr("mini_pi.cli.app.create_llm", lambda *args, **kwargs: FakeLLMClient([]))
+
+    result = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "--no-session", "--model", "custom-model",
+         "--context-window", "32000", "--reserve-tokens", "2000"],
+        input="/context\n/model deepseek deepseek-flash\n/context\n/exit\n",
+    )
+    assert result.exit_code == 0, result.output
+    assert result.output.count("window threshold 30000 tokens (window 32000 - reserve 2000)") == 2
+
+    default = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "--no-session", "--model", "custom-model"],
+        input="/context\n/model deepseek deepseek-flash\n/context\n/exit\n",
+    )
+    assert default.exit_code == 0, default.output
+    assert "Auto-compaction: unavailable (context window unknown)" in default.output
+    assert "window 1000000 - reserve 8192" in default.output
+
+
+def test_invalid_window_does_not_create_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """显式窗口小于默认 reserve 时，创建失败不留下空会话文件。"""
+    monkeypatch.setattr("mini_pi.session.jsonl._sessions_root", lambda path: tmp_path / "sessions")
+    monkeypatch.setattr("mini_pi.cli.app.load_last_connection", lambda: None)
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: "sk-test")
+    monkeypatch.setattr("mini_pi.cli.app.create_llm", lambda *args, **kwargs: FakeLLMClient([]))
+
+    result = runner.invoke(
+        app,
+        ["task", "--cwd", str(tmp_path), "--context-window", "1000"],
+    )
+
+    assert result.exit_code == 1
+    assert "reserve_tokens must be smaller than context_window" in result.output
+    assert not (tmp_path / "sessions").exists()

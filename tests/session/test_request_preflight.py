@@ -6,7 +6,9 @@ from pathlib import Path
 
 import pytest
 
+from mini_pi.agent.agent import Agent
 from mini_pi.context.policy import DEFAULT_RESERVE_TOKENS, KNOWN_CONTEXT_WINDOWS
+from mini_pi.context.request import estimate_request
 from mini_pi.session.runtime import AgentSession
 from mini_pi.tools.registry import ToolRegistry
 from tests.conftest import FakeLLMClient
@@ -18,19 +20,22 @@ def test_pending_task_crosses_window_without_writing_session(
     """当前投影尚小、待提交任务超窗时，预检失败不追加规则或用户消息。"""
     model = "test-pending-task-window"
     llm = FakeLLMClient([])
+    registry = ToolRegistry()
+    probe = Agent(llm=llm, registry=registry, cwd=tmp_path, provider="deepseek", model=model)
+    # 预检必须包含待提交任务；先用同一 Agent 预览以固定测试窗口。
+    short = estimate_request(probe.preview_messages("short"), [], provider="deepseek").input_tokens
+    long_task = "x" * 2000
+    large = estimate_request(probe.preview_messages(long_task), [], provider="deepseek").input_tokens
+    assert large > short + 100
+    monkeypatch.setitem(KNOWN_CONTEXT_WINDOWS, model, short + 50 + DEFAULT_RESERVE_TOKENS)
     runtime = AgentSession.create(
         cwd=tmp_path,
         llm=llm,
-        registry=ToolRegistry(),
+        registry=registry,
         provider="deepseek",
         model=model,
         sessions_root=tmp_path / "sessions",
     )
-    short = runtime._estimate_next_request("short").input_tokens
-    long_task = "x" * 2000
-    large = runtime._estimate_next_request(long_task).input_tokens
-    assert large > short + 100
-    monkeypatch.setitem(KNOWN_CONTEXT_WINDOWS, model, short + 50 + DEFAULT_RESERVE_TOKENS)
     before = runtime.path.read_bytes()
 
     reply = runtime.run(long_task)

@@ -66,6 +66,9 @@ def resolve_policy(
     reserve_tokens: int = DEFAULT_RESERVE_TOKENS,
 ) -> ContextPolicy | None:
     """解析模型策略：用户显式窗口优先，其次内置表；未知模型返回 None。"""
+    if reserve_tokens < 0:
+        # 即使窗口未知，显式负 reserve 也是错误配置，不能静默关闭策略。
+        raise ValueError("reserve_tokens must be >= 0")
     window = context_window if context_window is not None else KNOWN_CONTEXT_WINDOWS.get(model)
     if window is None:
         return None

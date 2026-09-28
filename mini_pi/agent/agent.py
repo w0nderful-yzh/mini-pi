@@ -14,6 +14,11 @@ from mini_pi.agent.state import (
     PrepareNextTurn,
     commit_message,
 )
+from mini_pi.context.policy import (
+    DEFAULT_RESERVE_TOKENS,
+    ContextPolicy,
+    resolve_policy,
+)
 from mini_pi.context.project import load_project_instructions
 from mini_pi.context.request import RequestSnapshot, estimate_request
 from mini_pi.context.sections import diff_sections, replay_system_messages
@@ -39,6 +44,8 @@ class Agent:
         prepare_next_turn: PrepareNextTurn | None = None,
         provider: str | None = None,
         model: str | None = None,
+        context_window: int | None = None,
+        reserve_tokens: int = DEFAULT_RESERVE_TOKENS,
     ) -> None:
         """注入依赖与构建 Workspace/State；预算与回调在此固定，多次 run 复用。"""
         if max_steps <= 0:
@@ -54,6 +61,11 @@ class Agent:
         self._prepare_next_turn = prepare_next_turn
         self._provider = provider
         self._model = model
+        self._context_window_override = context_window
+        self._reserve_tokens = reserve_tokens
+        self._context_policy = resolve_policy(
+            model or "", context_window=context_window, reserve_tokens=reserve_tokens
+        )
         self._workspace = Workspace(cwd)
         self.state = AgentState()
 
@@ -124,9 +136,20 @@ class Agent:
         self, llm: LLMClient, *, provider: str | None = None, model: str | None = None
     ) -> None:
         """替换 LLM 客户端并保留 transcript（/connect 切换 Key 或 provider）。"""
+        policy = resolve_policy(
+            model or "",
+            context_window=self._context_window_override,
+            reserve_tokens=self._reserve_tokens,
+        )
         self._llm = llm
         self._provider = provider
         self._model = model
+        self._context_policy = policy
+
+    @property
+    def context_policy(self) -> ContextPolicy | None:
+        """返回当前模型生效的窗口策略，未知模型且未显式配置时为 None。"""
+        return self._context_policy
 
     def request_snapshot(self) -> RequestSnapshot:
         """返回当前投影与工具集的下一请求估算，供只读展示复用。"""

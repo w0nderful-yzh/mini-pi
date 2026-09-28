@@ -8,7 +8,7 @@ from rich.console import Console
 
 from mini_pi.agent.agent import Agent
 from mini_pi.cli.console import ConsoleRenderer
-from mini_pi.context.policy import resolve_policy
+from mini_pi.context.policy import ContextPolicy
 from mini_pi.context.stats import ContextStats, context_stats
 from mini_pi.llm.types import Usage
 from mini_pi.session.runtime import AgentSession, CompactionExecution
@@ -27,9 +27,8 @@ def _stats(agent: Agent | AgentSession | None) -> ContextStats:
     )
 
 
-def _usage_label(total: int, model: str) -> str:
+def _usage_label(total: int, policy: ContextPolicy | None) -> str:
     """窗口未知时不伪造百分比；已知窗口显示估算占用。"""
-    policy = resolve_policy(model)
     if policy is None:
         return f"~{total} tokens / window unknown"
     percentage = total / policy.context_window * 100
@@ -82,7 +81,7 @@ def render_status(
     if full and isinstance(agent, AgentSession):
         console.print(f"Session path: {agent.path}", markup=False, soft_wrap=True)
     console.print(
-        f"Current context (estimated): {_usage_label(current_context_tokens(agent), model)}",
+        f"Current context (estimated): {_usage_label(current_context_tokens(agent), agent.context_policy if agent else None)}",
         markup=False,
     )
     usage = _run_usage(agent, renderer)
@@ -106,7 +105,6 @@ def render_context(
     console: Console,
     *,
     agent: Agent | AgentSession | None,
-    model: str,
     renderer: ConsoleRenderer,
 ) -> None:
     """按当前投影显示分类估算，实际 Provider 用量单独列出。"""
@@ -120,7 +118,8 @@ def render_context(
         ("Tool schemas", stats.tools),
     ):
         console.print(f"{label}: ~{amount} tokens", markup=False)
-    console.print(f"Total (estimated): {_usage_label(stats.total, model)}", markup=False)
+    policy = agent.context_policy if agent is not None else None
+    console.print(f"Total (estimated): {_usage_label(stats.total, policy)}", markup=False)
     console.print(
         f"Next request input (estimated): ~{current_context_tokens(agent)} tokens",
         markup=False,
@@ -133,15 +132,19 @@ def render_context(
         + (" tokens" if latest is not None else ""),
         markup=False,
     )
-    policy = resolve_policy(model)
     if policy is None:
         console.print("Auto-compaction: unavailable (context window unknown)", markup=False)
     else:
         # 窗口阈值与成本触发是两条独立路径：这里只说明当前生效的配置
+        availability = (
+            "cost-aware early compaction for old tool results is enabled"
+            if isinstance(agent, AgentSession)
+            else "automatic compaction unavailable (saved session required)"
+        )
         console.print(
             f"Auto-compaction: window threshold {policy.threshold_tokens} tokens "
             f"(window {policy.context_window} - reserve {policy.reserve_tokens}); "
-            "cost-aware early compaction for old tool results is enabled",
+            f"{availability}",
             markup=False,
         )
 
@@ -156,7 +159,7 @@ def _summary_usage_label(usage: Usage | None) -> str:
 def render_compaction(
     console: Console,
     *,
-    model: str,
+    policy: ContextPolicy | None,
     execution: CompactionExecution,
     tokens_before: int,
     tokens_after: int,
@@ -173,7 +176,7 @@ def render_compaction(
         markup=False,
     )
     console.print(
-        f"Current context (estimated): ~{tokens_before} → {_usage_label(tokens_after, model)}",
+        f"Current context (estimated): ~{tokens_before} → {_usage_label(tokens_after, policy)}",
         markup=False,
     )
     console.print(f"Summary usage: {_summary_usage_label(result.usage)}", markup=False)

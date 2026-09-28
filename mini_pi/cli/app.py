@@ -29,7 +29,7 @@ from mini_pi.cli.status import (
     render_status,
     render_tools,
 )
-from mini_pi.context.policy import DEFAULT_KEEP_RECENT_TOKENS
+from mini_pi.context.policy import DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS
 from mini_pi.errors import MiniPiError, MissingAPIKeyError, SessionError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
@@ -167,6 +167,8 @@ def _prompt_and_build(
     workspace: Workspace,
     max_steps: int,
     max_run_input_tokens: int | None = None,
+    context_window: int | None = None,
+    reserve_tokens: int = DEFAULT_RESERVE_TOKENS,
     renderer: ConsoleRenderer,
     provider: str,
     model: str,
@@ -187,6 +189,8 @@ def _prompt_and_build(
         workspace=workspace,
         max_steps=max_steps,
         max_run_input_tokens=max_run_input_tokens,
+        context_window=context_window,
+        reserve_tokens=reserve_tokens,
         renderer=renderer,
         provider=provider,
         model=model,
@@ -200,6 +204,8 @@ def _build_agent(
     workspace: Workspace,
     max_steps: int,
     max_run_input_tokens: int | None = None,
+    context_window: int | None = None,
+    reserve_tokens: int = DEFAULT_RESERVE_TOKENS,
     renderer: ConsoleRenderer,
     provider: str,
     model: str,
@@ -211,6 +217,8 @@ def _build_agent(
         cwd=workspace.root,
         max_steps=max_steps,
         max_run_input_tokens=max_run_input_tokens,
+        context_window=context_window,
+        reserve_tokens=reserve_tokens,
         on_event=renderer.handle,
         provider=provider,
         model=model,
@@ -223,6 +231,8 @@ def _build_runtime(
     workspace: Workspace,
     max_steps: int,
     max_run_input_tokens: int | None = None,
+    context_window: int | None = None,
+    reserve_tokens: int = DEFAULT_RESERVE_TOKENS,
     renderer: ConsoleRenderer,
     provider: str,
     model: str,
@@ -235,6 +245,8 @@ def _build_runtime(
             workspace=workspace,
             max_steps=max_steps,
             max_run_input_tokens=max_run_input_tokens,
+            context_window=context_window,
+            reserve_tokens=reserve_tokens,
             renderer=renderer,
             provider=provider,
             model=model,
@@ -247,6 +259,8 @@ def _build_runtime(
         model=model,
         max_steps=max_steps,
         max_run_input_tokens=max_run_input_tokens,
+        context_window=context_window,
+        reserve_tokens=reserve_tokens,
         on_event=renderer.handle,
     )
 
@@ -260,7 +274,6 @@ def _run_compaction(
     console: Console,
     agent: Agent | AgentSession | None,
     *,
-    model: str,
     instructions: str | None,
 ) -> None:
     """执行一次手动压缩：显示前后估算、切点与摘要调用成本，失败不中断 REPL。"""
@@ -284,7 +297,7 @@ def _run_compaction(
         return
     render_compaction(
         console,
-        model=model,
+        policy=agent.context_policy,
         execution=execution,
         tokens_before=before,
         tokens_after=current_context_tokens(agent),
@@ -300,6 +313,8 @@ def _switch_connection(
     workspace: Workspace,
     max_steps: int,
     max_run_input_tokens: int | None = None,
+    context_window: int | None = None,
+    reserve_tokens: int = DEFAULT_RESERVE_TOKENS,
     renderer: ConsoleRenderer,
     no_session: bool,
     arguments: list[str],
@@ -352,6 +367,8 @@ def _switch_connection(
                 workspace=workspace,
                 max_steps=max_steps,
                 max_run_input_tokens=max_run_input_tokens,
+                context_window=context_window,
+                reserve_tokens=reserve_tokens,
                 renderer=renderer,
                 provider=chosen_provider,
                 model=chosen_model,
@@ -365,7 +382,7 @@ def _switch_connection(
                 new_agent.set_llm(new_llm, provider=chosen_provider, model=chosen_model)
             else:
                 new_agent.set_llm(new_llm, provider=chosen_provider, model=chosen_model)
-    except MiniPiError as exc:
+    except (MiniPiError, ValueError) as exc:
         console.print(f"model switch failed: {exc}", style="red", markup=False)
         return None
 
@@ -395,6 +412,14 @@ def cli(
         min=1,
         help="Opt-in cumulative input budget per task, checked before each model request.",
     ),
+    context_window: int | None = typer.Option(
+        None, "--context-window", min=1,
+        help="Override the model context window for automatic compaction.",
+    ),
+    reserve_tokens: int = typer.Option(
+        DEFAULT_RESERVE_TOKENS, "--reserve-tokens", min=0,
+        help="Tokens reserved below the context window for the next response.",
+    ),
     no_session: bool = typer.Option(False, "--no-session", help="Keep history in memory only."),
     no_banner: bool = typer.Option(False, "--no-banner", help="Do not print the startup banner."),
     verbose: bool = typer.Option(False, "--verbose", help="Show tool arguments and bounded logs."),
@@ -414,7 +439,7 @@ def cli(
     renderer = ConsoleRenderer(console, show_thinking=not no_banner, verbose=verbose)
     agent: Agent | AgentSession | None = None
     startup_error: str | None = None
-    config_error: MiniPiError | None = None
+    config_error: MiniPiError | ValueError | None = None
     if resume is not None or continue_session:
         try:
             path = resume if resume is not None else latest_session_path(workspace.root)
@@ -427,9 +452,11 @@ def cli(
                 llm_factory=create_llm,
                 max_steps=max_steps,
                 max_run_input_tokens=max_run_input_tokens,
+                context_window=context_window,
+                reserve_tokens=reserve_tokens,
                 on_event=renderer.handle,
             )
-        except MiniPiError as exc:
+        except (MiniPiError, ValueError) as exc:
             Console(stderr=True).print(f"error: {exc}", style="red", soft_wrap=True)
             raise typer.Exit(code=1) from exc
     else:
@@ -440,6 +467,8 @@ def cli(
                 workspace=workspace,
                 max_steps=max_steps,
                 max_run_input_tokens=max_run_input_tokens,
+                context_window=context_window,
+                reserve_tokens=reserve_tokens,
                 renderer=renderer,
                 provider=provider,
                 model=model,
@@ -448,7 +477,7 @@ def cli(
             agent = new_agent
             # 记住本次成功使用的 provider/model，下次启动优先复用
             save_last_connection(provider, model)
-        except MiniPiError as exc:
+        except (MiniPiError, ValueError) as exc:
             config_error = exc
             startup_error = (
                 f"session creation failed: {exc}"
@@ -507,6 +536,8 @@ def cli(
             workspace=workspace,
             max_steps=max_steps,
             max_run_input_tokens=max_run_input_tokens,
+            context_window=context_window,
+            reserve_tokens=reserve_tokens,
             renderer=renderer,
             provider=provider,
             model=model,
@@ -579,7 +610,7 @@ def cli(
             )
             continue
         if stripped == "/context":
-            render_context(console, agent=agent, model=model, renderer=renderer)
+            render_context(console, agent=agent, renderer=renderer)
             continue
         if stripped == "/tools":
             render_tools(console, agent=agent, cwd=workspace.root)
@@ -601,7 +632,6 @@ def cli(
             _run_compaction(
                 console,
                 agent,
-                model=model,
                 instructions=stripped[len("/compact") :].strip() or None,
             )
             continue
@@ -638,6 +668,8 @@ def cli(
                 workspace=workspace,
                 max_steps=max_steps,
                 max_run_input_tokens=max_run_input_tokens,
+                context_window=context_window,
+                reserve_tokens=reserve_tokens,
                 renderer=renderer,
                 no_session=no_session,
                 arguments=stripped.split()[1:],

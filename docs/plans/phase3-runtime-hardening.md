@@ -1,6 +1,6 @@
 # Phase 3：Runtime Hardening 与外部能力（M7.8 / M8 / M9 / M10）
 
-> 状态：**M7.8.0、M7.8.5、M7.8.1、M7.8.2 已完成，M7.8.3 为下一项**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
+> 状态：**M7.8.0、M7.8.5、M7.8.1、M7.8.2、M7.8.3 已完成，M7.8.4 为下一项**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
 
 **目标：** 在接入 LSP / MCP 之前，先把「上下文有多少、预算怎么算、钩子挂在哪、改动怎么被守护」四件事定下来；之后按 LSP → MCP → 动态工具集 → 工具集恢复 → 基准的顺序扩展外部能力。
 
@@ -90,17 +90,11 @@
 
 ### M7.8.2 Token 估算升级
 
-**交付物与验收（本提交）：** `tokens.py` 改为可复现的字符类加权估算，`request.py` 加入请求框架与非空工具模式的一次性开销；不更改历史 usage 的来源标记。固定中文、英文、混合文本和工具 schema 四组真实 `deepseek-flash` input usage 对拍及系数见 [记录](../benchmarks/m7-8-token-estimation.md)，均落在声明的 ±15% 容差内，中文 +1.4%。单测覆盖字符类、工具 schema 和历史 usage 隔离；全量离线回归 554 passed、5 deselected，Ruff 与编译检查通过。OpenAI、长真实会话及大量工具未对拍；不引入 tokenizer 依赖或模型系数表。
+**交付物与验收（`e19182b`）：** `tokens.py` 改为可复现的字符类加权估算，`request.py` 加入请求框架与非空工具模式的一次性开销；不更改历史 usage 的来源标记。固定中文、英文、混合文本和工具 schema 四组真实 `deepseek-flash` input usage 对拍及系数见 [记录](../benchmarks/m7-8-token-estimation.md)，均落在声明的 ±15% 容差内，中文 +1.4%。单测覆盖字符类、工具 schema 和历史 usage 隔离；全量离线回归 554 passed、5 deselected，Ruff 与编译检查通过。OpenAI、长真实会话及大量工具未对拍；不引入 tokenizer 依赖或模型系数表。
 
 ### M7.8.3 Context Window 配置化
 
-**改动：**
-
-- CLI 新增 `--context-window INT`（并允许 `--reserve-tokens`，默认沿用 `DEFAULT_RESERVE_TOKENS = 8192`）。
-- 解析一次、注入一处：`AgentSession` 持有当前模型解析后的策略，`run()`、工具轮钩子、`/context`、`/status` 全部读同一份；`--no-session` 的纯内存模式也传入同一策略，删除 `cli/status.py` 里各自的 `resolve_policy(model)` 调用。`/model` 切换时按显式窗口优先、否则按新模型重新解析，不能保留旧模型的内置窗口。
-- 未知模型且未传窗口 = 维持现状：自动压缩关闭，`/context` 明确显示「未配置」。
-
-**验收：** 自定义模型名 + `--context-window` 能触发自动压缩（小窗口夹具）；`/context` 显示的窗口与决策使用的窗口是同一个值；`/model`、`/new`、`--resume`、`--no-session` 均覆盖显式窗口与默认窗口语义；不传参时行为与当前完全一致（回归用例）。
+**交付物与验收（本提交）：** CLI 增加 `--context-window`、`--reserve-tokens`（默认 8192）；`AgentSession` 持有创建或恢复时解析的唯一策略，prompt 前、工具轮、`/status` 和 `/context` 共用。`/model` 原子重算并保持显式窗口优先，`/new` 继承配置，`--resume` 从本次 CLI 参数解析且不写 JSONL；纯内存 `Agent` 持有策略供展示，未知模型无显式窗口时仍关闭自动压缩。自定义模型小窗口的离线压缩测试及 CLI 生命周期测试通过；全量离线回归 564 passed、5 deselected，Ruff、编译与 diff 检查通过。纯内存模式没有 JSONL 压缩事务。
 
 ### M7.8.4 Runtime Hook 与 RunContext
 
@@ -226,8 +220,8 @@ RAG / Vector DB             通用 Agent Scheduler
 | M7.8.0 | 前置小修：`read` 空文件、`bash` 无沙箱与平台说明 | 已完成（`0e5848e`；10 passed，全量 544 passed、5 deselected） |
 | M7.8.5 | CI 与 ruff 静态检查 | 已完成（`0517a4e`；本地 544 passed、5 deselected；远端待运行） |
 | M7.8.1 | RequestSnapshot 统一请求口径 | 已完成（`4fbedde`；552 passed、5 deselected） |
-| M7.8.2 | Token 估算升级（CJK 安全 + 工具 schema + 实测校准） | 已完成（本提交；DeepSeek 四组实测；554 passed、5 deselected） |
-| M7.8.3 | Context Window 配置化（`--context-window`） | 未开始 |
+| M7.8.2 | Token 估算升级（CJK 安全 + 工具 schema + 实测校准） | 已完成（`e19182b`；DeepSeek 四组实测；554 passed、5 deselected） |
+| M7.8.3 | Context Window 配置化（`--context-window`） | 已完成（本提交；564 passed、5 deselected） |
 | M7.8.4 | Runtime Hook 与 RunContext | 未开始 |
 | M7.8.6 | M7.8 总验收与文档同步 | 未开始 |
 | M8.1–M8.5 | LSP / MCP / ActiveToolSet / Restore / Benchmark | 未开始 |

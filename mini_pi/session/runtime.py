@@ -23,6 +23,8 @@ from mini_pi.context.cost import (
 )
 from mini_pi.context.policy import (
     DEFAULT_KEEP_RECENT_TOKENS,
+    DEFAULT_RESERVE_TOKENS,
+    ContextPolicy,
     evaluate_compaction,
     resolve_policy,
 )
@@ -92,6 +94,9 @@ class AgentSession:
         on_event: Callable[[AgentEvent], None] | None,
         provider: str,
         model: str,
+        context_window: int | None,
+        reserve_tokens: int,
+        context_policy: ContextPolicy | None,
     ) -> None:
         """持有会话/依赖并构建 Agent，将提交回调接到自身的 durable-first 入口。"""
         self._session = session
@@ -102,6 +107,9 @@ class AgentSession:
         self._on_event = on_event
         self._provider = provider
         self._model = model
+        self._context_window_override = context_window
+        self._reserve_tokens = reserve_tokens
+        self._context_policy = context_policy
         # 成本感知的提前压缩每次 run 只尝试一次：失败也不重复打扰模型
         self._cost_compaction_attempted = False
         self._agent = Agent(
@@ -130,6 +138,8 @@ class AgentSession:
         sessions_root: str | Path | None = None,
         max_steps: int = 50,
         max_run_input_tokens: int | None = None,
+        context_window: int | None = None,
+        reserve_tokens: int = DEFAULT_RESERVE_TOKENS,
         on_event: Callable[[AgentEvent], None] | None = None,
     ) -> AgentSession:
         """校验运行参数后创建 header，并接通 durable-first 消息提交。"""
@@ -137,6 +147,9 @@ class AgentSession:
             raise ValueError("max_steps must be > 0")
         if max_run_input_tokens is not None and max_run_input_tokens <= 0:
             raise ValueError("max_run_input_tokens must be > 0")
+        policy = resolve_policy(
+            model, context_window=context_window, reserve_tokens=reserve_tokens
+        )
         session = JsonlSession.create(
             cwd=cwd,
             provider=provider,
@@ -152,6 +165,9 @@ class AgentSession:
             on_event=on_event,
             provider=provider,
             model=model,
+            context_window=context_window,
+            reserve_tokens=reserve_tokens,
+            context_policy=policy,
         )
 
     @classmethod
@@ -166,6 +182,8 @@ class AgentSession:
         llm_factory: LLMFactory | None = None,
         max_steps: int = 50,
         max_run_input_tokens: int | None = None,
+        context_window: int | None = None,
+        reserve_tokens: int = DEFAULT_RESERVE_TOKENS,
         on_event: Callable[[AgentEvent], None] | None = None,
     ) -> AgentSession:
         """从活动 leaf 恢复状态和模型配置，后续消息沿原 leaf 追加。"""
@@ -183,6 +201,9 @@ class AgentSession:
             raise ValueError("provider and model must not be empty")
         if resolved_provider not in {"openai", "deepseek"}:
             raise SessionError(f"unsupported session provider: {resolved_provider!r}")
+        policy = resolve_policy(
+            resolved_model, context_window=context_window, reserve_tokens=reserve_tokens
+        )
         # 真实运行只读认证配置；可注入离线构造函数以验证恢复行为。
         factory = _create_auth_llm if llm_factory is None else llm_factory
         llm = factory(resolved_provider, resolved_model)
@@ -195,6 +216,9 @@ class AgentSession:
             on_event=on_event,
             provider=resolved_provider,
             model=resolved_model,
+            context_window=context_window,
+            reserve_tokens=reserve_tokens,
+            context_policy=policy,
         )
         runtime.state.messages.extend(replay.messages)
         runtime.state.step_count = replay.step_count
@@ -220,6 +244,11 @@ class AgentSession:
     def model(self) -> str:
         """返回后续消息将记录的模型。"""
         return self._model
+
+    @property
+    def context_policy(self) -> ContextPolicy | None:
+        """返回当前模型生效的唯一窗口策略。"""
+        return self._context_policy
 
     @property
     def session_id(self) -> str:
@@ -262,6 +291,8 @@ class AgentSession:
             sessions_root=sessions_root,
             max_steps=self._max_steps,
             max_run_input_tokens=self._max_run_input_tokens,
+            context_window=self._context_window_override,
+            reserve_tokens=self._reserve_tokens,
             on_event=self._on_event,
         )
 
@@ -269,10 +300,16 @@ class AgentSession:
         """替换运行时客户端，仅让后续提交消息使用新的模型元数据。"""
         if provider not in {"openai", "deepseek"} or not model.strip():
             raise SessionError("provider or model is invalid for this session")
+        policy = resolve_policy(
+            model,
+            context_window=self._context_window_override,
+            reserve_tokens=self._reserve_tokens,
+        )
         self._agent.set_llm(llm, provider=provider, model=model)
         self._llm = llm
         self._provider = provider
         self._model = model
+        self._context_policy = policy
 
     def run(self, task: str) -> AssistantMessage:
         """执行一轮任务：先按窗口策略判断是否需要压缩，再提交这一条 user 消息。"""
@@ -295,7 +332,7 @@ class AgentSession:
         - 压缩后仍超阈值同样不能继续：那会越过模型窗口，必须显式结束这次 run
         - 两个调用点共用：`run()` 的 prompt 前检查与工具轮之间的钩子
         """
-        policy = resolve_policy(self._model)
+        policy = self._context_policy
         if policy is None:
             # 窗口未知：不猜百分比、不做自动压缩，也不阻止任务
             return None
@@ -353,7 +390,7 @@ class AgentSession:
         - 每次 run 最多一次；摘要阶段失败只放弃这次优化，不改变本次 run 的结果
         - 写盘或重建失败会让内存投影与 JSONL 分叉，与窗口触发同样终止这次 run
         """
-        if self._cost_compaction_attempted or resolve_policy(self._model) is None:
+        if self._cost_compaction_attempted or self._context_policy is None:
             return
         preparation = prepare_compaction(
             self._session.active_entries(), keep_recent_tokens=DEFAULT_KEEP_RECENT_TOKENS

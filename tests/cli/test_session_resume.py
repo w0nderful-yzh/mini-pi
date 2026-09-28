@@ -103,6 +103,25 @@ def test_resume_explicit_model_override_only_affects_new_entries(
     assert all(entry.model == "custom" for entry in loaded.entries[2:])
 
 
+def test_resume_explicit_window_is_shown_for_unknown_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """CLI 恢复未知模型时从本次参数取得窗口，展示与会话策略一致。"""
+    session = JsonlSession.create(cwd=tmp_path, provider="deepseek", model="custom-model")
+    monkeypatch.setattr("mini_pi.cli.app.create_llm", lambda *args, **kwargs: FakeLLMClient([]))
+
+    result = runner.invoke(
+        app,
+        ["--cwd", str(tmp_path), "--resume", str(session.path),
+         "--context-window", "32000", "--reserve-tokens", "2000"],
+        input="/context\n/exit\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "window threshold 30000 tokens (window 32000 - reserve 2000)" in result.output
+    assert "context_window" not in session.path.read_text(encoding="utf-8")
+
+
 def test_continue_uses_validated_activity_time_not_creation_or_filename(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

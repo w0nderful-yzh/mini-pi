@@ -85,7 +85,7 @@ Python Coding Agent Harness
 | edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 只做精确唯一匹配，fuzzy 后置 |
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | Shell 边界 | `bash` 是无沙箱本地 shell | 同样是无沙箱本地 shell：`bash` 只约束 `cwd`，可读写 workspace 之外、可联网；文件工具的边界不适用于它，也不打算在 M7.8 引入 Docker/VM 沙箱 |
-| 上下文估算 | usage 锚点 + 其后消息的字符估算 | M7.8.1 按当前 wire 消息与工具 schema 预测下一请求；M7.8.2 用字符类权重和一次性工具模式开销校准 DeepSeek 输入。预算与窗口共用该估算；旧 `usage.total_tokens` 仅留在摘要切点与成本模型的消息区域估算中，历史 input usage 单独展示 |
+| 上下文估算 | usage 锚点 + 其后消息的字符估算 | M7.8.1 按当前 wire 消息与工具 schema 预测下一请求；M7.8.2 用字符类权重和一次性工具模式开销校准 DeepSeek 输入；M7.8.3 由运行时持有解析后的窗口策略，压缩决策与 CLI 展示共用。旧 `usage.total_tokens` 仅留在摘要切点与成本模型的消息区域估算中，历史 input usage 单独展示 |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
 | 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3-M7.5 已完成 CLI 新建/恢复/`/new`/同链 `/model` 切换、compaction 投影与手动 `/compact`；M7.6 接入窗口与成本触发；M7.D1 的 `/sessions` 与 `--continue` 严格加载全部候选；M7.7 已通过离线回归、真实 DeepSeek 与人工 CLI 验收 |
@@ -360,6 +360,7 @@ mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入
 - `/help` 列出可用命令；未知 `/命令` 只提示且不会作为任务发给模型
 - `/sessions` 严格加载当前 workspace 的全部候选，按活动时间显示短 id、活动模型、摘要状态和当前标记；任何候选损坏都会整体报错，不跳过后展示不完整列表。该命令只读本地 JSONL，不调用模型；恢复仍使用 `--continue` 或 `--resume <session.jsonl>`
 - `/status` 分开显示当前投影估算与最近任务的请求数、累计 Provider 用量、工具数和耗时；Session 恢复后从完整活动链重建统计，`/status full` 才显示完整路径。`/context` 分解当前投影，单列最近请求输入与任务累计用量，并显示当前模型的窗口压缩阈值与成本触发状态；`/tools` 列出工具
+- `--context-window INT` 可显式覆盖当前模型的窗口，`--reserve-tokens INT` 调整预留量（默认 8192，必须小于已配置窗口）。持久化会话的 prompt 前检查、工具轮检查、`/status` 与 `/context` 使用同一策略；`/model` 切换时显式窗口继续优先，否则重查新模型内置窗口，`/new` 继承本次配置。`--resume` 用本次 CLI 参数重新解析，不把窗口写入 JSONL。未知模型未配置窗口时自动压缩仍关闭；`--no-session` 只展示解析后的窗口，不执行需要 JSONL 的自动压缩
 - `/compact [instructions]` 手动压缩持久化会话：只在安全切点前生成摘要检查点，摘要请求不带工具，`instructions` 仅进入本次请求；输出摘要消息数、保留 entry 数、切点边界、压缩前后当前上下文估算与摘要调用的实测 usage。原始 message entry 一条不删，失败时不改 JSONL 与内存投影；`--no-session` 明确拒绝，不隐式建 JSONL
 - 同一套判定也会自动运行：M7.6b 起每次 `run()` 提交新 user 消息前按窗口策略（当前投影估算 > `context_window - reserve`）检查，需要时先压缩再追加这一条消息；M7.6c 起每个完整工具批次提交后、下一次请求前也用同一判定检查，压缩成功后同一次任务继续，已执行的工具不重放。窗口未知的模型不启用自动压缩，未超阈值不产生任何写入。M7.6d 起自动压缩失败（无安全切点、摘要或写盘失败、压缩后仍超阈值）以 agent error 结束这次任务：不追加假 assistant、不改投影、不再发出越界的下一次请求；已提交的消息与工具结果保留，一次性 CLI 调用返回非零码。M7.6f 起工具轮之间还有第二个触发：窗口内但旧工具结果占被摘要区域一半以上、且按 3 次后续请求算得摘要成本小于预计节省时提前压缩（旧输出按 2000 字符截断进入摘要请求，因此摘要成本与日志长度无关）；每次任务最多尝试一次，摘要阶段失败只放弃这次优化、不终止任务，写盘或重建失败仍以 agent error 终止；仅离线估算验证过收益（[记录](docs/benchmarks/m7-6f-cost-aware-compaction.md)），没有真实计费结论
 - 流式打印模型正文，默认工具事件根据已知命令形态显示操作标题、真实退出码、超时/截断与简短 stderr；未知或含凭据的 shell 命令采用保守标题，不推断任务成败。`--verbose` 展示参数及 Tool 层已截断日志并脱敏已知凭据。任务结束只打印一行请求、用量覆盖率、工具数和耗时；缺失 usage 明确标为不可用或部分实测。耗时在恢复后是 JSONL 消息时间的近似跨度
@@ -403,7 +404,7 @@ uv run pytest -m integration        # 需要 API Key
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
-| M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 进行中（M7.8.0、M7.8.5、M7.8.1、M7.8.2 完成；下一项 M7.8.3 Context Window 配置化） |
+| M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 进行中（M7.8.0、M7.8.5、M7.8.1、M7.8.2、M7.8.3 完成；下一项 M7.8.4 Runtime Hook 与 RunContext） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
@@ -482,7 +483,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 - **`bash` 不是沙箱**：文件工具的 Workspace 边界只约束 read/write/edit/search/git_diff，`bash` 是 `cwd = workspace root` 的无沙箱本地 shell（可以读写 workspace 之外、可以联网），也没有危险命令确认机制
 - 当前请求按 wire 消息与工具 schema 估算，M7.8.2 已用真实 DeepSeek input usage 校准字符类权重及工具模式固定开销（[四组固定样本记录](docs/benchmarks/m7-8-token-estimation.md)）；OpenAI、长真实会话与大量工具的偏差尚未量化。摘要切点与成本模型继续使用独立的消息区域估算，预测始终标为 estimated
 - 手动 `/compact`、prompt 前与工具轮之间的窗口触发，以及旧工具结果的成本感知提前压缩都已可用；摘要成本收益只有离线估算记录，未做真实计费对照
-- 已知模型的窗口都是 1M 级，窗口触发的自动压缩没有真实长任务样本；M7.7b 只用 DeepSeek 验证了手动 `/compact` 事务后的继续与 resume，OpenAI 因未配置 Key 未测
+- 已知模型的窗口都是 1M 级；自定义小窗口的自动压缩只经离线夹具验证，尚无真实长任务样本。M7.7b 只用 DeepSeek 验证了手动 `/compact` 事务后的继续与 resume，OpenAI 因未配置 Key 未测
 - `prompt_toolkit` 是可降级能力：非 tty 或未安装时回退单行 REPL；交互终端缺依赖会在 REPL 顶部打印降级原因（补全/历史/多行编辑不可用）
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
 - 支持平台为 macOS / Linux；进程组与文件权限语义依赖 POSIX，Windows 未支持
