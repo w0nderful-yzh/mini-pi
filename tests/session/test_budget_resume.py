@@ -49,7 +49,8 @@ def test_budget_limit_preserves_tool_pair_and_resume_continues_with_fresh_budget
         provider="deepseek",
         model="deepseek-flash",
         sessions_root=tmp_path / "sessions",
-        max_run_input_tokens=650,
+        # 请求含完整 system 与工具模式开销；750 留下第二批工具，再拦第三次请求。
+        max_run_input_tokens=750,
         on_event=events.append,
     )
 
@@ -73,7 +74,7 @@ def test_budget_limit_preserves_tool_pair_and_resume_continues_with_fresh_budget
         registry=_registry(),
         cwd=tmp_path,
         llm_factory=lambda provider, model: resumed_llm,
-        max_run_input_tokens=650,
+        max_run_input_tokens=750,
     )
     result = resumed.run("continue from saved observations")
 
@@ -86,7 +87,7 @@ def test_budget_limit_preserves_tool_pair_and_resume_continues_with_fresh_budget
     after = JsonlSession.load(runtime.path)
     assert after.entries[: len(before.entries)] == before.entries
     assert [entry.message.role for entry in after.entries[-2:]] == ["user", "assistant"]
-    assert resumed.max_run_input_tokens == 650
+    assert resumed.max_run_input_tokens == 750
 
 
 def test_budget_configuration_is_runtime_only_and_new_session_keeps_cli_setting(

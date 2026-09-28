@@ -610,6 +610,8 @@ M7.C6 起将两种 token 口径分开：一次 `run()` 多次请求的 Provider 
 
 M7.8.1 起，当前请求的窗口与任务预算预测使用同一次将发送的消息及工具 schema；prompt 前预检还包含待提交的用户输入和项目规则。上一轮 `usage.total_tokens` 含输出，只能用于摘要切点与成本模型的历史消息区域估算，不能作为下一次 input 的实测锚点。Provider `usage.input_tokens` 保留作历史实测和校准，`/context` 分类估算与当前请求预测、历史 usage 分开展示；细则见 Phase 3 计划。
 
+M7.8.2 起字符估算区分 ASCII、东亚文字及标点、其他宽字符和非 ASCII 窄字符；当前请求额外计一次请求框架开销，非空工具集额外计一次工具模式开销和实际 wire schema。系数来自固定 DeepSeek `usage.input_tokens` 对拍，记录在 `docs/benchmarks/m7-8-token-estimation.md`；其他模型及长任务未验证，预测仍标为 `estimated`。
+
 原始 `ToolMessage` 和 JSONL 记录保留真实、有界的 observation；展示摘要不写入模型消息。旧工具结果只在安全切点后通过 compaction 投影压缩，保持 tool call/result 配对和 `modified_files`；提前摘要需验证净成本收益（M7.6f 的成本模型与离线记录见 `docs/benchmarks/m7-6f-cost-aware-compaction.md`，没有真实计费结论前不声称节省费用）。
 
 ---

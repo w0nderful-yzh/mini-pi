@@ -27,8 +27,8 @@ from tests.conftest import FakeLLMClient, assistant
 
 _TIMESTAMP = datetime(2026, 9, 23, 18, 0, tzinfo=timezone.utc)
 
-# 字符规则每 4 字符 1 token：40 字符 = 10 token，1000 字符 = 250 token
-_SMALL = 40
+# ASCII 权重为每 5 字符 1 token；维持每条短消息 10 token 的切点条件。
+_SMALL = 50
 
 
 def append_message(
@@ -112,7 +112,7 @@ def test_repeat_compaction_updates_previous_summary_without_older_text() -> None
     append_message(path, SystemMessage(sections={"preamble": "p"}))
     append_message(path, UserMessage(content="ancient-" + "a" * _SMALL))
     append_message(path, AssistantMessage(content="ancient-" + "b" * _SMALL))
-    user2 = append_message(path, UserMessage(content="c" * 200))
+    user2 = append_message(path, UserMessage(content="c" * 250))
     append_message(path, AssistantMessage(content="d" * _SMALL))
     append_compaction(path, first_kept_entry_id=user2.id, summary="old summary")
     append_message(path, UserMessage(content="e" * _SMALL))
@@ -126,7 +126,7 @@ def test_repeat_compaction_updates_previous_summary_without_older_text() -> None
     assert result.summary == "## Goal\n继续"
     assert "<previous-summary>\nold summary\n</previous-summary>" in request
     assert "NEW conversation messages" in request
-    assert "[User]: " + "c" * 200 in request
+    assert "[User]: " + "c" * 250 in request
     # 上一次已摘要的原文与 system 快照都不再发送
     assert "ancient-" not in request
     assert "preamble" not in request

@@ -10,6 +10,10 @@ from mini_pi.context.tokens import TokenSource, estimate_text_tokens
 from mini_pi.llm.openai_client import to_openai_messages, to_openai_tools
 from mini_pi.llm.types import Message, ToolSchema
 
+# DeepSeek 固定样本中，请求框架和工具模式有额外输入开销；仅作为估算，不标记为实测。
+_REQUEST_OVERHEAD_TOKENS = 18
+_TOOLS_OVERHEAD_TOKENS = 210
+
 
 @dataclass(frozen=True, slots=True)
 class RequestSnapshot:
@@ -32,7 +36,9 @@ def _estimate_wire(value: list[dict[str, object]]) -> int:
 
 def estimate_tools_tokens(tools: Sequence[ToolSchema]) -> int:
     """按 Provider function 载荷估算当前工具集。"""
-    return _estimate_wire(to_openai_tools(list(tools)))
+    if not tools:
+        return 0
+    return _estimate_wire(to_openai_tools(list(tools))) + _TOOLS_OVERHEAD_TOKENS
 
 
 def estimate_request(
@@ -49,7 +55,11 @@ def estimate_request(
         list(frozen_messages), include_reasoning=provider == "deepseek"
     )
     # schema 与消息分别估算，方便分类展示；两项相加是唯一的请求预测。
-    input_tokens = _estimate_wire(wire_messages) + estimate_tools_tokens(frozen_tools)
+    input_tokens = (
+        _estimate_wire(wire_messages)
+        + (_REQUEST_OVERHEAD_TOKENS if wire_messages else 0)
+        + estimate_tools_tokens(frozen_tools)
+    )
     return RequestSnapshot(
         messages=frozen_messages,
         tools=frozen_tools,

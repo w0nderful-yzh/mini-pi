@@ -43,9 +43,9 @@ runner = CliRunner()
 _SMALL_WINDOW_MODEL = "test-e2e-small-window"
 _SMALL_WINDOW = 40_000
 
-# 旧回复约 25000 token：单独不到阈值，加上随后的工具轮才越线
-_OLD_REPLY = "x" * 100_000
-# 工作区里的真实日志文件：1000 行、约 43000 字节，read 后约 11000 token
+# ASCII 权重为 1/5：旧回复仍约 25000 token，单独不到阈值。
+_OLD_REPLY = "x" * 125_000
+# 工作区里的真实日志文件：1000 行、约 43000 字节，read 后参与越线。
 _LOG_PATH = "build.log"
 _LOG_LINE = "build log " + "y" * 29
 _LOG_LINES = 1_000

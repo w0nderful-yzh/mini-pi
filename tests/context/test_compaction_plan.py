@@ -22,9 +22,9 @@ from mini_pi.session.models import CompactionEntry, MessageEntry, SessionEntry
 
 _TIMESTAMP = datetime(2026, 9, 23, 12, 0, tzinfo=timezone.utc)
 
-# 字符规则每 4 字符 1 token：40 字符 = 10 token，200 字符 = 50 token
-_SMALL = 40
-_LARGE = 200
+# ASCII 权重为每 5 字符 1 token：50 字符 = 10 token，250 字符 = 50 token。
+_SMALL = 50
+_LARGE = 250
 
 
 def append_message(
@@ -73,7 +73,7 @@ def tool_round(path: list[SessionEntry]) -> tuple[MessageEntry, MessageEntry]:
         ToolMessage(
             tool_call_id="call_1",
             name="read",
-            content="r" * 400,
+            content="r" * 500,
             modified_files=["b.py"],
         ),
     )
@@ -103,7 +103,7 @@ def test_plan_maps_cut_to_real_entries_and_keeps_path_partition() -> None:
         entry.id for entry in path
     }
     assert plan.previous_summary is None
-    # 1 + 10 + 10 + 10 + 10 token：system 快照加四条消息
+    # 1 + 10 + 10 + 10 + 10 token：system 快照加四条消息。
     assert plan.tokens_before == TokenEstimate(tokens=41, source="estimated")
     assert plan.system_message == SystemMessage(sections={"preamble": "p"})
     assert plan.modified_files == ()

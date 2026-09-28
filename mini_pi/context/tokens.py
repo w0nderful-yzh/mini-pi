@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -16,8 +17,12 @@ from mini_pi.llm.types import (
     ToolMessage,
 )
 
-# 统一字符规则：每 4 个字符约 1 token，向上取整
-_CHARS_PER_TOKEN = 4
+# 权重分母固定，避免浮点误差；中文及东亚标点按 DeepSeek 实测校准。
+_WEIGHT_UNIT = 40
+_ASCII_WEIGHT = 8
+_CJK_WEIGHT = 25
+_OTHER_WIDE_WEIGHT = 40
+_OTHER_NARROW_WEIGHT = 20
 
 TokenSource = Literal["usage", "estimated"]
 
@@ -53,8 +58,8 @@ def estimate_tokens(messages: Sequence[Message]) -> TokenEstimate:
 
 
 def _estimate_message(message: Message) -> int:
-    """单条消息的字符规则估算。"""
-    return _ceil_div(len(_message_text(message)), _CHARS_PER_TOKEN)
+    """单条消息复用按字符类加权的文本估算。"""
+    return estimate_text_tokens(_message_text(message))
 
 
 def estimate_message_tokens(message: Message) -> int:
@@ -63,8 +68,28 @@ def estimate_message_tokens(message: Message) -> int:
 
 
 def estimate_text_tokens(text: str) -> int:
-    """对纯文本按同一字符规则估算；成本模型与统计复用，不引入第二套口径。"""
-    return _ceil_div(len(text), _CHARS_PER_TOKEN)
+    """按 ASCII、东亚字符和其他宽字符权重估算，供成本与统计共用。"""
+    weight = sum(_character_weight(char) for char in text)
+    return _ceil_div(weight, _WEIGHT_UNIT)
+
+
+def _character_weight(char: str) -> int:
+    """区分东亚文字与符号、其他宽字符及非 ASCII 窄字符。"""
+    codepoint = ord(char)
+    if codepoint < 128:
+        return _ASCII_WEIGHT
+    # 同时覆盖汉字、假名、韩文和东亚标点；emoji 等宽字符另取保守权重。
+    if (
+        0x2E80 <= codepoint <= 0xA000
+        or 0xAC00 <= codepoint <= 0xD7AF
+        or 0xF900 <= codepoint <= 0xFAFF
+        or 0xFF00 <= codepoint <= 0xFFEF
+        or 0x20000 <= codepoint <= 0x3134F
+    ):
+        return _CJK_WEIGHT
+    if unicodedata.east_asian_width(char) in {"W", "F"}:
+        return _OTHER_WIDE_WEIGHT
+    return _OTHER_NARROW_WEIGHT
 
 
 def _ceil_div(value: int, divisor: int) -> int:

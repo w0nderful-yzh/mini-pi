@@ -22,7 +22,7 @@ _SMALL_WINDOW_MODEL = "test-small-window"
 _SMALL_WINDOW = 40_000
 
 # 约 35000 token 的回复：单条就超过阈值，同时超过保留预算
-_HUGE_REPLY = "x" * 140_000
+_HUGE_REPLY = "x" * 180_000
 # 约 25000 / 15000 token：单条都在预算内，累计后才越过阈值
 _OLD_REPLY = "y" * 100_000
 _MEDIUM_REPLY = "z" * 60_000
@@ -212,4 +212,5 @@ def test_fixture_truly_exceeds_policy_threshold() -> None:
     policy = ContextPolicy(context_window=_SMALL_WINDOW)
 
     assert policy.threshold_tokens == _SMALL_WINDOW - policy.reserve_tokens
-    assert len(_HUGE_REPLY) // 4 > policy.threshold_tokens
+    # ASCII 1/5 的请求估算仍应越过窗口阈值。
+    assert len(_HUGE_REPLY) // 5 > policy.threshold_tokens

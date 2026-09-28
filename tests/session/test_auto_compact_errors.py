@@ -37,17 +37,18 @@ _SMALL_WINDOW = 40_000
 _TIGHT_WINDOW_MODEL = "test-auto-compact-errors-tight"
 _TIGHT_WINDOW = 24_000
 
-# 约 35000 token：单独就越过小窗口阈值，用于 prompt 前触发的失败
-_HUGE_REPLY = "x" * 140_000
+# ASCII 以 1/5 token 估算；这些尺寸维持原有窗口与安全切点关系。
+# 约 36000 token：单独就越过小窗口阈值，用于 prompt 前触发的失败。
+_HUGE_REPLY = "x" * 180_000
 # 约 25000 token：与一个工具轮相加后越过小窗口阈值
-_OLD_REPLY = "y" * 100_000
+_OLD_REPLY = "y" * 125_000
 # 约 15000 token 的工具结果：只够把工具轮推过阈值
-_TOOL_OUTPUT = "x" * 60_000
+_TOOL_OUTPUT = "x" * 75_000
 # 约 50000 token：单个工具轮本身就超过阈值与保留预算
-_GIANT_TOOL_OUTPUT = "z" * 200_000
+_GIANT_TOOL_OUTPUT = "z" * 250_000
 # 约 17500 token 与 30000 token：用于紧窗口下的“全部都在保留预算内”与“压完仍超”
-_MEDIUM_REPLY = "w" * 70_000
-_BIG_REPLY = "v" * 120_000
+_MEDIUM_REPLY = "w" * 87_500
+_BIG_REPLY = "v" * 150_000
 
 
 class _DumpArgs(BaseModel):

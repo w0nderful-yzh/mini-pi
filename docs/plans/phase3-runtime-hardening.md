@@ -1,6 +1,6 @@
 # Phase 3：Runtime Hardening 与外部能力（M7.8 / M8 / M9 / M10）
 
-> 状态：**M7.8.0、M7.8.5、M7.8.1 已完成，M7.8.2 为下一项**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
+> 状态：**M7.8.0、M7.8.5、M7.8.1、M7.8.2 已完成，M7.8.3 为下一项**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
 
 **目标：** 在接入 LSP / MCP 之前，先把「上下文有多少、预算怎么算、钩子挂在哪、改动怎么被守护」四件事定下来；之后按 LSP → MCP → 动态工具集 → 工具集恢复 → 基准的顺序扩展外部能力。
 
@@ -86,26 +86,11 @@
 
 ### M7.8.1 RequestSnapshot
 
-**交付物与验收（本提交）：** `mini_pi/context/request.py` 冻结消息与工具批次，按 Provider wire 形态估算下一请求；Loop 预算和实际 `llm.stream()` 共用快照，Session 窗口预检包含待提交的用户输入与项目规则，CLI 分开展示分类总量和当前请求预测。摘要切点/成本模型仍用消息区域估算，JSONL 不写派生快照。新增 system patch、schema、reasoning、模型切换、预算提示、Session 无写入与 CLI 测试；全量离线回归 552 passed、5 deselected，Ruff 与编译检查通过。
+**交付物与验收（`4fbedde`）：** `mini_pi/context/request.py` 冻结消息与工具批次，按 Provider wire 形态估算下一请求；Loop 预算和实际 `llm.stream()` 共用快照，Session 窗口预检包含待提交的用户输入与项目规则，CLI 分开展示分类总量和当前请求预测。摘要切点/成本模型仍用消息区域估算，JSONL 不写派生快照。新增 system patch、schema、reasoning、模型切换、预算提示、Session 无写入与 CLI 测试；全量离线回归 552 passed、5 deselected，Ruff 与编译检查通过。
 
 ### M7.8.2 Token 估算升级
 
-**目标：** 不严重低估实际 Context。
-
-**改动：**
-
-- 字符规则从单一「4 字符 / token」改为**按字符类加权**（ASCII、CJK、其他宽字符分别取系数），保持向上取整与可复现。
-- 在 M7.8.1 已有的工具 wire schema 计量上校准偏差；`source` 继续区分实测与估算，**不得**把当前请求预测或含估算的结果标成 `usage`。
-- M7.8.1 已停止把前一次 `usage.total_tokens` 当作当前请求的前缀真值；本项保留原始 usage 供偏差校准，摘要切点/成本模型继续使用独立的消息估算。改变既有单测预期时写出因果，不能只改期望值。
-
-**方法（先测后调）：**
-
-- 新增可对拍的夹具：固定中文、英文、混合文本与工具 schema，分别比较 `estimate_request()` 与真实 `usage.input_tokens`，输出偏差比。
-- 用真实 DeepSeek 分别跑上述最小样本；记录模型、脱敏载荷尺寸、估算值、input usage、偏差和最终系数到 `docs/benchmarks/m7-8-token-estimation.md`。若没有 Key 或 Provider 不给 usage，就保留「待实测」状态，不声称完成本项验收；**没有实测前不写具体倍数**。
-
-**不做：** 不追求 tokenizer 级精确，不引入 `tiktoken` 等新依赖，不按模型维护系数表（除非实测显示必须）。
-
-**验收：** 中文样本不再系统性低估（偏差落在记录文件声明的容差内）；`tests/context/test_tokens.py` 覆盖三类字符、工具 schema、历史 usage 与当前预测的隔离；全量离线测试全绿。
+**交付物与验收（本提交）：** `tokens.py` 改为可复现的字符类加权估算，`request.py` 加入请求框架与非空工具模式的一次性开销；不更改历史 usage 的来源标记。固定中文、英文、混合文本和工具 schema 四组真实 `deepseek-flash` input usage 对拍及系数见 [记录](../benchmarks/m7-8-token-estimation.md)，均落在声明的 ±15% 容差内，中文 +1.4%。单测覆盖字符类、工具 schema 和历史 usage 隔离；全量离线回归 554 passed、5 deselected，Ruff 与编译检查通过。OpenAI、长真实会话及大量工具未对拍；不引入 tokenizer 依赖或模型系数表。
 
 ### M7.8.3 Context Window 配置化
 
@@ -240,8 +225,8 @@ RAG / Vector DB             通用 Agent Scheduler
 | --- | --- | --- |
 | M7.8.0 | 前置小修：`read` 空文件、`bash` 无沙箱与平台说明 | 已完成（`0e5848e`；10 passed，全量 544 passed、5 deselected） |
 | M7.8.5 | CI 与 ruff 静态检查 | 已完成（`0517a4e`；本地 544 passed、5 deselected；远端待运行） |
-| M7.8.1 | RequestSnapshot 统一请求口径 | 已完成（本提交；552 passed、5 deselected） |
-| M7.8.2 | Token 估算升级（CJK 安全 + 工具 schema + 实测校准） | 未开始 |
+| M7.8.1 | RequestSnapshot 统一请求口径 | 已完成（`4fbedde`；552 passed、5 deselected） |
+| M7.8.2 | Token 估算升级（CJK 安全 + 工具 schema + 实测校准） | 已完成（本提交；DeepSeek 四组实测；554 passed、5 deselected） |
 | M7.8.3 | Context Window 配置化（`--context-window`） | 未开始 |
 | M7.8.4 | Runtime Hook 与 RunContext | 未开始 |
 | M7.8.6 | M7.8 总验收与文档同步 | 未开始 |

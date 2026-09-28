@@ -90,7 +90,8 @@ def test_budget_stops_after_complete_tool_batch_without_replaying_tools() -> Non
         state,
         llm,
         _registry(),
-        max_run_input_tokens=400,
+        # 工具模式固定开销纳入后，500 仍允许第二请求并在第三次前阻止。
+        max_run_input_tokens=500,
         on_event=events.append,
     )
 
@@ -105,7 +106,7 @@ def test_budget_stops_after_complete_tool_batch_without_replaying_tools() -> Non
     end = events[-1]
     assert isinstance(end, AgentEndEvent)
     assert end.reason == "budget_limit"
-    assert (end.budget_limit, end.budget_used, end.budget_source) == (400, 280, "provider")
+    assert (end.budget_limit, end.budget_used, end.budget_source) == (500, 280, "provider")
     assert end.predicted_next_input is not None
 
 

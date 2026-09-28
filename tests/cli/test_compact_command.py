@@ -20,7 +20,7 @@ runner = CliRunner()
 # 默认保留窗口是 20k token，因此历史里要有一条超过它的长回复才会产生切点
 _LONG_REPLY = "x" * 100_000
 # 约 35000 token：单条就超过小窗口阈值，用于自动压缩触发的失败路径
-_HUGE_REPLY = "y" * 140_000
+_HUGE_REPLY = "y" * 180_000
 
 
 def _patch_environment(
