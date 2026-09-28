@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from mini_pi.context.request import estimate_request, estimate_tools_tokens
+import pytest
+
+from mini_pi.context.request import (
+    _TOOL_FRAMING_TOKENS,
+    _TOOLS_OVERHEAD_TOKENS,
+    estimate_request,
+    estimate_tools_tokens,
+)
 from mini_pi.context.tokens import TokenEstimate, estimate_text_tokens, estimate_tokens
 from mini_pi.llm.types import (
     AssistantMessage,
@@ -115,16 +122,25 @@ def test_very_long_message_uses_ceiling_division() -> None:
     assert estimate_tokens([UserMessage(content="x" * 100_001)]).tokens == 20001
 
 
-def test_tool_schema_uses_wire_payload_and_one_mode_overhead() -> None:
-    """工具模式开销只加一次，schema 文本越长仍需增加预测。"""
+def test_tool_schema_counts_wire_payload_and_per_tool_framing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """工具模式固定开销只加一次；每个工具另计自身 wire 载荷与结构开销。"""
     small = ToolSchema(name="ping", description="Pong", parameters={"type": "object"})
     large = ToolSchema(
         name="read", description="读取工作区文件。" * 10, parameters={"type": "object"}
     )
     assert estimate_tools_tokens([]) == 0
     assert estimate_tools_tokens([small, large]) > estimate_tools_tokens([small])
-    # 第二个工具只增加自己的 wire 载荷，不重复计入工具模式固定开销。
-    assert estimate_tools_tokens([small, large]) - estimate_tools_tokens([small]) < 100
+
+    # 先取完整值，再把两个常数清零单独观察 wire 载荷：
+    # 两者之差必须正好是「一次性固定开销 + 每个工具一次结构开销」
+    full = estimate_tools_tokens([small] * 4)
+    monkeypatch.setattr("mini_pi.context.request._TOOLS_OVERHEAD_TOKENS", 0)
+    monkeypatch.setattr("mini_pi.context.request._TOOL_FRAMING_TOKENS", 0)
+    wire_only = estimate_tools_tokens([small] * 4)
+
+    assert full - wire_only == _TOOLS_OVERHEAD_TOKENS + 4 * _TOOL_FRAMING_TOKENS
 
 
 def test_historical_usage_remains_separate_from_current_request() -> None:

@@ -333,30 +333,43 @@ def mode_scale(args: argparse.Namespace, records: list[dict[str, Any]]) -> None:
 
 
 def mode_tools(args: argparse.Namespace, records: list[dict[str, Any]]) -> None:
-    """复核当前工具集下的「工具模式」请求开销：估算 vs Provider 实测 input。"""
+    """按工具数扫描「工具模式」开销：估算 vs Provider 实测 input，并给出边际实测值。"""
     key = resolve_api_key(PROVIDER, env_var="DEEPSEEK_API_KEY")
     if not key:
         raise SystemExit("DeepSeek API Key 不可用：工具开销复核未执行，不声称通过")
     client = DeepSeekClient(model=MODEL, api_key=key)
-    schemas = build_default_registry(Workspace(PROJECT)).schemas()
+    available = build_default_registry(Workspace(PROJECT)).schemas()
     messages = [
         SystemMessage(content="请只回复：收到。"),
         UserMessage(content="请回复收到。"),
     ]
-    for label, tools in (("no_tools", []), (f"default_registry_{len(schemas)}", schemas)):
+    counts = [int(item) for item in args.tool_counts.split(",")]
+    if any(count < 0 or count > len(available) for count in counts):
+        raise SystemExit(f"--tool-counts 必须在 0..{len(available)} 之间：{counts}")
+    previous: tuple[int, int] | None = None
+    for count in counts:
+        tools = available[:count]
         prediction = estimate_request(messages, tools, provider=PROVIDER, model=MODEL)
         response = client.complete(messages, tools)
         if response.usage is None or response.usage.input_tokens <= 0:
-            raise SystemExit(f"{label}: Provider 未返回有效 input usage")
+            raise SystemExit(f"tools_{count}: Provider 未返回有效 input usage")
         actual = response.usage.input_tokens
-        record = {
+        record: dict[str, Any] = {
             "kind": "tool_overhead",
-            "case": label,
-            "tools": len(tools),
+            "case": f"tools_{count}",
+            "tools": count,
             "estimate": prediction.input_tokens,
             "input_usage": actual,
             "error_pct": round((prediction.input_tokens / actual - 1) * 100, 1),
         }
+        if previous is not None:
+            added_tools = count - previous[0]
+            if added_tools > 0:
+                # 每多一个工具实际多出的 input：用于判断固定项还是按工具线性增长
+                record["marginal_actual_per_tool"] = round(
+                    (actual - previous[1]) / added_tools, 1
+                )
+        previous = (count, actual)
         records.append(record)
         print(json.dumps(record, ensure_ascii=False), flush=True)
 
@@ -375,6 +388,11 @@ def main() -> None:
         action="append",
         default=None,
         help="只跑指定任务名（可重复），用于重跑单条基线",
+    )
+    parser.add_argument(
+        "--tool-counts",
+        default="0,1,3,7",
+        help="tools 模式扫描的工具数（逗号分隔，按默认注册表顺序取前 N 个）",
     )
     parser.add_argument("--json", type=Path, default=None, help="把全部记录写到该文件")
     args = parser.parse_args()

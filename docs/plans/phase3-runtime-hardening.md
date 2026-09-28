@@ -34,11 +34,11 @@ M7.9 是小批次修正与测量，不修改 Agent 架构；M8 按收益逐项�
 
 ### M7.9.3 真实任务基线与规模测量
 
-**已交付。** 新增离线基线用例 `tests/integration/test_task_baseline.py`（四条固定任务形态：只读、跨文件定位、修改后验证、命令失败后换命令并修复；脚本化 FakeLLM 走生产装配路径，断言请求数、工具调用数、终止原因、`modified_files`，任务完成与否由任务结束后重跑 pytest 的真实结果判定）与驱动器 `docs/benchmarks/m7-9-baseline.py`（`real` / `scale` / `tools` 三种模式，真实任务在临时 workspace 与临时 HOME 中运行，`--only` 可重跑单条）。记录见 [M7.9.3 基线](../benchmarks/m7-9-baseline.md)。
+**已交付。** 新增离线基线用例 `tests/integration/test_task_baseline.py`（四条固定任务形态：只读、跨文件定位、修改后验证、命令失败后换命令并修复；脚本化 FakeLLM 走生产装配路径，断言请求数、工具调用数、终止原因、`modified_files`，任务完成与否由任务结束后重跑 pytest 的真实结果判定）与驱动器 `docs/benchmarks/m7-9-baseline.py`（`real` / `scale` / `tools` 三种模式，真实任务在临时 workspace 与临时 HOME 中运行，`--only` 可重跑单条，`--tool-counts` 扫描工具数）。记录见 [M7.9.3 基线](../benchmarks/m7-9-baseline.md)。
 
 真实 Provider（`deepseek-flash`）四条任务各一次，全部 `completed`、退出码 0：合计 16 次请求、20 次工具调用、35,689 实测 input / 1,587 实测 output、15.1s，两个修复任务的 `calculator.py` 改动由 pytest 复验通过，两个只读任务没有改动文件。规模测量：1600 条消息恢复 129 ms / 6.87 MB 分配峰值，40 个候选 × 200 条时 `/sessions` 与 `--continue` 约 1.3 s。
 
-**验收：** 离线用例 5 passed 且可重复；真实样本按 Provider usage 记录，未把估算当实测。工具模式开销复核发现 7 个工具时估算低于实测 16.6%（超出 M7.8.2 的 ±15% 固定样本容差）：无工具请求仍准确，差额来自 M7.8.2 用 1–2 个工具校准的**固定**工具模式开销，而实际开销随工具数继续增长。本次不改常数，建议先做 1/3/7 工具对照再决定是否改为「固定 + 每工具」结构。
+**验收与随之落地的估算修正：** 离线用例 5 passed 且可重复；真实样本按 Provider usage 记录，未把估算当实测。`tools` 模式复核发现 7 个工具时低估 16.6%（超出 M7.8.2 的 ±15% 容差），按 1/3/7 工具扫描拟合出「一次性 220 + 每工具 32 结构开销」，`estimate_tools_tokens()` 改为按工具数累加结构开销；0–7 个工具复验（含未参与拟合的 2 与 5）全部在 ±5% 内，预算夹具阈值随新预测重新标定。该修正只影响工具项，`source` 仍标为 estimated；只在 `deepseek-flash` 上对拍过。
 
 ### M7.9.4 CLI 视觉整理
 
@@ -123,7 +123,7 @@ Prompt section patch 只记录模型可见文本，无法单独恢复 server 配
 | M7.8 CI 修补 | 已完成 | `fb5f387`；彩色帮助输出回归，566 passed / 5 deselected；[GitHub CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 的 Test/Lint/Compile 通过 |
 | M7.9.1 未完成任务的退出语义 | 已完成 | `step_limit` 携带上限值、一次性退出码按终止原因映射（0/1/2/3/130）；全量 574 passed / 5 deselected；`8a8d297` |
 | M7.9.2 工作区状态与改动事实 | 已完成 | 新增只读 `git_status`（分组状态 + workspace 相对路径 + 非 git 可解释失败），状态路径不进入 Session 元数据；全量 588 passed / 5 deselected |
-| M7.9.3 真实任务基线与规模测量 | 已完成 | 离线基线用例 5 passed；真实 DeepSeek 四条任务 4/4 completed（16 请求 / 20 工具调用 / 35,689 input），规模与工具开销记录见 [基线](../benchmarks/m7-9-baseline.md)；发现 7 工具估算低估 16.6%，待 1/3/7 对照后再改常数 |
+| M7.9.3 真实任务基线与规模测量 | 已完成 | 离线基线用例 5 passed；真实 DeepSeek 四条任务 4/4 completed（16 请求 / 20 工具调用 / 35,689 input）；工具开销按 1/3/7 扫描改为「一次性 220 + 每工具 32」，0–7 工具复验 ±5% 内；全量 593 passed / 5 deselected；[基线](../benchmarks/m7-9-baseline.md) |
 | M7.9.4 | 未开始 | CLI 视觉整理 |
 | M8.0–M8.5 | 未开始 | 交互、只读 LSP、MCP、活动工具集、恢复、对照评测 |
 | M9 / M10 | 未开始 | 分别等待跨 Session 工作流和隔离并行任务 |

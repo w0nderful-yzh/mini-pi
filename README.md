@@ -85,7 +85,7 @@ Python Coding Agent Harness
 | edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 只做精确唯一匹配，fuzzy 后置 |
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | Shell 边界 | `bash` 是无沙箱本地 shell | 同样是无沙箱本地 shell：`bash` 只约束 `cwd`，可读写 workspace 之外、可联网；文件工具的边界不适用于它。接入不可信外部工具前重新评估执行权限 |
-| 上下文估算 | usage 锚点 + 其后消息的字符估算 | M7.8.1 按当前 wire 消息与工具 schema 预测下一请求；M7.8.2 用字符类权重和一次性工具模式开销校准 DeepSeek 输入；M7.8.3 由运行时持有解析后的窗口策略，压缩决策与 CLI 展示共用。旧 `usage.total_tokens` 仅留在摘要切点与成本模型的消息区域估算中，历史 input usage 单独展示 |
+| 上下文估算 | usage 锚点 + 其后消息的字符估算 | M7.8.1 按当前 wire 消息与工具 schema 预测下一请求；M7.8.2 用字符类权重校准 DeepSeek 输入；M7.9.3 按 1/3/7 工具实测把工具开销拆成「一次性模式开销 + 每工具 wire 结构开销 + schema 文本」，避免工具变多后系统性低估；M7.8.3 由运行时持有解析后的窗口策略，压缩决策与 CLI 展示共用。旧 `usage.total_tokens` 仅留在摘要切点与成本模型的消息区域估算中，历史 input usage 单独展示 |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
 | 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3-M7.5 已完成 CLI 新建/恢复/`/new`/同链 `/model` 切换、compaction 投影与手动 `/compact`；M7.6 接入窗口与成本触发；M7.D1 的 `/sessions` 与 `--continue` 严格加载全部候选；M7.7 已通过离线回归、真实 DeepSeek 与人工 CLI 验收 |
@@ -492,7 +492,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行
 - **`bash` 不是沙箱**：文件工具的 Workspace 边界只约束 read/write/edit/search/git_diff，`bash` 是 `cwd = workspace root` 的无沙箱本地 shell（可以读写 workspace 之外、可以联网），也没有危险命令确认机制
-- 当前请求按 wire 消息与工具 schema 估算，M7.8.2 已用真实 DeepSeek input usage 校准字符类权重及工具模式固定开销（[四组固定样本记录](docs/benchmarks/m7-8-token-estimation.md)）。**已知偏差**：M7.9.3 复核发现默认 7 个工具时估算低于实测 16.6%（无工具请求仍准确），因为固定开销是按 1–2 个工具校准的，而实际开销随工具数继续增长；在按 1/3/7 工具重新对拍前，多工具场景的预测偏乐观（[记录](docs/benchmarks/m7-9-baseline.md)）。OpenAI 与 1M 窗口长会话的偏差仍未量化。摘要切点与成本模型继续使用独立的消息区域估算，预测始终标为 estimated
+- 当前请求按 wire 消息与工具 schema 估算，字符类权重与工具模式开销都用真实 DeepSeek input usage 校准（[M7.8.2 四组固定样本](docs/benchmarks/m7-8-token-estimation.md)、[M7.9.3 工具数扫描与复验](docs/benchmarks/m7-9-baseline.md)）。工具开销按「一次性模式开销 + 每工具 wire 结构开销 + schema 文本」计算，0–7 个工具实测偏差在 ±5% 内；OpenAI 与 1M 窗口长会话仍未量化。摘要切点与成本模型继续使用独立的消息区域估算，预测始终标为 estimated
 - 手动 `/compact`、prompt 前与工具轮之间的窗口触发，以及旧工具结果的成本感知提前压缩都已可用；摘要成本收益只有离线估算记录，未做真实计费对照
 - 已知模型的窗口都是 1M 级；自定义小窗口的自动压缩只经离线夹具验证，尚无真实长任务样本。M7.7b 只用 DeepSeek 验证了手动 `/compact` 事务后的继续与 resume，OpenAI 因未配置 Key 未测
 - `prompt_toolkit` 是可降级能力：非 tty 或未安装时回退单行 REPL；交互终端缺依赖会在 REPL 顶部打印降级原因（补全/历史/多行编辑不可用）

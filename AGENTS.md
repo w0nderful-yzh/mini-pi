@@ -39,7 +39,7 @@
 - API Key 只从环境变量或用户级 `~/.mini-pi/auth.json` 读取；不得写入项目、日志或 Session。真实认证文件和输入历史保持限制权限。
 - JSONL Session 严格加载，损坏候选不能被静默跳过；恢复沿活动 parent 链构建投影。Session fork 尚未实现，需求和前置见 Phase 3。
 - 每次任务前只读取 git root 到 workspace 祖先链的 `AGENTS.md`；规则变化记录 prompt section patch，不启动时扫描整个仓库。读取失败在提交用户消息前报错。
-- 下一请求的窗口和任务预算使用同一批将发送的消息及工具 schema（RequestSnapshot）。Provider `usage.input_tokens` 是历史实测；当前请求预测是估算，不能把上轮 `usage.total_tokens` 当下一轮 input 真值。未知窗口不启用自动压缩。
+- 下一请求的窗口和任务预算使用同一批将发送的消息及工具 schema（RequestSnapshot）。Provider `usage.input_tokens` 是历史实测；当前请求预测是估算，不能把上轮 `usage.total_tokens` 当下一轮 input 真值。工具成本必须按工具数累加（一次性模式开销 + 每工具结构开销 + schema 文本），只算固定开销会随工具变多而系统性低估。未知窗口不启用自动压缩。
 - Compaction 只在安全切点替换可恢复的模型投影，不删原始 JSONL，不拆 tool call/result，也不丢 `modified_files`。窗口触发的摘要失败及写盘失败终止本次 run；成本触发的摘要失败只放弃优化，写盘失败仍终止。不把离线成本估算说成真实节费。
 
 ## 编码与验证

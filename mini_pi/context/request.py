@@ -12,7 +12,10 @@ from mini_pi.llm.types import Message, ToolSchema
 
 # DeepSeek 固定样本中，请求框架和工具模式有额外输入开销；仅作为估算，不标记为实测。
 _REQUEST_OVERHEAD_TOKENS = 18
-_TOOLS_OVERHEAD_TOKENS = 210
+# 工具模式的一次性开销，与每个工具自身的 wire 结构开销分开：M7.9.3 用 1/3/7 个工具
+# 实测对拍发现，只按 schema 文本计量会随工具数线性低估（7 个工具时 −16.6%）。
+_TOOLS_OVERHEAD_TOKENS = 220
+_TOOL_FRAMING_TOKENS = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,10 +38,18 @@ def _estimate_wire(value: list[dict[str, object]]) -> int:
 
 
 def estimate_tools_tokens(tools: Sequence[ToolSchema]) -> int:
-    """按 Provider function 载荷估算当前工具集。"""
+    """按 Provider function 载荷估算当前工具集。
+
+    组成：每个工具的 schema 文本 + 每工具一次的 wire 结构开销 + 进入工具模式的一次性开销。
+    结构开销必须按工具数累加，否则工具越多越低估。
+    """
     if not tools:
         return 0
-    return _estimate_wire(to_openai_tools(list(tools))) + _TOOLS_OVERHEAD_TOKENS
+    return (
+        _estimate_wire(to_openai_tools(list(tools)))
+        + _TOOLS_OVERHEAD_TOKENS
+        + _TOOL_FRAMING_TOKENS * len(tools)
+    )
 
 
 def estimate_request(
