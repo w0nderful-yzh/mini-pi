@@ -1,6 +1,6 @@
 # Phase 3：Runtime Hardening 与外部能力（M7.8 / M8 / M9 / M10）
 
-> 状态：**已按 2026-09-28 的代码基线复核，尚未开始实施**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M7.8 未开始，M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
+> 状态：**M7.8.0 已完成，M7.8.5 为下一项**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
 
 **目标：** 在接入 LSP / MCP 之前，先把「上下文有多少、预算怎么算、钩子挂在哪、改动怎么被守护」四件事定下来；之后按 LSP → MCP → 动态工具集 → 工具集恢复 → 基准的顺序扩展外部能力。
 
@@ -78,14 +78,7 @@
 
 ### M7.8.0 前置小修
 
-**改动：**
-
-- `read` 空文件（**唯一剩余代码改动**）：`total == 0` 时返回空内容并附一行说明（如 `[File is empty.]`），只有 `total > 0 and offset > total` 才报 `offset ... beyond end of file`。语义定为「空文件永远返回空内容」，让模型能区分「文件是空的」与「路径错了」。
-- 文档措辞：README §2/§4/§9（`bash` 是**无沙箱本地 shell**、支持平台为 **macOS / Linux**、当前估算口径）与 `AGENTS.md` §9 边界说明。**这部分已随本规划提交一并落地**，实施该子项时只需复核，不再重复修改。
-
-**不做：** 不实现 Docker / VM 沙箱，不引入 Permission / Capability 系统（等真实需求）。
-
-**验收：** `tests/test_read.py` 增加空文件与 `offset` 越界两组用例（空文件返回空内容、非空文件越界仍报错）；已落地的文档措辞与实际行为一致。
+**交付物与验收（本提交）：** `read` 对空文件返回 `[File is empty.]`，包括显式 `offset`；非空文件越界仍报 `ToolError`。`tests/test_read.py` 10 passed；全量离线回归 544 passed、5 deselected（`NO_COLOR` 清除、`TERM=xterm-256color`）；README 的无沙箱 shell、macOS/Linux 与估算口径，及 `AGENTS.md` §9 边界说明已复核。
 
 ### M7.8.5 CI 与静态检查
 
@@ -277,7 +270,7 @@ RAG / Vector DB             通用 Agent Scheduler
 
 | 里程碑 | 内容 | 状态 |
 | --- | --- | --- |
-| M7.8.0 | 前置小修：`read` 空文件、`bash` 无沙箱与平台说明 | 未开始 |
+| M7.8.0 | 前置小修：`read` 空文件、`bash` 无沙箱与平台说明 | 已完成（本提交；10 passed，全量 544 passed、5 deselected） |
 | M7.8.5 | CI 与 ruff 静态检查 | 未开始 |
 | M7.8.1 | RequestSnapshot 统一请求口径 | 未开始 |
 | M7.8.2 | Token 估算升级（CJK 安全 + 工具 schema + 实测校准） | 未开始 |

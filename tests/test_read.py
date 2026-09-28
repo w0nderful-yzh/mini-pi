@@ -23,6 +23,19 @@ def test_reads_whole_file(tool: ReadTool) -> None:
     assert result.details == {"path": "notes.txt", "total_lines": 3}
 
 
+@pytest.mark.parametrize("offset", [1, 3])
+def test_empty_file_reports_empty_content(tmp_path: Path, offset: int) -> None:
+    """空文件没有可分页的行，即使指定较大 offset 也明确说明文件为空。"""
+    (tmp_path / "empty.txt").write_text("", encoding="utf-8")
+    tool = ReadTool(Workspace(tmp_path))
+
+    result = tool.execute(path="empty.txt", offset=offset)
+
+    assert result.content == "[File is empty.]"
+    assert result.details == {"path": "empty.txt", "total_lines": 0}
+    assert result.modified_files == []
+
+
 def test_offset_and_limit(tool: ReadTool) -> None:
     """offset/limit 分页读取，并给出下一段起点。"""
     result = tool.execute(path="notes.txt", offset=2, limit=1)
@@ -32,8 +45,8 @@ def test_offset_and_limit(tool: ReadTool) -> None:
 
 def test_offset_beyond_end_is_error(tool: ReadTool) -> None:
     """offset 越界属于调用错误，直接报错。"""
-    with pytest.raises(ToolError, match="beyond end of file"):
-        tool.execute(path="notes.txt", offset=99)
+    with pytest.raises(ToolError, match=r"offset 4 is beyond end of file \(3 lines\)"):
+        tool.execute(path="notes.txt", offset=4)
 
 
 def test_missing_file_is_error(tool: ReadTool) -> None:

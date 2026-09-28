@@ -43,6 +43,12 @@ class ReadTool(Tool):
             raise ToolError(f"file is not valid UTF-8: {rel} ({exc})") from exc
         lines = text.splitlines()
         total = len(lines)
+        if total == 0:
+            # 空文件没有有效行号；优先报告文件为空，避免误判成分页越界。
+            return ToolResult(
+                content="[File is empty.]",
+                details={"path": rel, "total_lines": 0},
+            )
         if offset > total:
             raise ToolError(f"offset {offset} is beyond end of file ({total} lines)")
         window = lines[offset - 1 : offset - 1 + (limit or self.max_lines)]
