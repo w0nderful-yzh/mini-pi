@@ -132,6 +132,8 @@ def _tool_action(name: str, arguments: dict[str, object]) -> str:
         return _shell_action(command) if isinstance(command, str) else "Run shell command"
     if name == "git_diff":
         return f"Inspect git diff for {path}" if isinstance(path, str) else "Inspect git diff"
+    if name == "git_status":
+        return "Inspect git status"
     return name
 
 
@@ -164,11 +166,13 @@ def _tool_result(event: ToolExecutionEndEvent, *, content: str | None = None) ->
                 line += f" · stderr: {stderr}"
     elif event.tool_call.name == "search" and isinstance(details.get("count"), int):
         line = f"{details['count']} matches"
+    elif event.tool_call.name == "git_status" and isinstance(details.get("paths"), int):
+        line = f"{details['paths']} changed path(s)"
     elif event.tool_call.name in {"read", "write", "edit", "git_diff"}:
         line = "completed"
     else:
         line = _preview(observation)
-    if event.tool_call.name in {"read", "git_diff", "search"} and (
+    if event.tool_call.name in {"read", "git_diff", "git_status", "search"} and (
         "[output truncated]" in observation
         or "[Truncated at " in observation
         or "[Showing lines " in observation

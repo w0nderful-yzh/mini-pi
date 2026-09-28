@@ -118,7 +118,7 @@ ToolRegistry（schema 校验 / 调度 / 错误分类）
  │
  │  **kwargs
  ▼
-Tool（read / write / edit / search / bash / git_diff）
+Tool（read / write / edit / search / bash / git_diff / git_status）
  │
  │  path（只经 Workspace）
  ▼
@@ -226,7 +226,8 @@ mini-pi/
 │   │   ├── edit.py
 │   │   ├── search.py
 │   │   ├── bash.py
-│   │   └── git.py
+│   │   ├── git.py
+│   │   └── git_status.py
 │   │
 │   ├── session/
 │   │   ├── models.py                 # Header / MessageEntry / CompactionEntry
@@ -298,12 +299,13 @@ LLM → Tool Call → Tool → Observation → LLM → ...
 当前工具：
 
 ```text
-read     读文件（offset/limit、二进制识别、截断续读）
-write    原子写（自动建父目录）
-edit     精确唯一匹配替换（多 edit、不重叠、输出 diff）
-search   搜索代码（依赖自带 rg，无可用 rg 时用 Python 扫描）
-bash     执行命令（cwd=workspace、timeout、stdout/stderr 分离、exit code）
-git_diff 查看改动（支持 staged）
+read       读文件（offset/limit、二进制识别、截断续读）
+write      原子写（自动建父目录）
+edit       精确唯一匹配替换（多 edit、不重叠、输出 diff）
+search     搜索代码（依赖自带 rg，无可用 rg 时用 Python 扫描）
+bash       执行命令（cwd=workspace、timeout、stdout/stderr 分离、exit code）
+git_diff   查看内容差异（支持 staged）
+git_status 观察工作区状态（分支、已暂存/未暂存/未跟踪/冲突，只读）
 ```
 
 约定：
@@ -312,6 +314,8 @@ git_diff 查看改动（支持 staged）
 - 可预期失败抛 `ToolError`，Loop 转成 `is_error` observation 回传模型
 - 非预期异常直接冒泡（Fail Fast）
 - 文件操作必须经过 `Workspace`，禁止工具自行 `open()`
+- `modified_files` 只列工具确知改动的路径：只读工具（`read` / `search` / `git_diff` / `git_status`）与 `bash` 都留空，shell 改了哪些文件无法可靠推断。需要改动事实时用 `git_status` 观察状态、`git_diff` 查看内容，不靠模型总结补
+- `git_status` 只观察工作区：输出按暂存 / 未暂存 / 未跟踪 / 冲突分组，路径相对 workspace；查询限定在 workspace 内，非 git workspace 明确报错，不返回空的“干净”结果
 
 ### 6.4 Workspace
 
@@ -406,7 +410,7 @@ uv run pytest -m integration        # 需要 API Key
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
 | M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；[远端 CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 已通过） |
-| M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 进行中（M7.9.1 已完成） |
+| M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 进行中（M7.9.1–M7.9.2 已完成） |
 | M8 | 长任务交互、只读 LSP、按需 MCP、活动工具集与恢复 | 未开始；每项以真实任务收益或明确服务需求为准 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
@@ -482,7 +486,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 
 ### 已知限制（当前实现）
 
-- `git_diff` 不展示未跟踪文件，`bash` 的改动无法可靠填写 `modified_files`；工作区状态观察列入 M7.9.2
+- `git_diff` 只显示已跟踪内容的差异，未跟踪文件需要 `git_status` 定位后用 `read` 查看
 - 长任务中不能追加 steering / follow-up 输入；当前只能等待或取消，M8.0 以前先用真实任务验证需求
 - `read` 分页输出前仍会读取整个文件；多候选 `/sessions` 与 `--continue` 会逐个完整加载会话，规模表现待 M7.9.3 测量。损坏候选会严格阻断列表和自动恢复，不静默跳过
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）

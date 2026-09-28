@@ -36,6 +36,13 @@ def test_stderr_is_preserved(tool: BashTool) -> None:
     assert "stderr:" in result.content
 
 
+def test_bash_never_declares_modified_files(tool: BashTool) -> None:
+    """shell 改了哪些文件无法可靠推断，因此一律不声明 modified_files。"""
+    result = tool.execute(command="echo written > created.txt")
+    assert "exit_code: 0" in result.content
+    assert result.modified_files == []
+
+
 def test_cwd_is_workspace_root(tool: BashTool, tmp_path: Path) -> None:
     """命令在 workspace root 下执行。"""
     tool.execute(command="pwd > cwd.txt")

@@ -1,6 +1,6 @@
 # Phase 3：可靠性、CLI 体验与外部能力
 
-> 状态：M7.8 与 M7.9.1 已完成；M7.9.2 起及 M8–M10 未开始。当前实施入口是 M7.9.2。已完成的交付与验收放在文末。
+> 状态：M7.8、M7.9.1 与 M7.9.2 已完成；M7.9.3 起及 M8–M10 未开始。当前实施入口是 M7.9.3。已完成的交付与验收放在文末。
 
 本计划依据 mini-pi 当前源码、[Pi 本地生产链路](../design/pi-production-architecture.md)和已有验收记录。Pi 参考仓库基线为 `/Users/yzh666/workspace/pi` 的 `d1230ea`；它的能力是设计参考，不是必须逐项复制的清单。实现前核对当前代码，不能把计划写成已交付行为。
 
@@ -8,7 +8,7 @@
 
 | 顺序 | 里程碑 | 进入下一步的条件 |
 | --- | --- | --- |
-| 1 | M7.9.1–M7.9.3 完成语义与真实任务基线 | M7.9.1 已完成；未完成任务不会以成功退出，M7.9.2–M7.9.3 仍需给出可复现的任务成功率、用量与耗时记录 |
+| 1 | M7.9.1–M7.9.3 完成语义与真实任务基线 | M7.9.1、M7.9.2 已完成；未完成任务不会以成功退出，工作区状态与改动事实可观察，M7.9.3 仍需给出可复现的任务成功率、用量与耗时记录 |
 | 2 | M7.9.4 CLI 视觉整理 | 宽屏、窄屏、无颜色和非 tty 均清晰；展示不改变模型或 Session 事实 |
 | 3 | M8.0 长任务交互 | 在真实长任务中确认追加指令的价值；安全轮次边界和持久化语义经测试 |
 | 4 | M8.1 只读 LSP | 固定任务证明定位、引用或诊断收益；若没有收益，暂缓扩展 |
@@ -26,15 +26,15 @@ M7.9 是小批次修正与测量，不修改 Agent 架构；M8 按收益逐项�
 
 ### M7.9.2 工作区状态与改动事实
 
-**现状：** `git_diff` 只查看已跟踪文件的未提交差异，未跟踪文件不可见；`bash` 无法可靠填写 `modified_files`。这会影响未来 Task 验收，不能靠模型的总结补齐事实。
+**已交付。** 新增只读工具 `git_status`（`mini_pi/tools/git_status.py`，name=`git_status`）：`git rev-parse --show-prefix` 先确认 workspace 在 git worktree 内，再以 `git status --porcelain=v1 --branch --untracked-files=all --ignored=no -z -- .` 观察状态，输出给出分支与 `conflicted` / `staged` / `unstaged` / `untracked` 分组计数（冲突放最前，避免按 head 截断时被大量普通改动挤掉），组内按路径排序；重命名渲染为 `原路径 -> 新路径`，两侧都有改动的路径在两个分组各出现一次。路径基准统一为 workspace 相对（子目录 workspace 用 `--show-prefix` 去掉仓库根前缀），查询用 `-- .` 限定在 workspace 内，因此仓库其他目录的改动不会混入；前缀不匹配属于前提被破坏，直接 `ToolError`。非 git workspace 报可解释错误，不返回空的“干净”结果。`git_diff` 继续只负责内容差异，`bash` 与只读工具的 `modified_files` 一律留空，状态路径不写入 Session 元数据。CLI 侧补上 `Inspect git status` 标题与 `N changed path(s)` 结果行。
 
-**交付：** 为 Agent 提供明确的 Git 工作区状态观察方式，覆盖未跟踪、已暂存和未暂存路径；`git_diff` 继续负责内容差异。`bash` 的改动仍标为未知，不推断为完整的 `modified_files`。非 Git workspace 必须有可解释结果。
+**验收：** `tests/test_git_status.py` 11 passed——干净、未跟踪、已暂存、未暂存（含两种删除）、两侧同时改动、暂存重命名、合并冲突、忽略文件、子目录 workspace 只报告本子树、非 git 报错、`modified_files` 为空、`AgentSession` 落盘后 ToolMessage 与原始 JSONL 都没有把脏路径写成 `modifiedFiles`；`tests/test_bash.py` 增加“bash 从不声明 modified_files”；`tests/cli/test_tool_events.py` 增加 `Inspect git status` 标题与 `N changed path(s)` 结果行；`tests/test_registry_defaults.py` 与 README 工具清单同步。全量 588 passed / 5 deselected。全部为离线真实 git 命令，不调用真实 API。
 
-**验收：** 临时 Git 仓库中的四类状态（干净、未跟踪、已暂存、未暂存）及非 Git 目录；验证状态不会误写入 Session 消息元数据。
+**遗留：** `git_diff` 仍不显示未跟踪文件内容（未跟踪文件没有索引侧差异，用 `git_status` 定位后 `read` 查看）；`bash` 的改动继续标为未知。
 
 ### M7.9.3 真实任务基线与规模测量
 
-**交付：** 固定少量只读、跨文件定位、修改后验证、失败后恢复任务，统一记录任务完成、请求数、工具调用、耗时、Provider 实测 input/output、最终退出原因。另测多 Session 候选及长 JSONL 的 `--continue` / `/sessions` 耗时与内存；记录原始样本、模型、环境和脱敏结果。
+**交付：** 固定少量只读、跨文件定位、修改后验证、失败后恢复任务，统一记录任务完成、请求数、工具调用、耗时、Provider 实测 input/output、最终退出原因。另测多 Session 候选及长 JSONL 的 `--continue` / `/sessions` 耗时与内存；记录原始样本、模型、环境和脱敏结果。同时复核 M7.8.2 的工具模式固定开销（M7.9.2 新增 `git_status` 后工具集已从 6 个变为 7 个，当时校准的固定值需要重新对拍）。
 
 **验收：** 离线 FakeLLM 链路可重复；真实 Provider 样本明确记录成功与失败，不把估算用量当实测，不因缺 Key 声称真实验收通过。基线形成后再决定 LSP、工具数量或 Session 加速是否有收益。
 
@@ -121,7 +121,8 @@ Prompt section patch 只记录模型可见文本，无法单独恢复 server 配
 | M7.8 Runtime Hardening | 已完成 | `0e5848e`、`0517a4e`、`4fbedde`、`e19182b`、`2bc65ee`、`96c6279`；总验收 `5247b55`；[记录](../benchmarks/m7-8-final-acceptance.md) |
 | M7.8 CI 修补 | 已完成 | `fb5f387`；彩色帮助输出回归，566 passed / 5 deselected；[GitHub CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 的 Test/Lint/Compile 通过 |
 | M7.9.1 未完成任务的退出语义 | 已完成 | `step_limit` 携带上限值、一次性退出码按终止原因映射（0/1/2/3/130）；全量 574 passed / 5 deselected；`8a8d297` |
-| M7.9.2–M7.9.4 | 未开始 | 工作区状态、真实任务与规模基线、CLI 视觉整理 |
+| M7.9.2 工作区状态与改动事实 | 已完成 | 新增只读 `git_status`（分组状态 + workspace 相对路径 + 非 git 可解释失败），状态路径不进入 Session 元数据；全量 588 passed / 5 deselected |
+| M7.9.3–M7.9.4 | 未开始 | 真实任务与规模基线、CLI 视觉整理 |
 | M8.0–M8.5 | 未开始 | 交互、只读 LSP、MCP、活动工具集、恢复、对照评测 |
 | M9 / M10 | 未开始 | 分别等待跨 Session 工作流和隔离并行任务 |
 

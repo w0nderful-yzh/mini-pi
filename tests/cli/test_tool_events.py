@@ -26,6 +26,7 @@ def _renderer(*, width: int = 160, verbose: bool = False, terminal: bool = False
         ("read", {"path": "src/agent.py"}, "Read src/agent.py"),
         ("search", {"pattern": "run_loop", "path": "mini_pi"}, "Search 'run_loop' in mini_pi"),
         ("git_diff", {"path": "README.md"}, "Inspect git diff for README.md"),
+        ("git_status", {}, "Inspect git status"),
         ("bash", {"command": "git status --short"}, "Inspect git status"),
         ("bash", {"command": "git diff --check"}, "Inspect git diff"),
         ("bash", {"command": "rg -n run_loop mini_pi"}, "Search 'run_loop' with rg"),
@@ -129,6 +130,33 @@ def test_bash_failure_shows_exit_stderr_timeout_and_truncation_without_task_judg
     assert "build passed" not in text.lower()
     assert "continuing" not in text.lower()
     assert "Agent stopped with an error" not in text
+
+
+def test_git_status_result_reports_observed_path_count() -> None:
+    """工作区状态结果行只报观测到的路径数，不推断任务成败。"""
+    renderer, output = _renderer()
+    call = ToolCall(id="c1", name="git_status", arguments={})
+    renderer.handle(ToolExecutionStartEvent(tool_call=call))
+    renderer.handle(
+        ToolExecutionEndEvent(
+            tool_call=call,
+            result=ToolResult(
+                content="branch: main\nuntracked (1):\n  ?? new.txt",
+                details={
+                    "branch": "main",
+                    "paths": 1,
+                    "staged": 0,
+                    "unstaged": 0,
+                    "untracked": 1,
+                    "conflicted": 0,
+                },
+            ),
+            is_error=False,
+        )
+    )
+    text = output.getvalue()
+    assert "● Inspect git status" in text
+    assert "✓ 1 changed path(s)" in text
 
 
 def test_search_zero_matches_and_tool_error_have_distinct_meaning() -> None:
