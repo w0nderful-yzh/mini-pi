@@ -410,7 +410,7 @@ uv run pytest -m integration        # 需要 API Key
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
 | M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；[远端 CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 已通过） |
-| M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 进行中（M7.9.1–M7.9.2 已完成） |
+| M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 进行中（M7.9.1–M7.9.3 已完成；[基线记录](docs/benchmarks/m7-9-baseline.md)：真实 DeepSeek 4/4 completed，16 请求 / 20 工具调用 / 35,689 实测 input） |
 | M8 | 长任务交互、只读 LSP、按需 MCP、活动工具集与恢复 | 未开始；每项以真实任务收益或明确服务需求为准 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
@@ -492,7 +492,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行
 - **`bash` 不是沙箱**：文件工具的 Workspace 边界只约束 read/write/edit/search/git_diff，`bash` 是 `cwd = workspace root` 的无沙箱本地 shell（可以读写 workspace 之外、可以联网），也没有危险命令确认机制
-- 当前请求按 wire 消息与工具 schema 估算，M7.8.2 已用真实 DeepSeek input usage 校准字符类权重及工具模式固定开销（[四组固定样本记录](docs/benchmarks/m7-8-token-estimation.md)）；OpenAI、长真实会话与大量工具的偏差尚未量化。摘要切点与成本模型继续使用独立的消息区域估算，预测始终标为 estimated
+- 当前请求按 wire 消息与工具 schema 估算，M7.8.2 已用真实 DeepSeek input usage 校准字符类权重及工具模式固定开销（[四组固定样本记录](docs/benchmarks/m7-8-token-estimation.md)）。**已知偏差**：M7.9.3 复核发现默认 7 个工具时估算低于实测 16.6%（无工具请求仍准确），因为固定开销是按 1–2 个工具校准的，而实际开销随工具数继续增长；在按 1/3/7 工具重新对拍前，多工具场景的预测偏乐观（[记录](docs/benchmarks/m7-9-baseline.md)）。OpenAI 与 1M 窗口长会话的偏差仍未量化。摘要切点与成本模型继续使用独立的消息区域估算，预测始终标为 estimated
 - 手动 `/compact`、prompt 前与工具轮之间的窗口触发，以及旧工具结果的成本感知提前压缩都已可用；摘要成本收益只有离线估算记录，未做真实计费对照
 - 已知模型的窗口都是 1M 级；自定义小窗口的自动压缩只经离线夹具验证，尚无真实长任务样本。M7.7b 只用 DeepSeek 验证了手动 `/compact` 事务后的继续与 resume，OpenAI 因未配置 Key 未测
 - `prompt_toolkit` 是可降级能力：非 tty 或未安装时回退单行 REPL；交互终端缺依赖会在 REPL 顶部打印降级原因（补全/历史/多行编辑不可用）
@@ -507,10 +507,10 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 - 核心链路（Loop / Registry / Workspace / Tool / 截断 / 超时 / 取消）全部用 pytest 覆盖
 - Agent 测试使用 `FakeLLMClient`（脚本化事件流），不调用真实 API
 - 真实 API 测试标记 `@pytest.mark.integration`，默认排除；当前有基础连通性与「压缩后继续 + resume」用例
-- `tests/integration/` 是离线端到端目录：走生产装配路径（真实工具、真实 JSONL、FakeLLM），不加 `integration` marker
+- `tests/integration/` 是离线端到端目录：走生产装配路径（真实工具、真实 JSONL、FakeLLM），不加 `integration` marker；含自动压缩与四条固定任务形态的基线用例（只读、跨文件定位、修改后验证、失败后恢复）
 - 文件工具测试使用 `tmp_path`，不触碰真实项目文件
 
-详见 [`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md) 与 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md) 的验收命令。
+详见 [`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md) 与 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md) 的验收命令。真实任务基线、Session 规模与工具开销用 `docs/benchmarks/m7-9-baseline.py` 复现（`scale` 离线，`real` / `tools` 需要 Key）。
 
 ---
 
@@ -538,4 +538,4 @@ Test Core Runtime
 - Phase 1 计划：[`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)
 - Phase 2 计划：[`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)
 - Phase 3 计划（M7.8-M10）：[`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)
-- M7 成本与验收记录：[`docs/benchmarks/`](docs/benchmarks/)（用量基准、成本感知压缩、真实压缩验收、tty 输入与取消记录）
+- M7 成本与验收记录：[`docs/benchmarks/`](docs/benchmarks/)（M7.8 用量与最终验收、[M7.9.3 真实任务基线与规模](docs/benchmarks/m7-9-baseline.md)、成本感知压缩、真实压缩验收、tty 输入与取消记录）
