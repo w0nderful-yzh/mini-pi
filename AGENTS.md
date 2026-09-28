@@ -790,7 +790,7 @@ M9 Task / Memory
 M10 Multi-Agent
 ```
 
-M1-M7 已完成；M7（Session / Context 与 CLI）于 2026-09-24 通过离线回归、真实 Provider 与人工 CLI 验收。下一阶段从 M7.8 Runtime Hardening 开始，任务拆解、验收标准与 M8-M10 路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)；路线图状态表以 `README.md` 第 8 节为准。
+M1-M7.8 已完成；M7（Session / Context 与 CLI）于 2026-09-24 通过离线回归、真实 Provider 与人工 CLI 验收，M7.8 于 2026-09-28 通过离线回归与真实 DeepSeek 输入用量复核（记录见 `docs/benchmarks/m7-8-final-acceptance.md`；远端 CI 待推送运行）。下一阶段为 M8 LSP / MCP，任务拆解、验收标准与 M8-M10 路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)；路线图状态表以 `README.md` 第 8 节为准。
 
 不要跨阶段同时开太多功能。
 

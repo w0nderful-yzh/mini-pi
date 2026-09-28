@@ -1,6 +1,6 @@
 # Phase 3：Runtime Hardening 与外部能力（M7.8 / M8 / M9 / M10）
 
-> 状态：**M7.8.0、M7.8.5、M7.8.1–M7.8.4 已完成，M7.8.6 为下一项**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
+> 状态：**M7.8 已完成**（M7.8.0–M7.8.6；[最终验收](../benchmarks/m7-8-final-acceptance.md)）。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；下一阶段 M8 LSP / MCP，M8–M10 尚未开始。本文件保留 M7.8 交付摘要与 M8–M10 路线。
 
 **目标：** 在接入 LSP / MCP 之前，先把「上下文有多少、预算怎么算、钩子挂在哪、改动怎么被守护」四件事定下来；之后按 LSP → MCP → 动态工具集 → 工具集恢复 → 基准的顺序扩展外部能力。
 
@@ -98,14 +98,11 @@
 
 ### M7.8.4 Runtime Hook 与 RunContext
 
-**交付物与验收（本提交）：** `RunContext` 仅持有 `cost_compaction_attempted`，由每次 `run_loop` 新建；任务预算仍留在 Loop。`prepare_next_turn` 接收该上下文，可返回替换投影或 `None`，窗口压缩再成本压缩仍在会话层按顺序执行，Loop 不新增钩子分支。新增同一 run 共享、跨 run 隔离与连续两次任务各触发一次成本压缩的测试；全量离线回归 566 passed、5 deselected，Ruff、编译与 diff 检查通过。没有新增 `before_request`、`after_run` 或插件抽象。
+**交付物与验收（`96c6279`）：** `RunContext` 仅持有 `cost_compaction_attempted`，由每次 `run_loop` 新建；任务预算仍留在 Loop。`prepare_next_turn` 接收该上下文，可返回替换投影或 `None`，窗口压缩再成本压缩仍在会话层按顺序执行，Loop 不新增钩子分支。新增同一 run 共享、跨 run 隔离与连续两次任务各触发一次成本压缩的测试；全量离线回归 566 passed、5 deselected，Ruff、编译与 diff 检查通过。没有新增 `before_request`、`after_run` 或插件抽象。
 
 ### M7.8.6 总验收与文档同步
 
-- 离线全量回归 + 不变量专项（`--no-session`、append-only、tool pair、预算、compaction）。
-- 真实 DeepSeek 中文、英文、混合文本和工具 schema 最小请求对拍（估算 vs input usage），记录偏差；不可用时明确列为未通过门槛。
-- 确认默认关闭或默认不变的新能力没有改变现有行为。
-- 同步 README §2/§8/§9、`AGENTS.md` §6/§9/§20/§23 与本文件状态表，并在 phase2 第 5 节留指向本文件的入口。
+**交付物与验收（本提交）：** [最终验收记录](../benchmarks/m7-8-final-acceptance.md)包含锁定依赖、完整离线回归 566 passed / 5 deselected、不变量专项 41 passed、Ruff、编译和 diff 检查，以及真实 DeepSeek 中文/英文/混合/schema 四组输入用量复核。默认预算关闭、未知窗口不自动压缩、纯内存模式不建 Session、JSONL 原始消息与工具配对均由回归覆盖。README、AGENTS.md、Phase 2/3 状态已同步；远端 CI 尚未运行，需推送后查看。
 
 ---
 
@@ -212,8 +209,8 @@ RAG / Vector DB             通用 Agent Scheduler
 | M7.8.1 | RequestSnapshot 统一请求口径 | 已完成（`4fbedde`；552 passed、5 deselected） |
 | M7.8.2 | Token 估算升级（CJK 安全 + 工具 schema + 实测校准） | 已完成（`e19182b`；DeepSeek 四组实测；554 passed、5 deselected） |
 | M7.8.3 | Context Window 配置化（`--context-window`） | 已完成（`2bc65ee`；564 passed、5 deselected） |
-| M7.8.4 | Runtime Hook 与 RunContext | 已完成（本提交；566 passed、5 deselected） |
-| M7.8.6 | M7.8 总验收与文档同步 | 未开始 |
+| M7.8.4 | Runtime Hook 与 RunContext | 已完成（`96c6279`；566 passed、5 deselected） |
+| M7.8.6 | M7.8 总验收与文档同步 | 已完成（本提交；[记录](../benchmarks/m7-8-final-acceptance.md)；远端 CI 待运行） |
 | M8.1–M8.5 | LSP / MCP / ActiveToolSet / Restore / Benchmark | 未开始 |
 | M9 | Task / Project Memory | 未开始（有门槛） |
 | M10 | Multi-Agent（含 Session fork 与 worktree 前置） | 未开始 |

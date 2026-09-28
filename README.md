@@ -170,7 +170,7 @@ Agent Runtime 自己实现。
 
 ## 5. 目录结构
 
-当前实现范围（M1-M7 已完成，M7.8 规划中，M8 未开始）：
+当前实现范围（M1-M7.8 已完成，M8 未开始）：
 
 ```text
 mini-pi/
@@ -404,7 +404,7 @@ uv run pytest -m integration        # 需要 API Key
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
-| M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 进行中（M7.8.0、M7.8.5、M7.8.1–M7.8.4 完成；下一项 M7.8.6 总验收） |
+| M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；远端 CI 待推送） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
@@ -418,7 +418,7 @@ MVP 后的实施顺序保持为：先让会话可恢复、上下文可控，再�
 ```text
 M7 Session / Context（已完成）
   ↓
-M7.8 Runtime Hardening
+M7.8 Runtime Hardening（已完成）
   ↓
 M8 LSP / MCP
   ↓
