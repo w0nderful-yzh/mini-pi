@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
 from mini_pi.llm.types import Message
 
 MessageCommit = Callable[[Message], None]
-# 完整工具批次提交后、下一次模型请求前的可选钩子；允许替换 state.messages
-PrepareNextTurn = Callable[[], None]
+
+@dataclass
+class RunContext:
+    """单次 run 的最小可变状态，任务结束后丢弃。"""
+
+    cost_compaction_attempted: bool = False
+
+
+# 完整工具批次提交后调用；返回投影时由 Loop 安装，None 表示保持原样。
+PrepareNextTurn = Callable[[RunContext], Sequence[Message] | None]
 
 
 @dataclass

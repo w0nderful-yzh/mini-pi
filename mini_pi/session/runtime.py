@@ -8,7 +8,7 @@ from pathlib import Path
 
 from mini_pi.agent.agent import Agent
 from mini_pi.agent.events import AgentEndEvent, AgentEvent, AgentStartEvent
-from mini_pi.agent.state import AgentState
+from mini_pi.agent.state import AgentState, RunContext
 from mini_pi.auth import resolve_api_key
 from mini_pi.context.compaction import (
     CompactionPreparation,
@@ -110,8 +110,6 @@ class AgentSession:
         self._context_window_override = context_window
         self._reserve_tokens = reserve_tokens
         self._context_policy = context_policy
-        # 成本感知的提前压缩每次 run 只尝试一次：失败也不重复打扰模型
-        self._cost_compaction_attempted = False
         self._agent = Agent(
             llm=llm,
             registry=registry,
@@ -316,7 +314,6 @@ class AgentSession:
         if not task.strip():
             # 空任务不触发压缩检查，也不产生任何 Session 写入
             raise ValueError("task must not be empty")
-        self._cost_compaction_attempted = False
         failure = self._auto_compact_if_needed(pending_task=task)
         if failure is not None:
             # 压缩没能把投影降到阈值内：这次任务以明确 agent error 结束
@@ -370,18 +367,21 @@ class AgentSession:
             model=self._model,
         )
 
-    def _compact_between_turns(self) -> None:
+    def _compact_between_turns(self, run_context: RunContext) -> list[Message] | None:
         """工具轮之间的钩子：窗口触发失败必须终止，成本触发只是尽力而为。
 
         钩子没有返回值通道，窗口触发的可预期失败用 CompactionError 表达；Loop 会把它
         转成 `AgentEndEvent(reason="error")` 与 error assistant 消息，已提交的工具结果保留。
         """
+        before = self.state.messages
         failure = self._auto_compact_if_needed()
         if failure is not None:
             raise CompactionError(failure)
-        self._compact_old_tool_results()
+        self._compact_old_tool_results(run_context)
+        # 压缩事务已从 JSONL 重建投影；把新投影交给 Loop 的下一请求边界。
+        return self.state.messages if self.state.messages is not before else None
 
-    def _compact_old_tool_results(self) -> None:
+    def _compact_old_tool_results(self, run_context: RunContext) -> None:
         """窗口内但旧工具结果占主导时，按 M7.6f 成本模型提前压缩一次。
 
         - 只在工具轮之间尝试：这里确定还会有下一次请求，节省才有对象
@@ -390,7 +390,7 @@ class AgentSession:
         - 每次 run 最多一次；摘要阶段失败只放弃这次优化，不改变本次 run 的结果
         - 写盘或重建失败会让内存投影与 JSONL 分叉，与窗口触发同样终止这次 run
         """
-        if self._cost_compaction_attempted or self._context_policy is None:
+        if run_context.cost_compaction_attempted or self._context_policy is None:
             return
         preparation = prepare_compaction(
             self._session.active_entries(), keep_recent_tokens=DEFAULT_KEEP_RECENT_TOKENS
@@ -406,7 +406,7 @@ class AgentSession:
         if not decision.should_compact:
             return
         # 先置位再尝试：失败后本次 run 不再重试，避免每个工具轮都浪费一次调用
-        self._cost_compaction_attempted = True
+        run_context.cost_compaction_attempted = True
         try:
             self._commit_prepared(preparation)
         except (LLMError, CompactionError):

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from mini_pi.agent.agent import Agent
+from mini_pi.agent.state import RunContext
 from mini_pi.llm.types import Message, SystemMessage, UserMessage
 from mini_pi.tools.registry import ToolRegistry
 from tests.conftest import FakeLLMClient, assistant, tool_call
@@ -97,7 +98,7 @@ def test_run_installs_prepare_next_turn_hook(tmp_path: Path, echo_registry: Tool
     )
     seen: list[list[str]] = []
 
-    def hook() -> None:
+    def hook(run_context: RunContext) -> None:
         """记录触发时的 transcript 形态。"""
         seen.append([message.role for message in agent.state.messages])
 

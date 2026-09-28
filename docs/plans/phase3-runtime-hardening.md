@@ -1,6 +1,6 @@
 # Phase 3：Runtime Hardening 与外部能力（M7.8 / M8 / M9 / M10）
 
-> 状态：**M7.8.0、M7.8.5、M7.8.1、M7.8.2、M7.8.3 已完成，M7.8.4 为下一项**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
+> 状态：**M7.8.0、M7.8.5、M7.8.1–M7.8.4 已完成，M7.8.6 为下一项**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
 
 **目标：** 在接入 LSP / MCP 之前，先把「上下文有多少、预算怎么算、钩子挂在哪、改动怎么被守护」四件事定下来；之后按 LSP → MCP → 动态工具集 → 工具集恢复 → 基准的顺序扩展外部能力。
 
@@ -94,21 +94,11 @@
 
 ### M7.8.3 Context Window 配置化
 
-**交付物与验收（本提交）：** CLI 增加 `--context-window`、`--reserve-tokens`（默认 8192）；`AgentSession` 持有创建或恢复时解析的唯一策略，prompt 前、工具轮、`/status` 和 `/context` 共用。`/model` 原子重算并保持显式窗口优先，`/new` 继承配置，`--resume` 从本次 CLI 参数解析且不写 JSONL；纯内存 `Agent` 持有策略供展示，未知模型无显式窗口时仍关闭自动压缩。自定义模型小窗口的离线压缩测试及 CLI 生命周期测试通过；全量离线回归 564 passed、5 deselected，Ruff、编译与 diff 检查通过。纯内存模式没有 JSONL 压缩事务。
+**交付物与验收（`2bc65ee`）：** CLI 增加 `--context-window`、`--reserve-tokens`（默认 8192）；`AgentSession` 持有创建或恢复时解析的唯一策略，prompt 前、工具轮、`/status` 和 `/context` 共用。`/model` 原子重算并保持显式窗口优先，`/new` 继承配置，`--resume` 从本次 CLI 参数解析且不写 JSONL；纯内存 `Agent` 持有策略供展示，未知模型无显式窗口时仍关闭自动压缩。自定义模型小窗口的离线压缩测试及 CLI 生命周期测试通过；全量离线回归 564 passed、5 deselected，Ruff、编译与 diff 检查通过。纯内存模式没有 JSONL 压缩事务。
 
 ### M7.8.4 Runtime Hook 与 RunContext
 
-**改动：**
-
-- 新增最小 per-run 状态对象 `RunContext`（先只含实际需要共享的 `cost_compaction_attempted`；若 `request_count` 等字段有消费者再加入），把 `runtime.py:105` 的 `_cost_compaction_attempted` 迁入，`run()` 开始时新建，避免跨 run 泄漏。任务预算仍由 Loop 持有，避免两份可变计数。
-- `prepare_next_turn` 契约升级为接收 `RunContext`，并允许返回替换后的投影；`None` 时保持现有事件与行为，避免打挂已有测试。
-- 会话层内部把它组合成有序步骤（窗口压缩 → 成本压缩 → 未来的 prompt / 工具集 refresh），每步独立可测；Loop 内不新增分支判断。
-- 若有真实收尾需求再增加会话层 `after_run`；目前 usage 已可从活动链重建，M8 的长驻进程也不应在每次 `run()` 后无条件杀掉。进程生命周期在 M8 按创建/空闲/会话关闭边界设计。
-- **不新增 `before_request`**，理由见 §1.2 第 3 条。
-
-**不做：** 不做通用插件框架、事件总线或 `HookManager` 抽象；不做并行工具执行。
-
-**验收：** `tests/agent/test_loop.py` 与 `tests/session/*` 全绿；新增用例证明 per-run 状态不跨 `run()` 泄漏（连续两次 run 各触发一次成本压缩）；投影替换路径与现有压缩用例行为一致。
+**交付物与验收（本提交）：** `RunContext` 仅持有 `cost_compaction_attempted`，由每次 `run_loop` 新建；任务预算仍留在 Loop。`prepare_next_turn` 接收该上下文，可返回替换投影或 `None`，窗口压缩再成本压缩仍在会话层按顺序执行，Loop 不新增钩子分支。新增同一 run 共享、跨 run 隔离与连续两次任务各触发一次成本压缩的测试；全量离线回归 566 passed、5 deselected，Ruff、编译与 diff 检查通过。没有新增 `before_request`、`after_run` 或插件抽象。
 
 ### M7.8.6 总验收与文档同步
 
@@ -221,8 +211,8 @@ RAG / Vector DB             通用 Agent Scheduler
 | M7.8.5 | CI 与 ruff 静态检查 | 已完成（`0517a4e`；本地 544 passed、5 deselected；远端待运行） |
 | M7.8.1 | RequestSnapshot 统一请求口径 | 已完成（`4fbedde`；552 passed、5 deselected） |
 | M7.8.2 | Token 估算升级（CJK 安全 + 工具 schema + 实测校准） | 已完成（`e19182b`；DeepSeek 四组实测；554 passed、5 deselected） |
-| M7.8.3 | Context Window 配置化（`--context-window`） | 已完成（本提交；564 passed、5 deselected） |
-| M7.8.4 | Runtime Hook 与 RunContext | 未开始 |
+| M7.8.3 | Context Window 配置化（`--context-window`） | 已完成（`2bc65ee`；564 passed、5 deselected） |
+| M7.8.4 | Runtime Hook 与 RunContext | 已完成（本提交；566 passed、5 deselected） |
 | M7.8.6 | M7.8 总验收与文档同步 | 未开始 |
 | M8.1–M8.5 | LSP / MCP / ActiveToolSet / Restore / Benchmark | 未开始 |
 | M9 | Task / Project Memory | 未开始（有门槛） |

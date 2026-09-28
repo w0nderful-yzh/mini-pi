@@ -23,6 +23,7 @@ from mini_pi.agent.state import (
     AgentState,
     MessageCommit,
     PrepareNextTurn,
+    RunContext,
     commit_message,
 )
 from mini_pi.context.request import RequestSnapshot, estimate_request
@@ -139,8 +140,8 @@ def run_loop(
 ) -> AssistantMessage:
     """执行 LLM → Tool → Observation 循环，返回最后一条 assistant 消息。
 
-    `prepare_next_turn` 只在完整工具批次提交后、下一次模型请求前调用；它可以替换
-    `state.messages`（例如压缩），`None` 时保持 Phase 1 的事件行为不变。截断轮
+    `prepare_next_turn` 只在完整工具批次提交后、下一次模型请求前调用；接收本次
+    `RunContext` 并可返回替换投影，`None` 时保持 Phase 1 的事件行为不变。截断轮
     （stop_reason=length）没有真实工具批次，不触发该钩子。钩子抛出的 `MiniPiError`
     是可预期失败（例如自动压缩没能把投影降到阈值内）：以 agent error 结束本次 run，
     且不发送下一次请求；其他异常是程序缺陷，直接冒泡。
@@ -155,6 +156,7 @@ def run_loop(
         raise ValueError("max_run_input_tokens must be > 0")
     emit = on_event if on_event is not None else _noop
     emit(AgentStartEvent())
+    run_context = RunContext()
     budget = (
         _RunInputBudget(limit=max_run_input_tokens)
         if max_run_input_tokens is not None
@@ -239,8 +241,10 @@ def run_loop(
             return _cancelled_message()
         if prepare_next_turn is not None:
             try:
-                # 工具批次已提交、turn 已收尾：下一次请求会重新读取 state.messages
-                prepare_next_turn()
+                # 工具批次已提交、turn 已收尾：返回的投影在下一请求前一次性安装。
+                replacement = prepare_next_turn(run_context)
+                if replacement is not None:
+                    state.messages = list(replacement)
             except MiniPiError as exc:
                 # 可预期失败（如自动压缩无法把投影降到阈值内）：不追加假 assistant、
                 # 不改投影，以 agent error 结束，避免发出已经越界的下一次请求

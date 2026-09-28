@@ -8,7 +8,7 @@ import pytest
 
 from mini_pi.agent.events import AgentEndEvent, AgentEvent
 from mini_pi.agent.loop import run_loop
-from mini_pi.agent.state import AgentState
+from mini_pi.agent.state import AgentState, RunContext
 from mini_pi.errors import CompactionError
 from mini_pi.llm.openai_client import to_openai_messages
 from mini_pi.llm.types import AssistantMessage, Message, ToolMessage, UserMessage
@@ -170,10 +170,10 @@ def test_prepare_next_turn_runs_after_tool_batch_and_before_next_request(
     )
     seen: list[list[str]] = []
 
-    def hook() -> None:
-        """记录触发时的 transcript，并模拟压缩后的投影替换。"""
+    def hook(run_context: RunContext) -> list[Message]:
+        """记录触发时的 transcript，并把压缩投影交给 Loop 安装。"""
         seen.append([message.role for message in state.messages])
-        state.messages = [UserMessage(content="compacted")]
+        return [UserMessage(content="compacted")]
 
     run_loop(state, llm, echo_registry, prepare_next_turn=hook)
 
@@ -199,10 +199,49 @@ def test_prepare_next_turn_runs_once_per_tool_batch(echo_registry: ToolRegistry)
             ]
         ),
         echo_registry,
-        prepare_next_turn=lambda: calls.append(state.step_count),
+        prepare_next_turn=lambda run_context: calls.append(state.step_count),
     )
 
     assert calls == [1, 2]
+
+
+def test_prepare_next_turn_context_is_scoped_to_one_run(echo_registry: ToolRegistry) -> None:
+    """同一次 run 的多个工具轮共享上下文，下一次 run 获得新上下文。"""
+    state = AgentState(messages=[UserMessage(content="task")])
+    seen: list[RunContext] = []
+    initial_flags: list[bool] = []
+
+    def hook(run_context: RunContext) -> None:
+        """记录上下文身份，并模拟每次 run 只尝试一次成本优化。"""
+        seen.append(run_context)
+        initial_flags.append(run_context.cost_compaction_attempted)
+        run_context.cost_compaction_attempted = True
+
+    run_loop(
+        state,
+        FakeLLMClient(
+            [
+                assistant(tool_calls=[tool_call("c1", "echo", {"text": "one"})]),
+                assistant(tool_calls=[tool_call("c2", "echo", {"text": "two"})]),
+                assistant("done"),
+            ]
+        ),
+        echo_registry,
+        prepare_next_turn=hook,
+    )
+    run_loop(
+        state,
+        FakeLLMClient(
+            [assistant(tool_calls=[tool_call("c3", "echo", {"text": "three"})]), assistant("done")]
+        ),
+        echo_registry,
+        prepare_next_turn=hook,
+    )
+
+    assert len(seen) == 3
+    assert seen[0] is seen[1]
+    assert seen[2] is not seen[0]
+    assert initial_flags == [False, True, False]
 
 
 def test_prepare_next_turn_skipped_without_real_tool_batch(
@@ -215,7 +254,7 @@ def test_prepare_next_turn_skipped_without_real_tool_batch(
         state,
         FakeLLMClient([assistant("done")]),
         echo_registry,
-        prepare_next_turn=lambda: calls.append("final"),
+        prepare_next_turn=lambda run_context: calls.append("final"),
     )
     run_loop(
         state,
@@ -229,7 +268,7 @@ def test_prepare_next_turn_skipped_without_real_tool_batch(
             ]
         ),
         echo_registry,
-        prepare_next_turn=lambda: calls.append("truncated"),
+        prepare_next_turn=lambda run_context: calls.append("truncated"),
     )
 
     assert calls == []
@@ -242,7 +281,7 @@ def test_prepare_next_turn_expected_failure_ends_run_with_agent_error(
     state = AgentState(messages=[UserMessage(content="task")])
     events: list[AgentEvent] = []
 
-    def hook() -> None:
+    def hook(run_context: RunContext) -> None:
         """模拟自动压缩没能把投影降到阈值内。"""
         raise CompactionError("automatic compaction failed: still over the window threshold")
 
@@ -273,7 +312,7 @@ def test_prepare_next_turn_failure_propagates(echo_registry: ToolRegistry) -> No
     """钩子失败直接冒泡，不在 Loop 内兜底或静默跳过。"""
     state = AgentState(messages=[UserMessage(content="task")])
 
-    def hook() -> None:
+    def hook(run_context: RunContext) -> None:
         """模拟压缩失败。"""
         raise RuntimeError("compaction exploded")
 

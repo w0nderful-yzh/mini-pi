@@ -233,7 +233,7 @@ while steps_this_run < max_steps:
     if not assistant.tool_calls: 结束（reason=completed）
     if assistant.stop_reason == "length": tool call 全部转 error observation，下一轮
     for call in assistant.tool_calls: 执行并追加 ToolMessage
-    prepare_next_turn()  # 可选：仅在完整工具批次提交后、下一次请求前
+    prepare_next_turn(run_context)  # 可选：仅在完整工具批次提交后、下一次请求前
 ```
 
 ### 终止条件
@@ -267,7 +267,7 @@ agent_end(reason: completed | step_limit | budget_limit | error | cancelled)
 - M7.D2 起 CLI 输入层默认用 `prompt_toolkit`（历史、多行、`/` 补全、Ctrl+L），非 tty 或输入库缺失时回退内建单行 `input()`；输入在提交前只存在于终端侧，不写 Session。补全菜单只作提示：Tab/`→` 采纳高亮项，唯一匹配时 Enter 先补全、再按一次才提交，多匹配仍提交原文。交互终端缺输入库属于异常安装状态，必须在 REPL 顶部打印降级原因（非 tty 回退不提示）。用户在流式或工具边界中断（KeyboardInterrupt）由 Loop 转成 `agent_end(reason="cancelled")`：不补假 assistant，工具轮为被中断及未执行的调用补 cancelled observation 保持 call/result 配对，已提交消息、工具结果与文件改动全部保留；`bash` 的独立进程组必须先整组杀掉再冒泡。CLI 侧连续两次 Ctrl+C 才退出、中断绝不记为 `completed`，一次性调用返回退出码 130
 - `on_event` 为可选参数，测试时传 None 或列表收集器
 - `on_message_commit` 仅在完整 system / user / assistant / tool 消息上触发；回调成功后才追加内存历史，失败直接冒泡；tool 改动文件随已提交的 ToolMessage 记录
-- M7.6a 起 `run_loop` 支持可选 `prepare_next_turn`：只在完整工具批次提交、turn 收尾之后调用，下一次请求重新读取 `state.messages`，因此钩子可替换投影（压缩）；`None` 保持原事件行为，截断轮没有真实工具批次不触发，钩子异常直接冒泡。M7.6c 起 `AgentSession` 用该钩子运行同一套窗口判定与 M7.5 压缩事务，与 prompt 前检查共用入口；M7.6d 起钩子抛出的 `MiniPiError` 转为 `agent_end(reason="error")` 并返回 error assistant 消息（不追加假消息、不改投影、不再请求模型），其他异常仍是程序缺陷、直接冒泡
+- M7.6a 起 `run_loop` 支持可选 `prepare_next_turn`：只在完整工具批次提交、turn 收尾之后调用，下一次请求重新读取 `state.messages`，因此钩子可替换投影（压缩）；`None` 保持原事件行为，截断轮没有真实工具批次不触发。M7.6c 起 `AgentSession` 用该钩子运行同一套窗口判定与 M7.5 压缩事务，与 prompt 前检查共用入口；M7.6d 起钩子抛出的 `MiniPiError` 转为 `agent_end(reason="error")` 并返回 error assistant 消息（不追加假消息、不改投影、不再请求模型），其他异常仍是程序缺陷、直接冒泡。M7.8.4 起钩子接收每次 `run_loop` 新建的 `RunContext`，可返回下一请求投影，由 Loop 安装；返回 `None` 保持当前投影。成本压缩的本轮尝试标志只存在于 `RunContext`，任务预算继续由 Loop 持有
 
 ---
 

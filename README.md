@@ -71,7 +71,7 @@ Python Coding Agent Harness
 
 | 设计点 | pi 的做法 | mini-pi 的选择 |
 | --- | --- | --- |
-| 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 仍是单层循环，只处理 tool batch；M7 只新增 `prepare_next_turn` 钩子（供压缩替换投影），steering / follow-up 队列仍未实现 |
+| 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 仍是单层循环，只处理 tool batch；M7 的 `prepare_next_turn` 在 M7.8.4 接收单次运行的 `RunContext` 并可返回替换投影，steering / follow-up 队列仍未实现 |
 | 事件驱动 | `AgentEvent` 事件流驱动 TUI/print/RPC，UI 是纯消费者 | Loop 发 `AgentEvent`，CLI 只做渲染；M7.C7 的命令标题和失败提示不进入 ToolMessage，也不改变 Agent 决策 |
 | 思考与终端展示 | thinking 事件可供 UI 展示，Provider 保留必要回放字段 | M7.C 默认只显示思考状态图标；CLI 元数据不进入消息历史，DeepSeek 的 `reasoning_content` 回放保持协议兼容 |
 | 用量与上下文 | 模型请求返回 usage，compaction 缩短后续模型投影 | M7.C6 已区分单次任务累计 Provider 用量和当前上下文估算；M7.C8 提供默认关闭、显式启用的请求边界任务预算，窗口阈值只负责压缩安全 |
@@ -287,7 +287,7 @@ LLM → Tool Call → Tool → Observation → LLM → ...
 
 - `run_loop()` 是纯函数：输入 `AgentState + LLMClient + ToolRegistry`，输出最终 `AssistantMessage`
 - 每轮通过 `on_event` 回调发出 `AgentEvent`，CLI 是纯消费者
-- M7.6a 起可选 `prepare_next_turn` 钩子在完整工具批次提交后、下一次请求前调用，供 Session 层替换 `state.messages`（压缩投影）；`None` 时行为与 Phase 1 一致，截断轮不触发。M7.6c 起 `AgentSession` 把该钩子接到与 prompt 前检查同一套策略判定和压缩事务上；M7.6d 起钩子的可预期失败（`MiniPiError`）在 Loop 内转成 `agent_end(error)`，不再向模型发出越界的下一次请求，其他异常仍直接冒泡
+- M7.6a 起可选 `prepare_next_turn` 钩子在完整工具批次提交后、下一次请求前调用，供 Session 层替换压缩投影；截断轮不触发。M7.6c 起 `AgentSession` 把该钩子接到与 prompt 前检查同一套策略判定和压缩事务上；M7.6d 起钩子的可预期失败（`MiniPiError`）在 Loop 内转成 `agent_end(error)`，不再向模型发出越界的下一次请求，其他异常仍直接冒泡。M7.8.4 起钩子接收每次 `run_loop` 新建的 `RunContext`，返回投影由 Loop 安装，返回 `None` 则保持原投影；成本压缩尝试标志按 run 隔离，任务预算仍由 Loop 计数
 - 终止条件：无 tool call（`completed`）/ LLM error / 达到 `max_steps`（`step_limit`）/ 显式任务预算阻止下一请求（`budget_limit`）/ 用户中断（`cancelled`）
 - `stop_reason == "length"` 时**不执行**任何 tool call，全部转 error observation 让模型重发
 - M7.D2 起用户中断（KeyboardInterrupt）是可预期终止：未提交的流式 assistant 不补写，工具轮为被中断及未执行的调用补 cancelled observation 保持 call/result 配对，以 `agent_end(reason="cancelled")` 结束，已提交消息与文件改动不回滚
@@ -404,7 +404,7 @@ uv run pytest -m integration        # 需要 API Key
 | M5 | 真实代码修改闭环：CLI、样例项目、真实 API 验收 | 已完成 |
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
-| M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 进行中（M7.8.0、M7.8.5、M7.8.1、M7.8.2、M7.8.3 完成；下一项 M7.8.4 Runtime Hook 与 RunContext） |
+| M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 进行中（M7.8.0、M7.8.5、M7.8.1–M7.8.4 完成；下一项 M7.8.6 总验收） |
 | M8 | LSP / MCP | 未开始 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

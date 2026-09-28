@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from mini_pi.agent.events import AgentEndEvent, AgentEvent
 from mini_pi.agent.loop import run_loop
-from mini_pi.agent.state import AgentState
+from mini_pi.agent.state import AgentState, RunContext
 from mini_pi.llm.types import (
     AssistantMessage,
     DoneEvent,
@@ -201,7 +201,7 @@ def test_interrupt_in_prepare_next_turn_ends_cancelled() -> None:
     )
     events: list[AgentEvent] = []
 
-    def interrupt_hook() -> None:
+    def interrupt_hook(run_context: RunContext) -> None:
         """模拟工具批次提交后、下一次请求前用户按 Ctrl+C。"""
         raise KeyboardInterrupt
 

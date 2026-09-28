@@ -138,6 +138,36 @@ def test_early_compaction_fires_when_old_tool_results_dominate(
     assert runtime.state.messages == list(JsonlSession.load(runtime.path).replay().messages)
 
 
+def test_cost_attempt_resets_for_each_run(tmp_path: Path) -> None:
+    """连续两次任务都能各压缩一次，前一次的尝试标志不能泄漏。"""
+    tool = SizedTool(_HUGE_OUTPUT, _HUGE_OUTPUT, _BIG_OUTPUT)
+    llm = FakeLLMClient(
+        [
+            assistant(tool_calls=[tool_call("c1", "dump", {})]),
+            assistant("first done"),
+            assistant(tool_calls=[tool_call("c2", "dump", {})]),
+            assistant("## Goal\n第一次摘要"),
+            assistant("second done"),
+            assistant(tool_calls=[tool_call("c3", "dump", {})]),
+            assistant("## Goal\n第二次摘要"),
+            assistant("third done"),
+        ]
+    )
+    runtime = _session(tmp_path, llm, tool)
+    runtime.run("first")
+
+    second = runtime.run("second")
+    third = runtime.run("third")
+
+    assert second.content == "second done"
+    assert third.content == "third done"
+    assert tool.calls == 3
+    assert len(_compactions(runtime)) == 2
+    # 两次后续 run 各有一次无工具摘要请求，当前工具调用均只执行一次。
+    assert [index for index, tools in enumerate(llm.tools_seen) if tools is None] == [3, 6]
+    assert runtime.state.messages == list(JsonlSession.load(runtime.path).replay().messages)
+
+
 def test_early_compaction_skipped_when_region_is_conversation_heavy(
     tmp_path: Path,
 ) -> None:
