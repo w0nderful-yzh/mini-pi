@@ -89,12 +89,12 @@ def test_interactive_continue_gets_fresh_budget_and_status_shows_setting(
 
     result = runner.invoke(
         app,
-        ["--cwd", str(tmp_path), "--no-banner", "--max-run-input-tokens", "30000"],
+        ["--cwd", str(tmp_path), "--no-banner", "--max-run-input-tokens", "28200"],
         input="first\n/status\nsecond\n/exit\n",
     )
 
     assert result.exit_code == 0, result.output
-    assert "Run input budget: 30000 tokens (request-boundary, resets per task)" in result.output
+    assert "Run input budget: 28200 tokens (request-boundary, resets per task)" in result.output
     assert "Run stopped before the next model request" in result.output
     assert "continued" in result.output
     assert len(llm.calls) == 3

@@ -27,7 +27,8 @@ from mini_pi.context.policy import (
     resolve_policy,
 )
 from mini_pi.context.projection import project_compaction, project_entry_path
-from mini_pi.context.tokens import estimate_tokens
+from mini_pi.context.request import RequestSnapshot, estimate_request
+from mini_pi.context.tokens import TokenEstimate
 from mini_pi.errors import CompactionError, LLMError, MiniPiError, SessionError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
@@ -113,6 +114,8 @@ class AgentSession:
             on_message_commit=self._commit_message,
             # 工具轮之间复用同一策略与事务：下一次请求读到压缩后的投影
             prepare_next_turn=self._compact_between_turns,
+            provider=provider,
+            model=model,
         )
 
     @classmethod
@@ -228,6 +231,10 @@ class AgentSession:
         """向 CLI 暴露当前 Registry 的工具说明。"""
         return self._registry.schemas()
 
+    def request_snapshot(self) -> RequestSnapshot:
+        """暴露当前消息与工具的请求预测，供 CLI 与窗口判断共用。"""
+        return self._agent.request_snapshot()
+
     @property
     def summary_index(self) -> int | None:
         """当前投影含有效 compaction 时，摘要固定在 system 快照之后。"""
@@ -262,7 +269,7 @@ class AgentSession:
         """替换运行时客户端，仅让后续提交消息使用新的模型元数据。"""
         if provider not in {"openai", "deepseek"} or not model.strip():
             raise SessionError("provider or model is invalid for this session")
-        self._agent.set_llm(llm)
+        self._agent.set_llm(llm, provider=provider, model=model)
         self._llm = llm
         self._provider = provider
         self._model = model
@@ -273,13 +280,13 @@ class AgentSession:
             # 空任务不触发压缩检查，也不产生任何 Session 写入
             raise ValueError("task must not be empty")
         self._cost_compaction_attempted = False
-        failure = self._auto_compact_if_needed()
+        failure = self._auto_compact_if_needed(pending_task=task)
         if failure is not None:
             # 压缩没能把投影降到阈值内：这次任务以明确 agent error 结束
             return self._abort_before_prompt(failure)
         return self._agent.run(task)
 
-    def _auto_compact_if_needed(self) -> str | None:
+    def _auto_compact_if_needed(self, *, pending_task: str | None = None) -> str | None:
         """按 M7.4g 窗口策略检查当前投影；返回 None 表示可以继续，否则是终止原因。
 
         - 判定：估算 > context_window - reserve_tokens；窗口未知、未超阈值都放行
@@ -292,7 +299,8 @@ class AgentSession:
         if policy is None:
             # 窗口未知：不猜百分比、不做自动压缩，也不阻止任务
             return None
-        estimate = estimate_tokens(self._agent.state.messages)
+        request = self._estimate_next_request(pending_task)
+        estimate = TokenEstimate(tokens=request.input_tokens, source=request.source)
         if evaluate_compaction(estimate, policy=policy).status != "needed":
             return None
         try:
@@ -304,7 +312,8 @@ class AgentSession:
         if execution.result is None:
             # 需要压缩却没有安全切点或没有新内容可摘要：不能携超限上下文继续
             return _compaction_failure(execution.reason)
-        after = estimate_tokens(self._agent.state.messages)
+        after_request = self._estimate_next_request(pending_task)
+        after = TokenEstimate(tokens=after_request.input_tokens, source=after_request.source)
         if after.tokens > policy.threshold_tokens:
             # 单个工具轮本身就超过阈值：压缩已尽力，仍不得发出越窗请求
             return _compaction_failure(
@@ -312,6 +321,17 @@ class AgentSession:
                 f"{policy.threshold_tokens} ({after.source})"
             )
         return None
+
+    def _estimate_next_request(self, pending_task: str | None) -> RequestSnapshot:
+        """预检时加入尚未提交的任务与规则；工具轮使用已提交投影。"""
+        if pending_task is None:
+            return self.request_snapshot()
+        return estimate_request(
+            self._agent.preview_messages(pending_task),
+            self._registry.schemas(),
+            provider=self._provider,
+            model=self._model,
+        )
 
     def _compact_between_turns(self) -> None:
         """工具轮之间的钩子：窗口触发失败必须终止，成本触发只是尽力而为。

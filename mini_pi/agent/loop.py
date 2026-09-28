@@ -25,14 +25,13 @@ from mini_pi.agent.state import (
     PrepareNextTurn,
     commit_message,
 )
-from mini_pi.context.tokens import estimate_tokens
+from mini_pi.context.request import RequestSnapshot, estimate_request
 from mini_pi.errors import MiniPiError, ToolError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.types import (
     AssistantMessage,
     DoneEvent,
     ErrorEvent,
-    Message,
     TextDeltaEvent,
     ThinkingDeltaEvent,
     ToolCall,
@@ -135,6 +134,8 @@ def run_loop(
     on_event: EventSink | None = None,
     on_message_commit: MessageCommit | None = None,
     prepare_next_turn: PrepareNextTurn | None = None,
+    provider: str | None = None,
+    model: str | None = None,
 ) -> AssistantMessage:
     """执行 LLM → Tool → Observation 循环，返回最后一条 assistant 消息。
 
@@ -162,8 +163,9 @@ def run_loop(
     last: AssistantMessage | None = None
     steps_this_run = 0
     while steps_this_run < max_steps:
-        request_messages = state.messages
-        predicted_input = estimate_tokens(request_messages).tokens
+        # 快照同时固定预算预测与本轮实际传给 LLM 的工具 schema。
+        request = estimate_request(state.messages, registry.schemas(), provider=provider, model=model)
+        predicted_input = request.input_tokens
         if budget is not None:
             if budget.used + predicted_input > budget.limit:
                 return _emit_budget_limit(emit, budget, predicted_input, last)
@@ -174,11 +176,14 @@ def run_loop(
             ):
                 notice = _budget_notice(budget, predicted_input)
                 candidate = [*state.messages, notice]
-                candidate_input = estimate_tokens(candidate).tokens
+                candidate_request = estimate_request(
+                    candidate, request.tools, provider=provider, model=model
+                )
+                candidate_input = candidate_request.input_tokens
                 if budget.used + candidate_input > budget.limit:
                     return _emit_budget_limit(emit, budget, candidate_input, last)
                 budget.warned = True
-                request_messages = candidate
+                request = candidate_request
                 predicted_input = candidate_input
                 emit(
                     BudgetWarningEvent(
@@ -197,10 +202,9 @@ def run_loop(
             assistant = _stream_assistant(
                 state,
                 llm,
-                registry,
                 emit,
                 on_message_commit,
-                request_messages=request_messages,
+                request=request,
             )
         except KeyboardInterrupt:
             # 流已开始但完整消息尚未提交：不追加假 assistant，只按已发生的事实收尾
@@ -256,19 +260,15 @@ def run_loop(
 def _stream_assistant(
     state: AgentState,
     llm: LLMClient,
-    registry: ToolRegistry,
     emit: EventSink,
     on_message_commit: MessageCommit | None,
     *,
-    request_messages: list[Message] | None = None,
+    request: RequestSnapshot,
 ) -> AssistantMessage:
     """消费一次流式回复：转发增量事件，完整消息提交后加入 transcript。"""
     emit(MessageStartEvent())
     final: AssistantMessage | None = None
-    for event in llm.stream(
-        state.messages if request_messages is None else request_messages,
-        registry.schemas(),
-    ):
+    for event in llm.stream(list(request.messages), list(request.tools)):
         if isinstance(event, TextDeltaEvent):
             emit(MessageDeltaEvent(kind="text", delta=event.delta))
         elif isinstance(event, ThinkingDeltaEvent):

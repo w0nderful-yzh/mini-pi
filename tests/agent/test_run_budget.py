@@ -7,8 +7,8 @@ import pytest
 from mini_pi.agent.events import AgentEndEvent, AgentEvent, BudgetWarningEvent
 from mini_pi.agent.loop import run_loop
 from mini_pi.agent.state import AgentState
-from mini_pi.context.tokens import estimate_tokens
-from mini_pi.llm.types import AssistantMessage, ToolMessage, Usage, UserMessage
+from mini_pi.context.request import estimate_request
+from mini_pi.llm.types import AssistantMessage, ToolMessage, ToolSchema, Usage, UserMessage
 from mini_pi.tools.registry import ToolRegistry
 from tests.conftest import EchoTool, FakeLLMClient, assistant, tool_call
 
@@ -41,7 +41,7 @@ def _registry() -> ToolRegistry:
 
 def test_budget_warns_once_with_transient_prompt_then_allows_conclusion() -> None:
     """接近上限时模型得到一次未持久化提示，可直接作答完成。"""
-    state = AgentState(messages=[UserMessage(content="task")])
+    state = AgentState(messages=[UserMessage(content="task" * 200)])
     llm = FakeLLMClient(
         [
             _usage_reply(100, calls=[tool_call("c1", "echo", {"text": "fact"})]),
@@ -54,7 +54,7 @@ def test_budget_warns_once_with_transient_prompt_then_allows_conclusion() -> Non
         state,
         llm,
         _registry(),
-        max_run_input_tokens=300,
+        max_run_input_tokens=700,
         on_event=events.append,
     )
 
@@ -63,6 +63,9 @@ def test_budget_warns_once_with_transient_prompt_then_allows_conclusion() -> Non
     assert len(warnings) == 1
     assert warnings[0].source == "provider"
     assert "<runtime_budget_notice>" in llm.calls[1][-1].content
+    assert warnings[0].predicted_next_input == estimate_request(
+        llm.calls[1], llm.tools_seen[1] or []
+    ).input_tokens
     assert not any(
         isinstance(message, UserMessage) and "runtime_budget_notice" in message.content
         for message in state.messages
@@ -87,7 +90,7 @@ def test_budget_stops_after_complete_tool_batch_without_replaying_tools() -> Non
         state,
         llm,
         _registry(),
-        max_run_input_tokens=300,
+        max_run_input_tokens=400,
         on_event=events.append,
     )
 
@@ -102,7 +105,7 @@ def test_budget_stops_after_complete_tool_batch_without_replaying_tools() -> Non
     end = events[-1]
     assert isinstance(end, AgentEndEvent)
     assert end.reason == "budget_limit"
-    assert (end.budget_limit, end.budget_used, end.budget_source) == (300, 280, "provider")
+    assert (end.budget_limit, end.budget_used, end.budget_source) == (400, 280, "provider")
     assert end.predicted_next_input is not None
 
 
@@ -132,7 +135,7 @@ def test_budget_can_block_first_request_from_projection() -> None:
 def test_missing_provider_usage_counts_request_projection_as_estimated() -> None:
     """响应缺 usage 时累计请求前投影，下一边界仍能明确停止。"""
     state = AgentState(messages=[UserMessage(content="task")])
-    first_projection = estimate_tokens(state.messages).tokens
+    first_projection = estimate_request(state.messages, _registry().schemas()).input_tokens
     llm = FakeLLMClient(
         [assistant(tool_calls=[tool_call("c1", "echo", {"text": "fact"})])]
     )
@@ -169,3 +172,32 @@ def test_default_budget_is_disabled_and_invalid_budget_fails_fast() -> None:
             _registry(),
             max_run_input_tokens=0,
         )
+
+
+def test_prediction_and_stream_use_one_tool_schema_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Registry 的 schema 若会变化，预算与实际请求仍必须用同一批。"""
+    state = AgentState(messages=[UserMessage(content="task")])
+    registry = _registry()
+    first = registry.schemas()
+    calls = 0
+
+    def changing_schemas() -> list[ToolSchema]:
+        """第二次调用返回更长描述，以暴露重复取 schema 的问题。"""
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return first
+        return [first[0].model_copy(update={"description": "changed " * 1000})]
+
+    monkeypatch.setattr(registry, "schemas", changing_schemas)
+    expected = estimate_request(state.messages, first).input_tokens
+    llm = FakeLLMClient([assistant("done")])
+
+    result = run_loop(state, llm, registry, max_run_input_tokens=expected)
+
+    assert result.content == "done"
+    assert calls == 1
+    assert llm.tools_seen[0] == first
+    assert estimate_request(llm.calls[0], llm.tools_seen[0] or []).input_tokens == expected

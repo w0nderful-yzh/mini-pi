@@ -1,6 +1,6 @@
 # Phase 3：Runtime Hardening 与外部能力（M7.8 / M8 / M9 / M10）
 
-> 状态：**M7.8.0、M7.8.5 已完成，M7.8.1 为下一项**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
+> 状态：**M7.8.0、M7.8.5、M7.8.1 已完成，M7.8.2 为下一项**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
 
 **目标：** 在接入 LSP / MCP 之前，先把「上下文有多少、预算怎么算、钩子挂在哪、改动怎么被守护」四件事定下来；之后按 LSP → MCP → 动态工具集 → 工具集恢复 → 基准的顺序扩展外部能力。
 
@@ -82,35 +82,11 @@
 
 ### M7.8.5 CI 与静态检查
 
-**交付物与验收（本提交）：** 新增 Linux/Python 3.12 GitHub Actions：`uv sync --locked`、离线 pytest、Ruff、编译检查；`uv.lock` 锁定 Ruff 0.16.9，启用 `E4/E7/E9/F/I`，清理对应存量导入与未使用变量，无批量 `noqa`。本地逐项复现通过：544 passed、5 deselected；Ruff 与编译检查通过，`git diff --check` 通过。GitHub 远端运行状态待推送后验证。
+**交付物与验收（`0517a4e`）：** 新增 Linux/Python 3.12 GitHub Actions：`uv sync --locked`、离线 pytest、Ruff、编译检查；`uv.lock` 锁定 Ruff 0.16.9，启用 `E4/E7/E9/F/I`，清理对应存量导入与未使用变量，无批量 `noqa`。本地逐项复现通过：544 passed、5 deselected；Ruff 与编译检查通过，`git diff --check` 通过。GitHub 远端运行状态待推送后验证。
 
 ### M7.8.1 RequestSnapshot
 
-**目标：** 用下一次将发送的完整请求取代「一堆原始消息」，统一窗口与预算预测，并给展示提供同源估算。
-
-**改动：**
-
-- 新增 `mini_pi/context/request.py`：
-
-  ```python
-  @dataclass(frozen=True, slots=True)
-  class RequestSnapshot:
-      messages: tuple[Message, ...]
-      tools: tuple[ToolSchema, ...]
-      provider: str | None  # 独立 FakeLLM 可未知
-      model: str | None
-      input_tokens: int
-      source: TokenSource   # 当前请求通常为 estimated；历史 usage 单独保存
-  ```
-
-- `estimate_request(...)` 是**请求输入预测**的唯一入口：使用与 LLM client 一致的 system replay、Provider reasoning 回放及工具 wire schema，避免本地原始 `Message` 与实际载荷不一致。`estimate_tokens(messages)` 仍可用于摘要切点和成本模型中的消息区域估算，但不能再用于下一请求的窗口或任务预算。
-- 在调用 `llm.stream()` 前固定同一份 `messages + schemas`；预算提示若临时注入消息，要据此重建快照。独立 `run_loop()` 的 FakeLLM 和 `--no-session` 也要能走该入口；`provider/model` 元数据由调用方显式提供或标为未知，不能从 FakeLLM 猜出。
-- 收敛调用点：`agent/loop.py:166,177`（预算预测）、`runtime.py:295,307`（窗口判定）、`cli/status.py`（`/context` `/status`）；`context/stats.py` 复用同一字符规则但保持分类估算语义。
-- `ContextStats` 增加 `tools` 分量，`/context` 显示工具 schema 占用、当前请求预测和来源；分类之和只与分类总量相等，历史 Provider usage 单独展示。
-
-**不做：** 不把 `RequestSnapshot` 写进 JSONL（它是派生量，不是事实）；不引入 Provider 专用 tokenizer 依赖。
-
-**验收：** 同一份 messages + tools 在各调用点得到同一个预测 `input_tokens`（含预算提示、system patch、模型切换用例）；实际传给 `llm.stream()` 的 tools 与预测所用 schemas 同批固定；`/context` 分类之和等于展示的分类总量，窗口/预算与当前请求预测一致；旧 usage 不被当作本次实测。
+**交付物与验收（本提交）：** `mini_pi/context/request.py` 冻结消息与工具批次，按 Provider wire 形态估算下一请求；Loop 预算和实际 `llm.stream()` 共用快照，Session 窗口预检包含待提交的用户输入与项目规则，CLI 分开展示分类总量和当前请求预测。摘要切点/成本模型仍用消息区域估算，JSONL 不写派生快照。新增 system patch、schema、reasoning、模型切换、预算提示、Session 无写入与 CLI 测试；全量离线回归 552 passed、5 deselected，Ruff 与编译检查通过。
 
 ### M7.8.2 Token 估算升级
 
@@ -119,8 +95,8 @@
 **改动：**
 
 - 字符规则从单一「4 字符 / token」改为**按字符类加权**（ASCII、CJK、其他宽字符分别取系数），保持向上取整与可复现。
-- 工具 schema 按 Provider 实际 function 包装稳定序列化后计入估算；`source` 继续区分实测与估算，**不得**把当前请求预测或含估算的结果标成 `usage`。
-- 停止把前一次 `usage.total_tokens` 当作当前请求的前缀真值；保留原始 usage 供历史展示、偏差校准与累计任务预算，摘要切点/成本模型继续使用独立的消息估算。改变既有单测预期时写出因果，不能只改期望值。
+- 在 M7.8.1 已有的工具 wire schema 计量上校准偏差；`source` 继续区分实测与估算，**不得**把当前请求预测或含估算的结果标成 `usage`。
+- M7.8.1 已停止把前一次 `usage.total_tokens` 当作当前请求的前缀真值；本项保留原始 usage 供偏差校准，摘要切点/成本模型继续使用独立的消息估算。改变既有单测预期时写出因果，不能只改期望值。
 
 **方法（先测后调）：**
 
@@ -263,8 +239,8 @@ RAG / Vector DB             通用 Agent Scheduler
 | 里程碑 | 内容 | 状态 |
 | --- | --- | --- |
 | M7.8.0 | 前置小修：`read` 空文件、`bash` 无沙箱与平台说明 | 已完成（`0e5848e`；10 passed，全量 544 passed、5 deselected） |
-| M7.8.5 | CI 与 ruff 静态检查 | 已完成（本提交；本地 544 passed、5 deselected；远端待运行） |
-| M7.8.1 | RequestSnapshot 统一请求口径 | 未开始 |
+| M7.8.5 | CI 与 ruff 静态检查 | 已完成（`0517a4e`；本地 544 passed、5 deselected；远端待运行） |
+| M7.8.1 | RequestSnapshot 统一请求口径 | 已完成（本提交；552 passed、5 deselected） |
 | M7.8.2 | Token 估算升级（CJK 安全 + 工具 schema + 实测校准） | 未开始 |
 | M7.8.3 | Context Window 配置化（`--context-window`） | 未开始 |
 | M7.8.4 | Runtime Hook 与 RunContext | 未开始 |

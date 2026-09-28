@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from mini_pi.context.request import estimate_tools_tokens
 from mini_pi.context.sections import replay_system_messages
 from mini_pi.context.tokens import estimate_message_tokens
-from mini_pi.llm.types import Message, SystemMessage, ToolMessage, UserMessage
+from mini_pi.llm.types import Message, SystemMessage, ToolMessage, ToolSchema, UserMessage
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,14 +20,27 @@ class ContextStats:
     conversation: int
     tool_results: int
     summaries: int
+    tools: int = 0
 
     @property
     def total(self) -> int:
         """返回当前投影的分类估算总和。"""
-        return self.system + self.agents + self.conversation + self.tool_results + self.summaries
+        return (
+            self.system
+            + self.agents
+            + self.conversation
+            + self.tool_results
+            + self.summaries
+            + self.tools
+        )
 
 
-def context_stats(messages: Sequence[Message], *, summary_index: int | None = None) -> ContextStats:
+def context_stats(
+    messages: Sequence[Message],
+    *,
+    tools: Sequence[ToolSchema] = (),
+    summary_index: int | None = None,
+) -> ContextStats:
     """按当前投影计算分类估算，旧 system patch 只回放一次。"""
     system_messages = [item for item in messages if isinstance(item, SystemMessage)]
     state = replay_system_messages(system_messages)
@@ -49,4 +63,6 @@ def context_stats(messages: Sequence[Message], *, summary_index: int | None = No
             tool_results += tokens
         else:
             conversation += tokens
-    return ContextStats(system, agents, conversation, tool_results, summaries)
+    return ContextStats(
+        system, agents, conversation, tool_results, summaries, estimate_tools_tokens(tools)
+    )

@@ -15,9 +15,10 @@ from mini_pi.agent.state import (
     commit_message,
 )
 from mini_pi.context.project import load_project_instructions
+from mini_pi.context.request import RequestSnapshot, estimate_request
 from mini_pi.context.sections import diff_sections, replay_system_messages
 from mini_pi.llm.base import LLMClient
-from mini_pi.llm.types import AssistantMessage, SystemMessage, ToolSchema, UserMessage
+from mini_pi.llm.types import AssistantMessage, Message, SystemMessage, ToolSchema, UserMessage
 from mini_pi.tools.registry import ToolRegistry
 from mini_pi.workspace.workspace import Workspace
 
@@ -36,6 +37,8 @@ class Agent:
         on_event: Callable[[AgentEvent], None] | None = None,
         on_message_commit: MessageCommit | None = None,
         prepare_next_turn: PrepareNextTurn | None = None,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> None:
         """注入依赖与构建 Workspace/State；预算与回调在此固定，多次 run 复用。"""
         if max_steps <= 0:
@@ -49,6 +52,8 @@ class Agent:
         self._on_event = on_event
         self._on_message_commit = on_message_commit
         self._prepare_next_turn = prepare_next_turn
+        self._provider = provider
+        self._model = model
         self._workspace = Workspace(cwd)
         self.state = AgentState()
 
@@ -67,10 +72,27 @@ class Agent:
             on_event=self._on_event,
             on_message_commit=self._on_message_commit,
             prepare_next_turn=self._prepare_next_turn,
+            provider=self._provider,
+            model=self._model,
         )
 
     def _refresh_system_prompt(self) -> None:
         """只在目标 sections 变化时向 transcript 追加快照或 patch。"""
+        pending = self._pending_system_message()
+        if pending is not None:
+            commit_message(self.state, pending, self._on_message_commit)
+
+    def preview_messages(self, task: str) -> list[Message]:
+        """不写 Session，预览下一任务将追加的项目规则与用户消息。"""
+        pending = self._pending_system_message()
+        return [
+            *self.state.messages,
+            *([pending] if pending is not None else []),
+            UserMessage(content=task),
+        ]
+
+    def _pending_system_message(self) -> SystemMessage | None:
+        """计算待提交的完整规则或 patch，供预检和真实提交共用。"""
         desired = {
             section.id: section.content
             for section in build_sections(
@@ -86,17 +108,11 @@ class Agent:
         )
         if current is None or current.sections is None:
             # 旧 content 无法安全拆分；追加完整结构化快照而非猜测差异。
-            commit_message(
-                self.state, SystemMessage(sections=desired), self._on_message_commit
-            )
-            return
+            return SystemMessage(sections=desired)
         patch = diff_sections(current.sections, desired)
         if patch is not None:
-            commit_message(
-                self.state,
-                SystemMessage(section_patch=list(patch)),
-                self._on_message_commit,
-            )
+            return SystemMessage(section_patch=list(patch))
+        return None
 
     def reset(self) -> None:
         """清空会话状态，system prompt 会在下次 run 时重新注入。"""
@@ -104,9 +120,22 @@ class Agent:
         self.state.step_count = 0
         self.state.modified_files.clear()
 
-    def set_llm(self, llm: LLMClient) -> None:
+    def set_llm(
+        self, llm: LLMClient, *, provider: str | None = None, model: str | None = None
+    ) -> None:
         """替换 LLM 客户端并保留 transcript（/connect 切换 Key 或 provider）。"""
         self._llm = llm
+        self._provider = provider
+        self._model = model
+
+    def request_snapshot(self) -> RequestSnapshot:
+        """返回当前投影与工具集的下一请求估算，供只读展示复用。"""
+        return estimate_request(
+            self.state.messages,
+            self._registry.schemas(),
+            provider=self._provider,
+            model=self._model,
+        )
 
     @property
     def tool_schemas(self) -> list[ToolSchema]:

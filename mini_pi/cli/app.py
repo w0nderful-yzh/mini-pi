@@ -201,6 +201,8 @@ def _build_agent(
     max_steps: int,
     max_run_input_tokens: int | None = None,
     renderer: ConsoleRenderer,
+    provider: str,
+    model: str,
 ) -> Agent:
     """装配纯内存 Agent（--no-session）；事件走 renderer，不接持久化。"""
     return Agent(
@@ -210,6 +212,8 @@ def _build_agent(
         max_steps=max_steps,
         max_run_input_tokens=max_run_input_tokens,
         on_event=renderer.handle,
+        provider=provider,
+        model=model,
     )
 
 
@@ -232,6 +236,8 @@ def _build_runtime(
             max_steps=max_steps,
             max_run_input_tokens=max_run_input_tokens,
             renderer=renderer,
+            provider=provider,
+            model=model,
         )
     return AgentSession.create(
         cwd=workspace.root,
@@ -358,7 +364,7 @@ def _switch_connection(
             if isinstance(new_agent, AgentSession):
                 new_agent.set_llm(new_llm, provider=chosen_provider, model=chosen_model)
             else:
-                new_agent.set_llm(new_llm)
+                new_agent.set_llm(new_llm, provider=chosen_provider, model=chosen_model)
     except MiniPiError as exc:
         console.print(f"model switch failed: {exc}", style="red", markup=False)
         return None

@@ -22,7 +22,9 @@ def _stats(agent: Agent | AgentSession | None) -> ContextStats:
     if agent is None:
         return context_stats(())
     summary_index = agent.summary_index if isinstance(agent, AgentSession) else None
-    return context_stats(agent.state.messages, summary_index=summary_index)
+    return context_stats(
+        agent.state.messages, tools=agent.tool_schemas, summary_index=summary_index
+    )
 
 
 def _usage_label(total: int, model: str) -> str:
@@ -35,8 +37,8 @@ def _usage_label(total: int, model: str) -> str:
 
 
 def current_context_tokens(agent: Agent | AgentSession | None) -> int:
-    """当前投影的估算总量；/status 与 /compact 使用同一口径，避免前后不一致。"""
-    return _stats(agent).total
+    """返回下一请求预测；无运行时对象时没有可发送的上下文。"""
+    return agent.request_snapshot().input_tokens if agent is not None else 0
 
 
 def _run_usage(agent: Agent | AgentSession | None, renderer: ConsoleRenderer) -> RunUsage | None:
@@ -79,7 +81,10 @@ def render_status(
     console.print(f"Session: {session}", markup=False)
     if full and isinstance(agent, AgentSession):
         console.print(f"Session path: {agent.path}", markup=False, soft_wrap=True)
-    console.print(f"Current context (estimated): {_usage_label(_stats(agent).total, model)}", markup=False)
+    console.print(
+        f"Current context (estimated): {_usage_label(current_context_tokens(agent), model)}",
+        markup=False,
+    )
     usage = _run_usage(agent, renderer)
     console.print(f"Last run Provider usage: {_provider_label(usage)}", markup=False)
     budget = agent.max_run_input_tokens if agent is not None else None
@@ -112,9 +117,14 @@ def render_context(
         ("Conversation", stats.conversation),
         ("Tool results", stats.tool_results),
         ("Summaries", stats.summaries),
+        ("Tool schemas", stats.tools),
     ):
         console.print(f"{label}: ~{amount} tokens", markup=False)
     console.print(f"Total (estimated): {_usage_label(stats.total, model)}", markup=False)
+    console.print(
+        f"Next request input (estimated): ~{current_context_tokens(agent)} tokens",
+        markup=False,
+    )
     usage = _run_usage(agent, renderer)
     console.print(f"Last run Provider usage: {_provider_label(usage)}", markup=False)
     latest = usage.latest_input_tokens if usage is not None else None
