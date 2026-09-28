@@ -85,7 +85,7 @@ Python Coding Agent Harness
 | edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 只做精确唯一匹配，fuzzy 后置 |
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | Shell 边界 | `bash` 是无沙箱本地 shell | 同样是无沙箱本地 shell：`bash` 只约束 `cwd`，可读写 workspace 之外、可联网；文件工具的边界不适用于它，也不打算在 M7.8 引入 Docker/VM 沙箱 |
-| 上下文估算 | usage 锚点 + 其后消息的字符估算 | 复刻同一策略；当前字符规则是 4 字符 ≈ 1 token，会低估中文、只在 usage 锚点里间接计入工具 schema，M7.8.2 补 CJK 安全估算与工具 schema 计量 |
+| 上下文估算 | usage 锚点 + 其后消息的字符估算 | 当前实现沿用此策略，但旧 `usage.total_tokens` 含输出，不能当作下一请求的输入真值；M7.8 将按当前 wire 消息与工具 schema 预测请求，历史 input usage 仅用于实测对拍和累计用量 |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
 | 持久化 | JSONL entry 树（`parentId` 链）+ compaction | M7.3-M7.5 已完成 CLI 新建/恢复/`/new`/同链 `/model` 切换、compaction 投影与手动 `/compact`；M7.6 接入窗口与成本触发；M7.D1 的 `/sessions` 与 `--continue` 严格加载全部候选；M7.7 已通过离线回归、真实 DeepSeek 与人工 CLI 验收 |
@@ -480,7 +480,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行
 - **`bash` 不是沙箱**：文件工具的 Workspace 边界只约束 read/write/edit/search/git_diff，`bash` 是 `cwd = workspace root` 的无沙箱本地 shell（可以读写 workspace 之外、可以联网），也没有危险命令确认机制
-- Token 估算按字符规则（4 字符 ≈ 1 token）计算，中文会低估、工具 schema 只通过 usage 锚点间接计入；M7.8.2 会做 CJK 安全估算与实测校准
+- Token 估算当前混用 4 字符 ≈ 1 token 与历史 `usage.total_tokens` 锚点；中文可能低估，历史 usage 含输出且只反映当时的工具集。M7.8 将按当前请求估算并用真实 input usage 校准
 - 手动 `/compact`、prompt 前与工具轮之间的窗口触发，以及旧工具结果的成本感知提前压缩都已可用；摘要成本收益只有离线估算记录，未做真实计费对照
 - 已知模型的窗口都是 1M 级，窗口触发的自动压缩没有真实长任务样本；M7.7b 只用 DeepSeek 验证了手动 `/compact` 事务后的继续与 resume，OpenAI 因未配置 Key 未测
 - `prompt_toolkit` 是可降级能力：非 tty 或未安装时回退单行 REPL；交互终端缺依赖会在 REPL 顶部打印降级原因（补全/历史/多行编辑不可用）

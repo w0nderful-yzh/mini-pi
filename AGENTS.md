@@ -608,6 +608,8 @@ M7.6f 起工具轮之间多一个独立于窗口阈值的成本触发（mini_pi/
 
 M7.C6 起将两种 token 口径分开：一次 `run()` 多次请求的 Provider input/output 之和是任务累计消耗；下一次请求的活动投影估算才是当前上下文。`/context` 只分解当前投影，不把累计消耗当窗口占用。M7.C8 的任务预算在完整工具批次后、下一次模型请求前检查；Provider usage 缺失时使用独立标记的投影估算，不能伪称实测。窗口阈值仍只用于 Context Compaction。
 
+M7.8 实施时，当前请求的窗口与任务预算预测必须使用同一次将发送的消息及工具 schema；上一轮 `usage.total_tokens` 含输出，只能视作历史粗估，不能作为下一次 input 的实测锚点。Provider `usage.input_tokens` 保留作历史实测和校准，`/context` 分类估算与历史 usage 分开展示；细则见 Phase 3 计划。
+
 原始 `ToolMessage` 和 JSONL 记录保留真实、有界的 observation；展示摘要不写入模型消息。旧工具结果只在安全切点后通过 compaction 投影压缩，保持 tool call/result 配对和 `modified_files`；提前摘要需验证净成本收益（M7.6f 的成本模型与离线记录见 `docs/benchmarks/m7-6f-cost-aware-compaction.md`，没有真实计费结论前不声称节省费用）。
 
 ---

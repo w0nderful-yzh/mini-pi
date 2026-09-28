@@ -1,6 +1,6 @@
 # Phase 3：Runtime Hardening 与外部能力（M7.8 / M8 / M9 / M10）
 
-> 状态：**规划已定稿，尚未开始实施**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M7.8 未开始，M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
+> 状态：**已按 2026-09-28 的代码基线复核，尚未开始实施**。M7（Session / Context 与 CLI）已于 2026-09-24 验收完成；M7.8 未开始，M8–M10 未开始。本文件是 M7.8 的实施依据，同时承接 phase2 第 5 节的 M8–M10 概要。
 
 **目标：** 在接入 LSP / MCP 之前，先把「上下文有多少、预算怎么算、钩子挂在哪、改动怎么被守护」四件事定下来；之后按 LSP → MCP → 动态工具集 → 工具集恢复 → 基准的顺序扩展外部能力。
 
@@ -29,11 +29,11 @@
 
 ### 1.2 需要修正的评审结论
 
-1. **`estimate_tokens` 不是纯字符估算，工具成本大体已被间接计价。**
-   `tokens.py:40-48` 优先采用最近一次 assistant 的 `usage.total_tokens` 作为已知前缀成本，只对其后的消息按字符估算。该 usage 来自一次**包含 tool schema** 的真实请求，所以对「本会话已发生过至少一次请求」的窗口判定，工具成本已经算进去了。真正缺口只有三处：① 本 Session 的首次请求（还没有 usage 锚点）；② `/context`、`predicted_input` 这类纯投影口径；③ 工具集变化后旧锚点失真。M7.8.2 必须分别处理，不能笼统声称「工具 schema 没算」。
+1. **`estimate_tokens` 并非纯字符估算，但旧 usage 不是下一次请求的输入真值。**
+   `tokens.py:40-48` 使用最近一次 assistant 的 `usage.total_tokens` 加后续消息字符估算；`llm/openai_client.py` 把它映射自 Provider 的 `prompt_tokens + completion_tokens`。前一次请求确实携带了当时的 tool schema，但 `total_tokens` 含输出，后续请求又可能改变 system 投影、工具集、模型或 DeepSeek reasoning 回放。现有锚点只代表历史粗估，不能证明当前工具成本已准确计入，更不能把预测标成 `usage`。M7.8.1/2 以**当前将发送的消息与工具集**估算下一请求；历史 `usage.input_tokens` 单独保留为校准与任务累计实测。
 
 2. **中文低估的程度要实测，不接受评审的示意数字。**
-   评审的「实际 80k / 估算 30k~40k」没有来源。M7.8.2 要求以 Provider usage 为真值量化偏差后再定系数，样本与结论写入 `docs/benchmarks/`。
+   评审的「实际 80k / 估算 30k~40k」没有来源。M7.8.2 要求以 Provider `usage.input_tokens` 为真值，在中文、英文、混合文本及工具 schema 四类固定请求上量化偏差后再定系数，样本与结论写入 `docs/benchmarks/`；一个短请求不能校准三类字符。
 
 3. **不把 `prepare_next_turn` 拆成 `before_request` / `after_tool_batch` / `after_run` 三套钩子。**
    Pi 的做法是把 Compaction、Prompt refresh、动态工具与模型切换都挂在**同一个 turn 边界**上（[参考 §5.1](../design/pi-production-architecture.md)），mini-pi 的 `prepare_next_turn` 正是这个边界。M7.8.4 只做两件事：给它一个显式上下文（`RunContext`）、允许它替换下一次请求的投影；需要多步时在会话层内部按固定顺序组合，不在 Loop 里加 `if`，也不引入插件框架。
@@ -43,7 +43,7 @@
    Pi 生产路径同样同时发送 `tools` prompt section 与 Tool JSON Schema，且 `buildRules()` 会按活动工具生成规则（[参考 §9.1](../design/pi-production-architecture.md)）。A/B 值得做，但要等 M8.3 把工具数量真正推上去之后，且必须同时测 Tool Call 成功率与任务完成率；默认保留现状，把 A/B 并入 M8.5。
 
 5. **MCP 工具名不能用 `server:tool`（评审 §8.3 示例）。**
-   Provider 的 function name 只接受字母、数字、下划线和连字符（≤64 字符），`github:get_issue` 会被 API 直接拒绝。M8.2 必须定义确定的「外部名 → Provider 安全名」映射，保证可逆（供展示与恢复）并对跨 server 重名 Fail Fast。当前 `ToolRegistry.register()` 只查重、不校验名字形态。
+   Provider 的 function name 只接受字母、数字、下划线和连字符（≤64 字符），`github:get_issue` 会被 API 直接拒绝。M8.2 必须定义确定的「外部名 → Provider 安全名」映射，并持久保存反向映射供展示与恢复；不能要求任意长名称仅靠安全名本身可逆。当前 `ToolRegistry.register()` 只查重、不校验名字形态。
 
 6. **M10 有评审未列出的硬前置。**
    Worker/Reviewer 需要**同一 Session 的分叉**，而 `AGENTS.md` 与 phase2 都写明「fork 留到后续」，`JsonlSession` 目前只有单 leaf 追加；worktree 创建也必须经 Tool（Agent 不得直接执行 git）。这两项要作为 M10 的前置里程碑显式排期，不能默认「做到 Multi-Agent 时自然就有」。
@@ -51,6 +51,8 @@
 ### 1.3 评审未覆盖、但按现状要一并处理的
 
 - **窗口来源要收敛为一份。** 引入 `--context-window` 后，`cli/status.py:30`、`cli/status.py:126`（展示）与 `runtime.py:291`、`runtime.py:336`（决策）必须读同一份解析结果，否则「显示的窗口」和「决策用的窗口」会分叉。
+- **展示分类与请求预测要分开。** `context/stats.py` 按消息分类估算，`tokens.py` 可以采用历史 usage；两者现在就不是严格相等的口径。M7.8.1 要求展示的分类之和等于展示的估算总量，窗口/预算则只读同一个当前请求预测；历史实测另列，不塞入分类求和。
+- **请求对象必须反映 wire 形态。** `llm/openai_client.py:46-85` 会回放 system patch、把 ToolMessage 的 `name` 留在本地、按 Provider 决定是否回放 reasoning；只对原始 `Message` 逐条计字符会系统性偏离实际请求。工具 schema 也要按 `to_openai_tools()` 的 function 包装估算。
 - **文档同步项：** README §8 路线图、§9 已知限制（`bash` 无沙箱、平台支持、估算口径）、AGENTS.md §9 Shell Tool 措辞与 §20 开发顺序。
 - **不扩张：** `write` / `edit` 的空值与唯一匹配语义已有覆盖（`AGENTS.md` §10），不借 M7.8 顺手改。
 
@@ -89,7 +91,7 @@
 
 **改动：**
 
-- 新增 `.github/workflows/ci.yml`，步骤与本地一致：`uv sync` → `uv run pytest` → `uv run ruff check .` → `python -m compileall -q mini_pi` → `git diff --check`。
+- 新增 `.github/workflows/ci.yml`，在 macOS/Linux 支持范围内至少固定一套 Linux Python 3.12 环境，步骤：`uv sync --locked` → `uv run pytest` → `uv run ruff check .` → `uv run python -m compileall -q mini_pi`。`git diff --check` 仍作为本地提交前检查；CI 若检查提交差异，必须显式取得 base/head，不能在干净 checkout 上运行空的 `git diff --check` 假装守护。
 - `pyproject.toml`：dev 组加 `ruff`，提交最小 `[tool.ruff]` 配置（`target-version = "py312"`，行宽与现有风格一致）。
 - 首次接入会有存量告警：通过**选定能一次清零的规则集**处理，禁止 `# noqa` 批量掩盖；清理纳入本子项提交。
 
@@ -99,7 +101,7 @@
 
 ### M7.8.1 RequestSnapshot
 
-**目标：** 用「一次真实请求」取代「一堆消息」，作为窗口、预算、展示、未来基准的统一口径。
+**目标：** 用下一次将发送的完整请求取代「一堆原始消息」，统一窗口与预算预测，并给展示提供同源估算。
 
 **改动：**
 
@@ -110,19 +112,20 @@
   class RequestSnapshot:
       messages: tuple[Message, ...]
       tools: tuple[ToolSchema, ...]
-      provider: str
-      model: str
+      provider: str | None  # 独立 FakeLLM 可未知
+      model: str | None
       input_tokens: int
-      source: TokenSource   # usage | estimated | mixed
+      source: TokenSource   # 当前请求通常为 estimated；历史 usage 单独保存
   ```
 
-- `estimate_request(...)` 是唯一入口；`estimate_tokens(messages)` 退化为内部实现或薄封装，不能留下第二套口径。
-- 收敛调用点：`agent/loop.py:166,177`（预算预测）、`runtime.py:295,307`（窗口判定）、`cli/status.py`（`/context` `/status`）、`context/stats.py`。
-- `ContextStats` 增加 `tools` 分量，`/context` 显示工具 schema 占用。
+- `estimate_request(...)` 是**请求输入预测**的唯一入口：使用与 LLM client 一致的 system replay、Provider reasoning 回放及工具 wire schema，避免本地原始 `Message` 与实际载荷不一致。`estimate_tokens(messages)` 仍可用于摘要切点和成本模型中的消息区域估算，但不能再用于下一请求的窗口或任务预算。
+- 在调用 `llm.stream()` 前固定同一份 `messages + schemas`；预算提示若临时注入消息，要据此重建快照。独立 `run_loop()` 的 FakeLLM 和 `--no-session` 也要能走该入口；`provider/model` 元数据由调用方显式提供或标为未知，不能从 FakeLLM 猜出。
+- 收敛调用点：`agent/loop.py:166,177`（预算预测）、`runtime.py:295,307`（窗口判定）、`cli/status.py`（`/context` `/status`）；`context/stats.py` 复用同一字符规则但保持分类估算语义。
+- `ContextStats` 增加 `tools` 分量，`/context` 显示工具 schema 占用、当前请求预测和来源；分类之和只与分类总量相等，历史 Provider usage 单独展示。
 
 **不做：** 不把 `RequestSnapshot` 写进 JSONL（它是派生量，不是事实）；不引入 Provider 专用 tokenizer 依赖。
 
-**验收：** 同一份 messages + tools 在各调用点得到同一个 `input_tokens`（新增一致性用例）；`/context` 分量之和等于 `total`；含 usage 的轮次上，估算与 Provider usage 的差可解释且被记录。
+**验收：** 同一份 messages + tools 在各调用点得到同一个预测 `input_tokens`（含预算提示、system patch、模型切换用例）；实际传给 `llm.stream()` 的 tools 与预测所用 schemas 同批固定；`/context` 分类之和等于展示的分类总量，窗口/预算与当前请求预测一致；旧 usage 不被当作本次实测。
 
 ### M7.8.2 Token 估算升级
 
@@ -131,36 +134,36 @@
 **改动：**
 
 - 字符规则从单一「4 字符 / token」改为**按字符类加权**（ASCII、CJK、其他宽字符分别取系数），保持向上取整与可复现。
-- 工具 schema 文本（`json.dumps(schema, sort_keys=True)` 稳定序列化）计入估算；`source` 继续区分实测与估算，**不得**把含估算的结果标成 `usage`。
-- 保留 usage 锚点语义（`tokens.py:40-48`），但锚点与当前工具集不一致时按估算重算并在 `source` 上体现。
+- 工具 schema 按 Provider 实际 function 包装稳定序列化后计入估算；`source` 继续区分实测与估算，**不得**把当前请求预测或含估算的结果标成 `usage`。
+- 停止把前一次 `usage.total_tokens` 当作当前请求的前缀真值；保留原始 usage 供历史展示、偏差校准与累计任务预算，摘要切点/成本模型继续使用独立的消息估算。改变既有单测预期时写出因果，不能只改期望值。
 
 **方法（先测后调）：**
 
-- 新增可对拍的用例：固定中文、英文、混合样本，比较 `estimate_request()` 与真实 `usage.input_tokens`，输出偏差比。
-- 用真实 DeepSeek 跑一次最小样本（1 次请求、短输入），把偏差与最终系数写入 `docs/benchmarks/m7-8-token-estimation.md`；**没有实测前不写具体倍数**。
+- 新增可对拍的夹具：固定中文、英文、混合文本与工具 schema，分别比较 `estimate_request()` 与真实 `usage.input_tokens`，输出偏差比。
+- 用真实 DeepSeek 分别跑上述最小样本；记录模型、脱敏载荷尺寸、估算值、input usage、偏差和最终系数到 `docs/benchmarks/m7-8-token-estimation.md`。若没有 Key 或 Provider 不给 usage，就保留「待实测」状态，不声称完成本项验收；**没有实测前不写具体倍数**。
 
 **不做：** 不追求 tokenizer 级精确，不引入 `tiktoken` 等新依赖，不按模型维护系数表（除非实测显示必须）。
 
-**验收：** 中文样本不再系统性低估（偏差落在记录文件声明的容差内）；`tests/context/test_tokens.py` 覆盖三类字符、工具 schema、usage 锚点与混合来源；全量离线测试全绿。
+**验收：** 中文样本不再系统性低估（偏差落在记录文件声明的容差内）；`tests/context/test_tokens.py` 覆盖三类字符、工具 schema、历史 usage 与当前预测的隔离；全量离线测试全绿。
 
 ### M7.8.3 Context Window 配置化
 
 **改动：**
 
 - CLI 新增 `--context-window INT`（并允许 `--reserve-tokens`，默认沿用 `DEFAULT_RESERVE_TOKENS = 8192`）。
-- 解析一次、注入一处：`AgentSession` 持有解析后的策略，`run()`、工具轮钩子、`/context`、`/status` 全部读同一份，删除 `cli/status.py` 里各自的 `resolve_policy(model)` 调用。
+- 解析一次、注入一处：`AgentSession` 持有当前模型解析后的策略，`run()`、工具轮钩子、`/context`、`/status` 全部读同一份；`--no-session` 的纯内存模式也传入同一策略，删除 `cli/status.py` 里各自的 `resolve_policy(model)` 调用。`/model` 切换时按显式窗口优先、否则按新模型重新解析，不能保留旧模型的内置窗口。
 - 未知模型且未传窗口 = 维持现状：自动压缩关闭，`/context` 明确显示「未配置」。
 
-**验收：** 自定义模型名 + `--context-window` 能触发自动压缩（小窗口夹具）；`/context` 显示的窗口与决策使用的窗口是同一个值；不传参时行为与当前完全一致（回归用例）。
+**验收：** 自定义模型名 + `--context-window` 能触发自动压缩（小窗口夹具）；`/context` 显示的窗口与决策使用的窗口是同一个值；`/model`、`/new`、`--resume`、`--no-session` 均覆盖显式窗口与默认窗口语义；不传参时行为与当前完全一致（回归用例）。
 
 ### M7.8.4 Runtime Hook 与 RunContext
 
 **改动：**
 
-- 新增 per-run 状态对象 `RunContext`（`run_id`、`request_count`、`input_budget`、`cost_compaction_attempted`、`cancelled`），把 `runtime.py:105` 的 `_cost_compaction_attempted` 迁入，`run()` 开始时新建，避免跨 run 泄漏。
+- 新增最小 per-run 状态对象 `RunContext`（先只含实际需要共享的 `cost_compaction_attempted`；若 `request_count` 等字段有消费者再加入），把 `runtime.py:105` 的 `_cost_compaction_attempted` 迁入，`run()` 开始时新建，避免跨 run 泄漏。任务预算仍由 Loop 持有，避免两份可变计数。
 - `prepare_next_turn` 契约升级为接收 `RunContext`，并允许返回替换后的投影；`None` 时保持现有事件与行为，避免打挂已有测试。
 - 会话层内部把它组合成有序步骤（窗口压缩 → 成本压缩 → 未来的 prompt / 工具集 refresh），每步独立可测；Loop 内不新增分支判断。
-- 新增 `after_run`（会话层收尾：usage 汇总，以及未来 LSP / MCP 的生命周期回收）。
+- 若有真实收尾需求再增加会话层 `after_run`；目前 usage 已可从活动链重建，M8 的长驻进程也不应在每次 `run()` 后无条件杀掉。进程生命周期在 M8 按创建/空闲/会话关闭边界设计。
 - **不新增 `before_request`**，理由见 §1.2 第 3 条。
 
 **不做：** 不做通用插件框架、事件总线或 `HookManager` 抽象；不做并行工具执行。
@@ -170,7 +173,7 @@
 ### M7.8.6 总验收与文档同步
 
 - 离线全量回归 + 不变量专项（`--no-session`、append-only、tool pair、预算、compaction）。
-- 真实 DeepSeek 一次最小请求对拍（估算 vs usage），记录偏差。
+- 真实 DeepSeek 中文、英文、混合文本和工具 schema 最小请求对拍（估算 vs input usage），记录偏差；不可用时明确列为未通过门槛。
 - 确认默认关闭或默认不变的新能力没有改变现有行为。
 - 同步 README §2/§8/§9、`AGENTS.md` §6/§9/§20/§23 与本文件状态表，并在 phase2 第 5 节留指向本文件的入口。
 
@@ -182,16 +185,17 @@
 
 - **能力：** `definition` / `references` / `symbols` / `diagnostics`，全部只读；不实现 rename / format / codeAction。
 - **结构：** `Tool → LspAdapter → JSON-RPC → Language Server`，Agent 与 Loop 不感知 LSP。
-- **复用：** 长驻子进程的启动、超时与进程组清理沿用 `tools/process.py` 的既有语义；路径 → `file://` URI 必须经 `Workspace.resolve`。
+- **复用：** 进程组清理沿用 `tools/process.py` 的安全语义；现有 `run_process()` 是一次性 `communicate()`，不能直接当长驻 JSON-RPC 客户端复用。路径 → `file://` URI 必须经 `Workspace.resolve`。
 - **必须处理：** 初始化握手与 `initialized`、server 崩溃、请求超时、server 不存在、workspace 外文件、JSON-RPC 错误 —— 一律转 `ToolError`，不静默返回空结果。
-- **生命周期：** 由 M7.8.4 的 `after_run` 回收，或空闲超时退出。
+- **生命周期：** 明确会话关闭与空闲超时回收边界；不得每次 `run()` 后无条件退出，否则长驻服务每轮重新握手。
 - **验收：** 离线假 server（脚本化 JSON-RPC）覆盖握手、正常响应、崩溃、超时、越界路径；真实语言服务器人工验证一次并记录。
 
 ### M8.2 MCP（stdio client）
 
 - **范围：** client only / stdio only；不做 MCP server、OAuth、远程 transport。
 - **结构：** `ToolSource` 抽象 → `BuiltinToolSource` / `McpToolSource`，`ToolRegistry` 只保留 `schemas()` 与 `execute(name, args)`，**Loop 不改**。
-- **名字：** 外部名映射为 Provider 安全名（`[A-Za-z0-9_-]{1,64}`），映射确定且可逆；跨 server 重名 Fail Fast；参数校验仍用 pydantic（由 schema 生成动态模型）。
+- **名字：** 外部名映射为 Provider 安全名（`[A-Za-z0-9_-]{1,64}`），同一 server/tool 的映射稳定，并保存 Provider 名到原始 server/tool 的反向表；任意长名称不可能仅靠 ≤64 字符的名字本身可逆。映射冲突与内置工具重名 Fail Fast。
+- **参数：** MCP 的 JSON Schema 不保证能无损转成 pydantic 动态模型；先明确支持的 schema 子集并对不支持的构造 Fail Fast，或采用明确的 JSON Schema 校验器。不能悄悄删约束后把参数送到 server。
 - **配置：** server 配置放用户级目录，凭据只走环境变量或 `~/.mini-pi`，禁止写入项目目录、日志或提交。
 - **错误：** server 未启动、中途退出、协议错误、工具自身报错 → `ToolError`；不静默降级为「工具不存在」。
 - **验收：** 离线假 stdio server（真实 subprocess + 脚本化 JSON-RPC）覆盖握手、`tools/list`、`tools/call`、崩溃、超时、非法 JSON、重名冲突。
@@ -206,8 +210,8 @@
 ### M8.4 External Tool Restore
 
 - **问题：** resume 后必须能重建原 Session 的工具集，否则历史里出现过的工具今天不存在，Session 语义漂移。
-- **方案：** 工具集变化继续经现有 prompt section diff / patch 机制持久化（`mini_pi/context/sections.py` 的 `diff_sections` / `apply_section_patch`），resume 时按记录重建；server 不可用时明确报错，**不静默丢弃**历史调用。
-- **验收：** 跨进程 resume 后 `schemas()` 与创建时一致（比较稳定序列化结果）；外部 server 缺失时报错可解释。
+- **方案：** prompt section diff / patch 只记录模型可见文本，无法重建 server 配置、完整 schema、Provider 名映射或 active allowlist。必须另有可回放的非凭据工具集快照/变更 entry，或引用带版本与摘要的用户级配置；resume 校验快照与当前 server `tools/list` 一致后再提供工具，凭据仍只从用户级配置/环境读取。server 不可用时明确报错，**不静默丢弃**历史调用。
+- **验收：** 跨进程 resume 后工具 schema、名称映射与 active 集合均一致；服务配置/schema 漂移、外部 server 缺失时报错可解释；Session 内没有凭据。
 
 ### M8.5 Benchmark
 
