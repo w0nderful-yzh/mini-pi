@@ -137,7 +137,7 @@ class PtySession:
     def expect_prompt(self, timeout: float = 20.0) -> None:
         """等待下一次提示符出现；先清空滑动窗口。"""
         self.buffer = ""
-        self.read_until("mini-pi>", timeout)
+        self.read_until("›", timeout)
 
     def command(self, text: str, expect: str, timeout: float = 20.0) -> None:
         """输入一条命令/任务并等待预期输出，然后等待下一次提示符。"""
@@ -195,7 +195,7 @@ def phase_create(home: Path, workdir: Path) -> dict[str, object]:
     argv = ["--cwd", str(workdir), "--no-banner", "--model", UNKNOWN_MODEL]
     pty_session = PtySession(build_bootstrap(script, argv), home)
     try:
-        pty_session.read_until("mini-pi>")
+        pty_session.read_until("›")
         pty_session.command("run the big script twice then reply done", "created session")
         # 语义化工具事件：确定性标题 + 真实退出码 + 截断标记
         assert "Run python3" in pty_session.output, pty_session.output[-800:]
@@ -231,12 +231,12 @@ def phase_resume(home: Path, workdir: Path, session_path: Path, phase1: dict[str
     argv = ["--cwd", str(workdir), "--resume", str(session_path), "--no-banner"]
     pty_session = PtySession(build_bootstrap(script, argv), home)
     try:
-        pty_session.read_until("mini-pi>")
-        pty_session.command("/compact", "Compaction: summarized")
-        assert "Summary usage:" in pty_session.output
-        pty_session.command("/context", "Summaries:")
+        pty_session.read_until("›")
+        pty_session.command("/compact", "summarized")
+        assert "Summary usage" in pty_session.output
+        pty_session.command("/context", "Summaries")
         pty_session.command("continue after compact", "continued after compact")
-        pty_session.command("/status", "Last run requests")
+        pty_session.command("/status full", "Last tools")
         pty_session.command("/new", "new session:")
         pty_session.command("task in new session", "answer in new session")
         pty_session.exit_repl()
@@ -276,7 +276,7 @@ def phase_budget(home: Path, workdir: Path) -> dict[str, object]:
     ]
     pty_session = PtySession(build_bootstrap(script, argv), home)
     try:
-        pty_session.read_until("mini-pi>")
+        pty_session.read_until("›")
         pty_session.buffer = ""
         pty_session.send("run a tiny command\r")
         deadline = time.monotonic() + 20
@@ -309,7 +309,7 @@ def phase_narrow_interrupt(home: Path, workdir: Path) -> dict[str, object]:
     argv = ["--cwd", str(workdir), "--model", UNKNOWN_MODEL]
     pty_session = PtySession(build_bootstrap(script, argv), home, rows=24, cols=40)
     try:
-        pty_session.read_until("mini-pi>")
+        pty_session.read_until("›")
         startup = pty_session.output
         # 窄屏：Banner 降级为单行，启动元数据按字段分行
         assert "牛人，就用牛的 coding agent" in startup, startup

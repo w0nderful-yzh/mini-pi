@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from mini_pi.cli import style
 from mini_pi.cli.app import app
 from mini_pi.llm.types import AssistantMessage, Usage, UserMessage
 from mini_pi.session.jsonl import JsonlSession
@@ -99,7 +100,7 @@ def test_interactive_continue_gets_fresh_budget_and_status_shows_setting(
     )
 
     assert result.exit_code == 0, result.output
-    assert "Run input budget: 28200 tokens (request-boundary, resets per task)" in result.output
+    assert style.row("Budget", "28,200 tokens (request-boundary, resets per task)") in result.output
     assert "Run stopped before the next model request" in result.output
     assert "continued" in result.output
     assert len(llm.calls) == 3
@@ -127,7 +128,7 @@ def test_budget_defaults_off_and_cli_rejects_nonpositive_value(
         input="/status\n/exit\n",
     )
     assert result.exit_code == 0, result.output
-    assert "Run input budget: disabled" in result.output
+    assert style.row("Budget", "disabled") in result.output
 
     invalid = runner.invoke(app, ["--max-run-input-tokens", "0"])
     assert invalid.exit_code != 0

@@ -126,7 +126,10 @@ def test_bash_failure_shows_exit_stderr_timeout_and_truncation_without_task_judg
     renderer.handle(AgentEndEvent(reason="completed"))
     text = output.getvalue()
     assert "● Run frontend build (npm)" in text
-    assert "✗ shell exited 2 (timed out) (output truncated) · stderr: TypeScript error in app.ts" in text
+    assert (
+        "✗ Run frontend build (npm) · shell exited 2 (timed out) (output truncated)"
+        " · stderr: TypeScript error in app.ts" in text
+    )
     assert "build passed" not in text.lower()
     assert "continuing" not in text.lower()
     assert "Agent stopped with an error" not in text
@@ -156,7 +159,7 @@ def test_git_status_result_reports_observed_path_count() -> None:
     )
     text = output.getvalue()
     assert "● Inspect git status" in text
-    assert "✓ 1 changed path(s)" in text
+    assert "✓ Inspect git status · 1 changed path(s)" in text
 
 
 def test_search_zero_matches_and_tool_error_have_distinct_meaning() -> None:
@@ -178,8 +181,8 @@ def test_search_zero_matches_and_tool_error_have_distinct_meaning() -> None:
             is_error=True,
         )
     )
-    assert "✓ 0 matches" in output.getvalue()
-    assert "✗ failed: ToolError: not a file: missing.py" in output.getvalue()
+    assert "✓ Search 'absent' in workspace · 0 matches" in output.getvalue()
+    assert "✗ Read missing.py · failed: ToolError: not a file: missing.py" in output.getvalue()
 
 
 def test_verbose_shows_captured_result_and_redacts_credential_forms() -> None:

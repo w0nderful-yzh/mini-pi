@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any, Protocol
 
+from mini_pi.cli import style
+
 # 输入历史与凭据同目录，目录 0700、文件 0600，且位于用户目录而不是项目目录
 DEFAULT_HISTORY_PATH = Path.home() / ".mini-pi" / "history"
 
@@ -30,9 +32,10 @@ SLASH_COMMANDS: tuple[str, ...] = (
     "/exit",
 )
 
-_REPL_PROMPT = "mini-pi> "
+# 行首标记与展示层共用同一套词汇
+_REPL_PROMPT = f"{style.MARK_USER} "
 # 多行输入的第二行起使用续行提示，明确当前还在同一次提交中
-_CONTINUATION_PROMPT = "   ... "
+_CONTINUATION_PROMPT = "  ... "
 # 交互终端缺 prompt_toolkit 时的降级说明；非 tty 回退属于正常路径，不提示
 _MISSING_LIBRARY_NOTICE = (
     "input library prompt_toolkit is not installed; history, multi-line editing, "

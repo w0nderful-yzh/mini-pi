@@ -456,7 +456,8 @@ def cli(
         raise typer.BadParameter("--no-session cannot be used with --resume or --continue")
 
     workspace = Workspace(cwd)
-    console = Console()
+    # 关闭 Rich 的自动高亮：它会按数字/字符串上色，切碎这里刻意设计的语义色
+    console = Console(highlight=False)
     renderer = ConsoleRenderer(console, show_thinking=not no_banner, verbose=verbose)
     agent: Agent | AgentSession | None = None
     startup_error: str | None = None

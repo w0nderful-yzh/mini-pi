@@ -360,14 +360,15 @@ mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入
 - 默认在 `~/.mini-pi/sessions/` 下按 workspace 保存 JSONL；交互启动页只显示短会话 id，完整 cwd 与当前 Session 路径由 `/status full` 展示；一次性任务结束仍显示可恢复文件路径；创建失败不会静默回退到内存模式
 - `--resume <path>` 严格加载指定会话；`--continue` 严格校验当前 workspace 的所有候选，按最后 entry 的活动时间选最新（空会话用 header 时间）。候选损坏、cwd 不匹配或最新时间并列会报错，不静默退回旧会话；两者不可并用，也不可与 `--no-session` 并用
 - `--no-session` 不创建持久化文件，保留原有 `/reset` 与 `/model` 行为；持久化模式用 `/new` 开启独立会话，`/model` 在当前链切换模型且仅让后续 entry 使用新配置；`/reset` 在持久化模式下提示改用 `/new`
-- 交互启动显示 ASCII Banner 与标语（`mini_pi/assets/banner.txt` 原样输出），随后只列版本、模型、项目名、短会话 id 和 `/help`；终端宽度不足或非 tty 时 Banner 降为单行、启动元数据按字段分行；`--no-banner` 可关闭
+- 交互启动显示 ASCII Banner 与标语（`mini_pi/assets/banner.txt` 原样输出），随后是两行身份栏：`mini-pi <版本> · <provider>/<model>` 与 `<项目> · session <短 id>`，帮助入口 `/help for commands` 在宽屏右对齐到同一行；40 列窄屏、`TERM=dumb` 与非 tty 改按字段分行。`--no-banner` 可关闭 Art
 - `/help` 列出可用命令；未知 `/命令` 只提示且不会作为任务发给模型
 - `/sessions` 严格加载当前 workspace 的全部候选，按活动时间显示短 id、活动模型、摘要状态和当前标记；任何候选损坏都会整体报错，不跳过后展示不完整列表。该命令只读本地 JSONL，不调用模型；恢复仍使用 `--continue` 或 `--resume <session.jsonl>`
-- `/status` 分开显示当前投影估算与最近任务的请求数、累计 Provider 用量、工具数和耗时；Session 恢复后从完整活动链重建统计，`/status full` 才显示完整路径。`/context` 分解当前投影，单列最近请求输入与任务累计用量，并显示当前模型的窗口压缩阈值与成本触发状态；`/tools` 列出工具
+- `/status` 默认只给决策信息：模型、项目、会话、（`full` 时补完整路径）、当前请求估算、最近任务实测用量、任务预算与压缩配置；请求数/工具数/耗时明细只在 `/status full` 展开。`/context` 按「当前投影分类 → 最近请求与任务实测 → 压缩配置」三组展示，`/tools` 对齐列出工具名与说明
 - `--context-window INT` 可显式覆盖当前模型的窗口，`--reserve-tokens INT` 调整预留量（默认 8192，必须小于已配置窗口）。持久化会话的 prompt 前检查、工具轮检查、`/status` 与 `/context` 使用同一策略；`/model` 切换时显式窗口继续优先，否则重查新模型内置窗口，`/new` 继承本次配置。`--resume` 用本次 CLI 参数重新解析，不把窗口写入 JSONL。未知模型未配置窗口时自动压缩仍关闭；`--no-session` 只展示解析后的窗口，不执行需要 JSONL 的自动压缩
 - `/compact [instructions]` 手动压缩持久化会话：只在安全切点前生成摘要检查点，摘要请求不带工具，`instructions` 仅进入本次请求；输出摘要消息数、保留 entry 数、切点边界、压缩前后当前上下文估算与摘要调用的实测 usage。原始 message entry 一条不删，失败时不改 JSONL 与内存投影；`--no-session` 明确拒绝，不隐式建 JSONL
 - 同一套判定也会自动运行：M7.6b 起每次 `run()` 提交新 user 消息前按窗口策略（当前投影估算 > `context_window - reserve`）检查，需要时先压缩再追加这一条消息；M7.6c 起每个完整工具批次提交后、下一次请求前也用同一判定检查，压缩成功后同一次任务继续，已执行的工具不重放。窗口未知的模型不启用自动压缩，未超阈值不产生任何写入。M7.6d 起自动压缩失败（无安全切点、摘要或写盘失败、压缩后仍超阈值）以 agent error 结束这次任务：不追加假 assistant、不改投影、不再发出越界的下一次请求；已提交的消息与工具结果保留，一次性 CLI 调用返回非零码。M7.6f 起工具轮之间还有第二个触发：窗口内但旧工具结果占被摘要区域一半以上、且按 3 次后续请求算得摘要成本小于预计节省时提前压缩（旧输出按 2000 字符截断进入摘要请求，因此摘要成本与日志长度无关）；每次任务最多尝试一次，摘要阶段失败只放弃这次优化、不终止任务，写盘或重建失败仍以 agent error 终止；仅离线估算验证过收益（[记录](docs/benchmarks/m7-6f-cost-aware-compaction.md)），没有真实计费结论
-- 流式打印模型正文，默认工具事件根据已知命令形态显示操作标题、真实退出码、超时/截断与简短 stderr；未知或含凭据的 shell 命令采用保守标题，不推断任务成败。`--verbose` 展示参数及 Tool 层已截断日志并脱敏已知凭据。任务结束只打印一行请求、用量覆盖率、工具数和耗时；缺失 usage 明确标为不可用或部分实测。耗时在恢复后是 JSONL 消息时间的近似跨度
+- 流式打印模型正文；默认工具事件先显示进行中的 `● 标题`，完成后用 `✓/✗ 标题 · 结果` 收敛为一行并重复操作标题，长会话里不必回看是哪一步。真实退出码、超时/截断与简短 stderr 照实展示，未知或含凭据的 shell 命令用保守标题，不推断任务成败。`--verbose` 展示参数及 Tool 层已截断日志并脱敏已知凭据。任务结束打印一行 `Completed/Stopped/Failed/Cancelled · N tools · M requests · in/out · 秒`，缺失 usage 明确标为不可用或 partial；耗时在恢复后是 JSONL 消息时间的近似跨度
+- 展示层共用一套视觉词汇（`mini_pi/cli/style.py`）：青色进行中、绿色成功、黄色注意、红色失败，且每种状态都有 `● ✓ ✗ ⚠` 或结果词承载，去掉颜色仍可读；数字统一加千位分隔。tty 中长行按终端宽度折行不越界，非 tty 保持每事件一行的确定性文本且无 ANSI；Rich 的自动高亮已关闭，避免切碎语义色
 - `--max-steps` 控制单次任务的最大循环步数（默认 50）。用尽步数仍未给出最终回答时以 `step_limit` 结束：终端明确提示上限值与「任务未完成」，不会把最后一条 assistant 正文当成完成态；交互模式下只结束本次任务，下一条提问重新计数，也可用 `--max-steps` 提高上限
 - 一次性模式的退出码与终止原因一一对应，脚本可据此判断任务是否真的完成：`0` completed、`1` error、`2` budget_limit、`3` step_limit、`130` cancelled（128+SIGINT）。只有 `completed` 返回 0；其余情况不回滚已提交的消息、工具结果与文件改动，持久化会话保留，可用 `--resume` 继续；拿不到 `agent_end` 时按失败（1）处理，不因缺少终止事件报成功
 - 交互输入默认使用 `prompt_toolkit`：输入 `/` 时命令菜单自动出现在输入行下方，Tab（或 `→`）采纳高亮项；只剩**唯一匹配**时 Enter 会先补全、再按一次 Enter 才提交，其他情况 Enter 直接提交原文；Ctrl+J 或 Alt+Enter 换行、Ctrl+L 清屏。输入历史保存在 `~/.mini-pi/history`（目录 0700、文件 0600，不写入项目目录，Key 输入走独立的隐藏提示因此不进入历史）。stdin/stdout 不是 tty 时静默回退内建 `input()` 的单行 REPL（按行读取、每行一次提交）；交互终端但输入库缺失时同样回退，并在 REPL 顶部打印一行降级原因，避免静默失去补全与历史
@@ -410,7 +411,7 @@ uv run pytest -m integration        # 需要 API Key
 | M6 | pytest 完善：边界用例、超时、路径逃逸、完整回归 | 已完成 |
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
 | M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；[远端 CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 已通过） |
-| M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 进行中（M7.9.1–M7.9.3 已完成；[基线记录](docs/benchmarks/m7-9-baseline.md)：真实 DeepSeek 4/4 completed，16 请求 / 20 工具调用 / 35,689 实测 input） |
+| M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 已完成（M7.9.1–M7.9.4；[任务基线](docs/benchmarks/m7-9-baseline.md)：真实 DeepSeek 4/4 completed；[视觉验收](docs/benchmarks/m7-9-4-cli-visual.md)：80/40 列、`TERM=dumb`、`NO_COLOR`、非 tty 全部通过） |
 | M8 | 长任务交互、只读 LSP、按需 MCP、活动工具集与恢复 | 未开始；每项以真实任务收益或明确服务需求为准 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |

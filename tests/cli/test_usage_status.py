@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from mini_pi.cli import style
 from mini_pi.cli.app import app
 from mini_pi.llm.types import AssistantMessage, Usage
 from mini_pi.session.jsonl import JsonlSession
@@ -54,16 +55,16 @@ def test_status_context_and_resume_use_persisted_request_usage(
     first = runner.invoke(
         app,
         ["--cwd", str(tmp_path), "--no-banner"],
-        input="task\n/status\n/context\n/exit\n",
+        input="task\n/status\n/status full\n/context\n/exit\n",
     )
     assert first.exit_code == 0, first.output
-    assert "requests 2 · provider in 30 / out 5 (2/2 usage) · tools 1" in first.output
-    assert "Last run Provider usage: in 30 / out 5 tokens (2/2 requests reported usage)" in first.output
-    assert "Last request Provider input: 20 tokens" in first.output
-    assert "Last run requests: 2" in first.output
-    assert "Last run tools: 1" in first.output
-    assert "Current context (estimated):" in first.output
-    assert "Total (estimated):" in first.output
+    assert "Completed · 1 tools · 2 requests · in 30 / out 5" in first.output
+    assert style.row("Last run", "in 30 / out 5 tokens (2/2 requests)") in first.output
+    assert style.row("Last request", "in 20 tokens") in first.output
+    # 请求/工具/耗时明细只在 /status full 展开，默认视图保持决策信息
+    assert first.output.count(style.row("Last span", "")) == 1
+    assert style.row("Context", "~") in first.output
+    assert style.row("Total", "~") in first.output
     path = next((tmp_path / "sessions").rglob("*.jsonl"))
     before = JsonlSession.load(path).entries
 
@@ -71,12 +72,12 @@ def test_status_context_and_resume_use_persisted_request_usage(
     second = runner.invoke(
         app,
         ["--cwd", str(tmp_path), "--resume", str(path), "--no-banner"],
-        input="/status\n/context\n/exit\n",
+        input="/status full\n/context\n/exit\n",
     )
     assert second.exit_code == 0, second.output
-    assert "Last run Provider usage: in 30 / out 5 tokens (2/2 requests reported usage)" in second.output
-    assert "Last request Provider input: 20 tokens" in second.output
-    assert "Last run recorded span:" in second.output
+    assert style.row("Last run", "in 30 / out 5 tokens (2/2 requests)") in second.output
+    assert style.row("Last request", "in 20 tokens") in second.output
+    assert style.row("Last span", "") in second.output
     assert JsonlSession.load(path).entries == before
 
 
@@ -94,13 +95,13 @@ def test_memory_mode_marks_partial_usage_and_unknown_window(
     result = runner.invoke(
         app,
         ["--cwd", str(tmp_path), "--no-session", "--model", "custom-model", "--no-banner"],
-        input="task\n/status\n/context\n/reset\n/status\n/exit\n",
+        input="task\n/status\n/status full\n/context\n/reset\n/status\n/exit\n",
     )
     assert result.exit_code == 0, result.output
     # Rich 在窄终端可能换行，逐段断言覆盖率和部分实测标识。
     normalized = " ".join(result.output.split())
-    assert "partial measured: in 10 / out 2 tokens (1/2 requests reported usage)" in normalized
-    assert "Last request Provider input: unavailable" in result.output
+    assert "partial in 10 / out 2 tokens (1/2 requests)" in normalized
+    assert style.row("Last request", "unavailable") in result.output
     assert "window unknown" in result.output
-    assert "Last run Provider usage: unavailable (no model requests)" in result.output
-    assert "Last run elapsed:" in result.output
+    assert style.row("Last run", "unavailable (no model requests)") in result.output
+    assert result.output.count(style.row("Last span", "")) == 1

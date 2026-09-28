@@ -130,7 +130,7 @@ def test_renders_usage_when_present() -> None:
     )
     assert "tokens:" not in stream.getvalue()
     renderer.handle(AgentEndEvent(reason="completed"))
-    assert "requests 1 · provider in 10 / out 5 (1/1 usage)" in stream.getvalue()
+    assert "Completed · 0 tools · 1 requests · in 10 / out 5" in stream.getvalue()
 
 
 def test_usage_sums_only_current_run() -> None:
@@ -146,10 +146,10 @@ def test_usage_sums_only_current_run() -> None:
             )
         )
     renderer.handle(AgentEndEvent(reason="completed"))
-    assert "requests 2 · provider in 30 / out 4 (2/2 usage)" in stream.getvalue()
+    assert "Completed · 0 tools · 2 requests · in 30 / out 4" in stream.getvalue()
     renderer.handle(AgentStartEvent())
     renderer.handle(AgentEndEvent(reason="completed"))
-    assert stream.getvalue().count("requests 2 · provider") == 1
+    assert stream.getvalue().count("2 requests") == 1
 
 
 def test_omits_usage_line_without_usage() -> None:
@@ -223,7 +223,7 @@ def test_default_bash_nonzero_is_failure() -> None:
             is_error=False,
         )
     )
-    assert "✗ shell exited 3" in stream.getvalue()
+    assert "✗ Run false · shell exited 3" in stream.getvalue()
 
 
 def test_verbose_redacts_common_credential_forms() -> None:

@@ -24,6 +24,17 @@ from mini_pi.agent.events import (
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
 )
+from mini_pi.cli import style
+from mini_pi.llm.types import ToolCall
+
+# 终止原因在收尾统计行里的说法；具体解释由 _render_end 单独给出
+_OUTCOME_WORDS: dict[str, str] = {
+    "completed": "Completed",
+    "step_limit": "Stopped at step limit",
+    "budget_limit": "Stopped at input budget",
+    "error": "Failed",
+    "cancelled": "Cancelled",
+}
 
 _SHELL_CONTROL = re.compile(r"[;&|<>`\r\n]|\$\(|\$\{")
 _SENSITIVE_COMMAND = re.compile(
@@ -222,6 +233,11 @@ class ConsoleRenderer:
         )
         self._thinking.start()
 
+    def _print(self, *args: object, **kwargs: object) -> None:
+        """事件行统一出口：tty 里按终端宽度折行，非 tty 保持单行确定性输出。"""
+        kwargs.setdefault("soft_wrap", not self.console.is_terminal)
+        self.console.print(*args, **kwargs)
+
     def _stop_thinking(self) -> None:
         """在正文或工具输出前清理状态，避免残留和重复刷屏。"""
         if self._thinking is not None:
@@ -275,12 +291,12 @@ class ConsoleRenderer:
             if event.kind == "thinking":
                 return
             self._stop_thinking()
-            self.console.print(event.delta, end="", markup=False, highlight=False)
+            self._print(event.delta, end="", markup=False, highlight=False)
             self._printing_text = True
         elif isinstance(event, MessageEndEvent):
             self._stop_thinking()
             if self._printing_text:
-                self.console.print()
+                self._print()
                 self._printing_text = False
             usage = event.message.usage
             self._requests += 1
@@ -292,17 +308,11 @@ class ConsoleRenderer:
                 self._measured_requests += 1
         elif isinstance(event, ToolExecutionStartEvent):
             self._stop_thinking()
-            action = _tool_action(event.tool_call.name, event.tool_call.arguments)
-            if self._verbose:
-                action += f" {_format_arguments(event.tool_call.arguments, limit=None)}"
-            else:
-                action = _single_line(self._redact(action))
-            self.console.print(
-                self._redact(f"● {action}"),
-                style="cyan",
+            self._print(
+                self._event_line(f"{style.MARK_RUNNING} {self._tool_title(event.tool_call)}"),
+                style=style.RUNNING,
                 markup=False,
                 highlight=False,
-                soft_wrap=True,
             )
         elif isinstance(event, ToolExecutionEndEvent):
             self.last_tool_count += 1
@@ -313,21 +323,22 @@ class ConsoleRenderer:
                 and details["exit_code"] != 0
             )
             # 先对完整 observation 脱敏，再做预览截断，避免长 Key 泄漏前缀。
-            line = _tool_result(event, content=self._redact(event.result.content))
-            if not self._verbose:
-                line = _single_line(line)
-            self.console.print(
-                f"{'✗' if failed else '✓'} {line}",
-                style="red" if failed else "green",
+            result = _tool_result(event, content=self._redact(event.result.content))
+            # 结束行重复工具标题：长会话里单看 "✓ completed" 无法判断是哪个操作
+            line = self._event_line(
+                f"{self._tool_title(event.tool_call)} · {result}"
+            )
+            self._print(
+                f"{style.MARK_FAILED if failed else style.MARK_OK} {line}",
+                style=style.FAILURE if failed else style.SUCCESS,
                 markup=False,
                 highlight=False,
-                soft_wrap=True,
             )
             if self._verbose:
                 # Tool 层已做有界截断；进程层丢弃的内容无法恢复。
-                self.console.print(
+                self._print(
                     self._redact(event.result.content),
-                    style="dim",
+                    style=style.MUTED,
                     markup=False,
                     highlight=False,
                 )
@@ -337,64 +348,91 @@ class ConsoleRenderer:
             if self._started_at is not None:
                 self.last_run_seconds = perf_counter() - self._started_at
             self._render_end(event)
-            usage = (
-                f"in {self._input_tokens} / out {self._output_tokens}"
-                if self._has_usage
-                else "unavailable"
-            )
-            if 0 < self._measured_requests < self._requests:
-                usage = f"partial {usage}"
-            coverage = f"{self._measured_requests}/{self._requests} usage"
-            elapsed = f" · {self.last_run_seconds:.1f}s" if self.last_run_seconds is not None else ""
-            self.console.print(
-                f"  requests {self._requests} · provider {usage} ({coverage})"
-                f" · tools {self.last_tool_count}{elapsed}",
-                style="dim",
+            self._print(
+                self._summary_line(event.reason),
+                style=style.MUTED,
                 markup=False,
+                highlight=False,
             )
         elif isinstance(event, BudgetWarningEvent):
             qualifier = "estimated" if event.source == "estimated" else event.source
-            self.console.print(
-                "Run input budget is close: "
-                f"{event.used}/{event.limit} used ({qualifier}); "
-                f"next request ~{event.predicted_next_input}, "
-                f"{event.remaining} remaining. Asking the model to conclude if possible.",
-                style="yellow",
+            self._print(
+                f"{style.MARK_WARNING} Run input budget is close: "
+                f"{style.count(event.used)}/{style.count(event.limit)} used ({qualifier}); "
+                f"next request ~{style.count(event.predicted_next_input)}, "
+                f"{style.count(event.remaining)} remaining. Asking the model to conclude if possible.",
+                style=style.WARNING,
                 markup=False,
-                soft_wrap=True,
+                highlight=False,
             )
+
+    def _tool_title(self, tool_call: ToolCall) -> str:
+        """工具标题（verbose 附带完整参数）；脱敏与单行化由 _event_line 统一处理。"""
+        title = _tool_action(tool_call.name, tool_call.arguments)
+        if self._verbose:
+            return f"{title} {_format_arguments(tool_call.arguments, limit=None)}"
+        return title
+
+    def _event_line(self, value: str) -> str:
+        """事件行统一处理：先脱敏再转单行；verbose 只脱敏，交给终端软换行。"""
+        redacted = self._redact(value)
+        return redacted if self._verbose else _single_line(redacted)
+
+    def _summary_line(self, reason: AgentEndReason) -> str:
+        """收尾统计行：结果词 · 工具数 · 请求数 · Provider 用量 · 耗时。"""
+        if self._has_usage:
+            usage = f"in {style.count(self._input_tokens)} / out {style.count(self._output_tokens)}"
+            if 0 < self._measured_requests < self._requests:
+                usage += f" (partial {self._measured_requests}/{self._requests})"
+        else:
+            usage = "provider usage unavailable"
+        parts = [
+            _OUTCOME_WORDS.get(reason, reason),
+            f"{self.last_tool_count} tools",
+            f"{self._requests} requests",
+            usage,
+        ]
+        if self.last_run_seconds is not None:
+            parts.append(f"{self.last_run_seconds:.1f}s")
+        return " · ".join(parts)
 
     def _render_end(self, event: AgentEndEvent) -> None:
         """根据终止原因输出结束提示（completed/step_limit/error/budget_limit/cancelled）。"""
         if event.reason == "step_limit":
             # 步数用尽不是完成：说明上限值与下一步动作，避免把最后一条正文当成最终回答
             limit = f" ({event.step_limit})" if event.step_limit is not None else ""
-            self.console.print(
-                f"Reached the step limit{limit} before finishing the task. "
+            self._print(
+                f"{style.MARK_WARNING} Reached the step limit{limit} before finishing the task. "
                 "The task is incomplete; continue in this session or raise --max-steps.",
-                style="yellow",
+                style=style.WARNING,
                 markup=False,
-                soft_wrap=True,
+                highlight=False,
             )
         elif event.reason == "cancelled":
             # 中断不是完成：明确说明保留了什么，避免把 Ctrl+C 当成任务成功
-            self.console.print(
-                "Task cancelled by user. Committed messages and file changes were kept.",
-                style="yellow",
+            self._print(
+                f"{style.MARK_FAILED} Task cancelled by user. "
+                "Committed messages and file changes were kept.",
+                style=style.FAILURE,
                 markup=False,
+                highlight=False,
             )
         elif event.reason == "error":
-            self.console.print(
-                f"Agent stopped with an error: {event.error}", style="red", markup=False
+            self._print(
+                f"{style.MARK_FAILED} Agent stopped with an error: {event.error}",
+                style=style.FAILURE,
+                markup=False,
+                highlight=False,
             )
         elif event.reason == "budget_limit":
             source = event.budget_source or "estimated"
-            self.console.print(
-                "Run stopped before the next model request: input budget would be exceeded "
-                f"({event.budget_used}/{event.budget_limit} used, "
-                f"next request ~{event.predicted_next_input}, {source}). "
+            self._print(
+                f"{style.MARK_WARNING} Run stopped before the next model request: "
+                "input budget would be exceeded "
+                f"({style.count(event.budget_used or 0)}/{style.count(event.budget_limit or 0)} used, "
+                f"next request ~{style.count(event.predicted_next_input or 0)}, {source}). "
                 "The task is incomplete; continue in this session to start a new run budget.",
-                style="yellow",
+                style=style.WARNING,
                 markup=False,
-                soft_wrap=True,
+                highlight=False,
             )

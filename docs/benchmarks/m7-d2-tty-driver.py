@@ -120,7 +120,7 @@ class Session:
     def expect_prompt(self, timeout: float = 15.0) -> None:
         """等待下一次提示符出现；先清空旧输出避免匹配到历史画面。"""
         self.clear()
-        self.read_until("mini-pi>", timeout)
+        self.read_until("›", timeout)
 
     def wait_exit(self, timeout: float = 10.0) -> bool:
         """等待子进程退出；返回是否在超时前结束。"""
@@ -163,7 +163,7 @@ def main() -> int:
     session = Session(build_bootstrap(workdir, pidfile, callsfile), home)
     transcript: list[str] = []
     try:
-        session.read_until("mini-pi>")
+        session.read_until("›")
         transcript.append("=== startup prompt ===")
 
         # 1) 多行输入：Ctrl+J 换行后再 Enter 提交，只应产生一条 user 消息

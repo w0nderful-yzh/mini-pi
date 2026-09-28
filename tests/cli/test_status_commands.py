@@ -10,6 +10,7 @@ from rich.console import Console
 from typer.testing import CliRunner
 
 from mini_pi.agent.agent import Agent
+from mini_pi.cli import style
 from mini_pi.cli.app import app
 from mini_pi.cli.console import ConsoleRenderer
 from mini_pi.cli.status import render_context
@@ -41,14 +42,14 @@ def test_status_context_and_tools_after_run(
     assert result.exit_code == 0, result.output
     path = next((tmp_path / "sessions").rglob("*.jsonl"))
     session = JsonlSession.load(path)
-    assert f"Session: {str(session.header.id)[:8]}" in result.output
-    assert f"Session path: {path}" in result.output
-    assert "Total (estimated):" in result.output
-    assert "Tool schemas: ~" in result.output
-    assert "Next request input (estimated): ~" in result.output
-    assert "Auto-compaction: window threshold" in result.output
+    assert style.row("Session", str(session.header.id)[:8]) in result.output
+    assert style.row("Session path", str(path)) in result.output
+    assert style.row("Total", "~") in result.output
+    assert style.row("Tool schemas", "~") in result.output
+    assert style.row("Next request", "~") in result.output
+    assert style.row("Compaction", "window threshold") in result.output
     assert "cost-aware early compaction" in result.output
-    assert "read:" in result.output
+    assert "read        " in result.output
     assert [item.content for item in session.replay().messages if isinstance(item, UserMessage)] == ["task"]
     assert len(llm.calls) == 1
 
@@ -67,10 +68,10 @@ def test_unknown_window_and_memory_mode(tmp_path: Path, monkeypatch: pytest.Monk
     )
 
     assert result.exit_code == 0, result.output
-    assert "Session: memory only" in result.output
+    assert style.row("Session", "memory only") in result.output
     assert "window unknown" in result.output
-    assert "Next request input (estimated): ~" in result.output
-    assert "Auto-compaction: unavailable" in result.output
+    assert style.row("Next request", "~") in result.output
+    assert style.row("Compaction", "unavailable") in result.output
 
 
 def test_context_displays_the_same_request_prediction_as_agent(tmp_path: Path) -> None:
@@ -90,8 +91,8 @@ def test_context_displays_the_same_request_prediction_as_agent(tmp_path: Path) -
         console, agent=agent, renderer=ConsoleRenderer(console)
     )
 
-    assert f"Next request input (estimated): ~{expected} tokens" in output.getvalue()
-    assert "Tool schemas: ~" in output.getvalue()
+    assert style.row("Next request", f"~{expected} tokens") in output.getvalue()
+    assert style.row("Tool schemas", "~") in output.getvalue()
 
 
 def test_explicit_window_survives_model_switch_and_new(
@@ -112,8 +113,11 @@ def test_explicit_window_survives_model_switch_and_new(
     )
 
     assert result.exit_code == 0, result.output
-    assert result.output.count("window threshold 30000 tokens (window 32000 - reserve 2000)") == 2
-    assert result.output.count("/ 32000 tokens") == 4  # /status 与 /context 各读两次同一窗口。
+    threshold = style.row(
+        "Compaction", "window threshold 30,000 tokens (window 32,000 - reserve 2,000)"
+    )
+    assert result.output.count(threshold) == 2
+    assert result.output.count("/ 32,000 tokens") == 4  # /status 与 /context 各读两次同一窗口。
     assert "new session:" in result.output
 
 
@@ -133,7 +137,10 @@ def test_no_session_explicit_window_and_builtin_switch(
         input="/context\n/model deepseek deepseek-flash\n/context\n/exit\n",
     )
     assert result.exit_code == 0, result.output
-    assert result.output.count("window threshold 30000 tokens (window 32000 - reserve 2000)") == 2
+    threshold = style.row(
+        "Compaction", "window threshold 30,000 tokens (window 32,000 - reserve 2,000)"
+    )
+    assert result.output.count(threshold) == 2
 
     default = runner.invoke(
         app,
@@ -141,8 +148,8 @@ def test_no_session_explicit_window_and_builtin_switch(
         input="/context\n/model deepseek deepseek-flash\n/context\n/exit\n",
     )
     assert default.exit_code == 0, default.output
-    assert "Auto-compaction: unavailable (context window unknown)" in default.output
-    assert "window 1000000 - reserve 8192" in default.output
+    assert style.row("Compaction", "unavailable (context window unknown)") in default.output
+    assert "window 1,000,000 - reserve 8,192" in default.output
 
 
 def test_invalid_window_does_not_create_session(

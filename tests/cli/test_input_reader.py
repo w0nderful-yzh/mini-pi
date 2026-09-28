@@ -46,7 +46,7 @@ def test_missing_library_falls_back_to_single_line(
 def test_basic_reader_uses_builtin_input(monkeypatch: pytest.MonkeyPatch) -> None:
     """回退实现保持原语义：调用内建 input 并返回原始文本。"""
     monkeypatch.setattr("builtins.input", lambda prompt="": f"<{prompt}>task")
-    assert BasicReplReader().read() == "<mini-pi> >task"
+    assert BasicReplReader().read() == "<› >task"
 
 
 def test_prompt_toolkit_reader_persists_history_with_strict_permissions(

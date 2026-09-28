@@ -118,7 +118,7 @@ def test_resume_explicit_window_is_shown_for_unknown_model(
     )
 
     assert result.exit_code == 0, result.output
-    assert "window threshold 30000 tokens (window 32000 - reserve 2000)" in result.output
+    assert "window threshold 30,000 tokens (window 32,000 - reserve 2,000)" in result.output
     assert "context_window" not in session.path.read_text(encoding="utf-8")
 
 

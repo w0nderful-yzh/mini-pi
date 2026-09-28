@@ -1,6 +1,6 @@
 # Phase 3：可靠性、CLI 体验与外部能力
 
-> 状态：M7.8 与 M7.9.1–M7.9.3 已完成；M7.9.4 及 M8–M10 未开始。当前实施入口是 M7.9.4。已完成的交付与验收放在文末。
+> 状态：M7.8 与 M7.9 全部完成；M8–M10 未开始。当前实施入口是 M8.0。已完成的交付与验收放在文末。
 
 本计划依据 mini-pi 当前源码、[Pi 本地生产链路](../design/pi-production-architecture.md)和已有验收记录。Pi 参考仓库基线为 `/Users/yzh666/workspace/pi` 的 `d1230ea`；它的能力是设计参考，不是必须逐项复制的清单。实现前核对当前代码，不能把计划写成已交付行为。
 
@@ -9,7 +9,7 @@
 | 顺序 | 里程碑 | 进入下一步的条件 |
 | --- | --- | --- |
 | 1 | M7.9.1–M7.9.3 完成语义与真实任务基线 | 已完成：未完成任务不会以成功退出，工作区状态与改动事实可观察，真实任务成功率/用量/耗时与 Session 规模已有可复现记录（[基线](../benchmarks/m7-9-baseline.md)） |
-| 2 | M7.9.4 CLI 视觉整理 | 宽屏、窄屏、无颜色和非 tty 均清晰；展示不改变模型或 Session 事实 |
+| 2 | M7.9.4 CLI 视觉整理 | 已完成：宽屏、窄屏、`TERM=dumb`、`NO_COLOR` 与非 tty 均清晰，展示不改变模型或 Session 事实 |
 | 3 | M8.0 长任务交互 | 在真实长任务中确认追加指令的价值；安全轮次边界和持久化语义经测试 |
 | 4 | M8.1 只读 LSP | 固定任务证明定位、引用或诊断收益；若没有收益，暂缓扩展 |
 | 5 | M8.2–M8.4 MCP、活动工具集与恢复 | 至少一个明确要接入的本地服务；工具 schema、名称映射、恢复可验证 |
@@ -42,30 +42,9 @@ M7.9 是小批次修正与测量，不修改 Agent 架构；M8 按收益逐项�
 
 ### M7.9.4 CLI 视觉整理
 
-**定位：** 保留 `mini_pi/assets/banner.txt` 和 `thinking.txt` 原样，采用“清楚的层级、少量强调色、默认紧凑”的终端风格。只改 `mini_pi/cli/` 的展示与必要的终端测试；不引入全屏 TUI、新依赖或新的 AgentEvent，也不调整输入键位。
+**已交付。** 新增 `mini_pi/cli/style.py` 作为唯一视觉词汇：语义色（青进行中 / 绿成功 / 黄注意 / 红失败）、行首标记（`● ✓ ✗ ⚠ ›`）、统一标签列宽与千位分隔。启动页改为两行身份栏（版本·模型 / 项目·短 Session ID + 右对齐 `/help for commands`），40 列、`TERM=dumb` 与非 tty 按字段分行。任务流中工具结束行重复操作标题（`✓ Read app.py · completed`）并合并结果，收尾统一为 `Completed/Stopped/Failed/Cancelled · N tools · M requests · in/out · 秒`；取消按失败色展示。状态页 `/status` 默认只给决策信息，请求/工具/耗时移到 `/status full`；`/context` 分三组，`/tools` 与 `/sessions` 对齐列。展示层关闭 Rich 自动高亮（它会切碎语义色），tty 内长行按宽度折行、非 tty 保持每事件一行的确定性文本。未改 `banner.txt` / `thinking.txt`、未加依赖或 AgentEvent、未动输入键位。
 
-**启动页：** 宽 tty 在现有 ASCII Banner 下，将版本/模型与项目/短 Session ID 排成两行清晰的身份栏，再给一行 `/help` 提示；保持适度留白，不加大边框或重复打印完整路径。40 列窄屏及非 tty 继续按短字段分行，`--no-banner` 仍可关闭 Art；完整 cwd 和 Session 路径只在 `/status full`。
-
-**任务流：** 用户输入、模型正文、工具操作、最终结果使用一致的间距与语义颜色：青色表示进行中，绿色表示工具成功，黄色表示预算或截断等注意，红色表示失败/取消。颜色必须辅以文字或符号，不能独自承载状态。tty 的工具执行中可用单条临时进度，完成后收敛为一条有界结果；非 tty 只输出确定性、无 ANSI 控制的最终文本行，不做动态重绘。保留现有 `thinking.txt` 的瞬时状态，正文或工具事件出现时清理。未知、组合或含凭据命令仍用保守标题，失败状态只根据真实事件和退出码显示。
-
-**状态页：** `/status`、`/context`、`/tools` 使用一致的标签宽度、分组与数值对齐；默认先呈现用户要做决策的信息（模型/项目/会话、当前请求估算、最近任务实测、预算/压缩状态），详细统计留在对应命令，不在每轮结果后重复铺开。`/sessions` 保持严格候选校验与短 ID，列表仅改善对齐和当前标记。
-
-目标布局示意（文案和间距可在 tty 验收时微调，不规定具体颜色代码）：
-
-```text
-mini-pi 0.x · deepseek/deepseek-flash
-mini-pi · session a1b2c3d4                         /help
-
-› 检查并修复测试
-✓ Read tests/test_cli.py · completed
-✗ Run pytest · exit 1 · stderr: assertion failed
-✓ Edit tests/test_cli.py · 1 file changed
-✓ Run pytest · exit 0
-
-Completed · 4 tools · 3 requests · provider in/out …
-```
-
-**验收：** 用固定 FakeLLM 事件和真实 pty 检查 40/80/120 列、`NO_COLOR`/`TERM=dumb`、非 tty、`--no-banner`、长路径/中英文/多行正文，以及成功、ToolError、shell 非零、超时、截断、预算、`step_limit` 与取消。检查输出不越界、不泄露凭据、无残留 Live 区域；普通模式有界，`--verbose` 仅展开工具已捕获内容。对比修改前后的 JSONL、模型请求及 `ToolMessage`，确认 UI-only 数据没有进入事实链。保留脱敏 tty 截图或转录作为视觉验收记录。
+**验收：** `tests/cli/test_visual_layout.py` 19 passed（全部状态都有文本标记、结果行重复标题、收尾行顺序与千位分隔、partial/缺失 usage 标注、状态页共用一个值列、窄屏/`TERM=dumb`/非 tty 字段行、宽屏身份栏不越界、会话列表对齐、非 tty 无 ANSI 且每事件一行）；既有终端测试同步到新契约。真实 pty 记录见 [M7.9.4 视觉验收](../benchmarks/m7-9-4-cli-visual.md)：80 列任务流与状态页、40 列窄屏、`TERM=dumb`、`NO_COLOR`、非 tty 一次性输出与任务中 Ctrl+C 全部通过断言，无残留 Live 区域。全量 612 passed / 5 deselected。展示改动不写 `ToolMessage`、JSONL 与模型请求。
 
 ## 2. M8 交互与外部能力
 
@@ -124,7 +103,7 @@ Prompt section patch 只记录模型可见文本，无法单独恢复 server 配
 | M7.9.1 未完成任务的退出语义 | 已完成 | `step_limit` 携带上限值、一次性退出码按终止原因映射（0/1/2/3/130）；全量 574 passed / 5 deselected；`8a8d297` |
 | M7.9.2 工作区状态与改动事实 | 已完成 | 新增只读 `git_status`（分组状态 + workspace 相对路径 + 非 git 可解释失败），状态路径不进入 Session 元数据；全量 588 passed / 5 deselected |
 | M7.9.3 真实任务基线与规模测量 | 已完成 | 离线基线用例 5 passed；真实 DeepSeek 四条任务 4/4 completed（16 请求 / 20 工具调用 / 35,689 input）；工具开销按 1/3/7 扫描改为「一次性 220 + 每工具 32」，0–7 工具复验 ±5% 内；全量 593 passed / 5 deselected；[基线](../benchmarks/m7-9-baseline.md) |
-| M7.9.4 | 未开始 | CLI 视觉整理 |
+| M7.9.4 CLI 视觉整理 | 已完成 | 统一视觉词汇、身份栏、工具结果行带标题、收尾统计行、状态页对齐与分组；[视觉验收](../benchmarks/m7-9-4-cli-visual.md)；全量 612 passed / 5 deselected |
 | M8.0–M8.5 | 未开始 | 交互、只读 LSP、MCP、活动工具集、恢复、对照评测 |
 | M9 / M10 | 未开始 | 分别等待跨 Session 工作流和隔离并行任务 |
 

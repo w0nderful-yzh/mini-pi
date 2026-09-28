@@ -7,6 +7,8 @@ from importlib import resources
 from rich.cells import cell_len
 from rich.console import Console
 
+from mini_pi.cli import style
+
 _ASSET_PACKAGE = "mini_pi"
 _ASSET_RELATIVE_PATH = "assets/banner.txt"
 TAGLINE = "牛人，就用牛的 coding agent！"
@@ -55,19 +57,30 @@ def render_startup(
     project: str,
     session: str,
 ) -> None:
-    """渲染紧凑启动信息；完整路径留给 `/status full`。"""
+    """渲染紧凑启动信息：身份栏 + 帮助入口；完整路径留给 `/status full`。"""
     identity = f"mini-pi {version} · {provider}/{model}"
     context = f"{project} · session {session}"
-    if console.is_terminal and console.width >= max(cell_len(identity), cell_len(context)):
-        lines = (identity, context, "/help for commands")
-    else:
-        # 窄屏和非 tty 使用短字段行，避免依赖终端自动折行破坏信息顺序。
-        lines = (
-            f"mini-pi {version}",
-            f"model {provider}/{model}",
-            f"project {project}",
-            f"session {session}",
-            "/help for commands",
-        )
-    for line in lines:
-        console.print(line, style="dim", markup=False, highlight=False)
+    hint = "/help for commands"
+    console.print()
+    # 身份栏是一个整体：两行都排得下才用。TERM=dumb 不报告真实宽度，固定走字段行
+    can_use_bar = (
+        console.is_terminal
+        and not console.is_dumb_terminal
+        and console.width >= cell_len(identity)
+    )
+    bar = style.spread(context, hint, width=console.width) if can_use_bar else None
+    if bar is not None:
+        console.print(identity, style="bold", markup=False, highlight=False, soft_wrap=True)
+        console.print(bar, style=style.MUTED, markup=False, highlight=False, soft_wrap=True)
+        console.print()
+        return
+    # 窄屏与非 tty 使用短字段行，避免依赖终端折行破坏信息顺序
+    for line in (
+        f"mini-pi {version}",
+        f"model {provider}/{model}",
+        f"project {project}",
+        f"session {session}",
+        hint,
+    ):
+        console.print(line, style=style.MUTED, markup=False, highlight=False, soft_wrap=True)
+    console.print()

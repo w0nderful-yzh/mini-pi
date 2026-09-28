@@ -35,8 +35,14 @@ def isolate_auth(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 
 def make_console(*, width: int = 80, terminal: bool = True, color: bool = False) -> Console:
-    """构造可断言的 Console；默认关色，便于匹配纯文本。"""
-    return Console(file=io.StringIO(), force_terminal=terminal, width=width, no_color=not color)
+    """构造可断言的 Console；显式高度让 Rich 采用给定宽度而不去探测终端。"""
+    return Console(
+        file=io.StringIO(),
+        force_terminal=terminal,
+        width=width,
+        height=24,
+        no_color=not color,
+    )
 
 
 def test_banner_asset_is_preserved() -> None:

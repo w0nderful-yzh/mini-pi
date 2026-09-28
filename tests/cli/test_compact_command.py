@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from mini_pi.cli import style
 from mini_pi.cli.app import app
 from mini_pi.context.policy import KNOWN_CONTEXT_WINDOWS
 from mini_pi.errors import LLMError
@@ -47,14 +48,12 @@ def _task_and_summary_script(
 
 def _context_tokens(output: str) -> tuple[int, int]:
     """从展示行里取出压缩前后的估算值，用于断言确实变短。"""
-    line = next(
-        item
-        for item in output.splitlines()
-        if item.startswith("Current context (estimated): ~")
-    )
-    before_text, after_text = line.removeprefix("Current context (estimated): ~").split(" → ")
-    after_tokens = int(after_text.removeprefix("~").split(" /")[0])
-    return int(before_text), after_tokens
+    prefix = style.row("Context", "~")
+    line = next(item for item in output.splitlines() if item.startswith(prefix))
+    before_text, after_text = line.removeprefix(prefix).split(" → ")
+    # 展示值带千位分隔，断言前先还原成整数
+    after_tokens = int(after_text.removeprefix("~").split(" /")[0].replace(",", ""))
+    return int(before_text.replace(",", "")), after_tokens
 
 
 def test_compact_reports_estimates_and_keeps_original_entries(
@@ -76,8 +75,11 @@ def test_compact_reports_estimates_and_keeps_original_entries(
     )
 
     assert result.exit_code == 0, result.output
-    assert "Compaction: summarized 2 messages, kept 2 entries (cut boundary: user)" in result.output
-    assert "Summary usage: in 26000 / out 400 tokens" in result.output
+    assert (
+        style.row("Compaction", "summarized 2 messages, kept 2 entries (cut boundary: user)")
+        in result.output
+    )
+    assert style.row("Summary usage", "in 26,000 / out 400 tokens") in result.output
     before_tokens, after_tokens = _context_tokens(result.output)
     assert before_tokens > after_tokens
     # 交互默认输出不打印完整 Session 路径；需要时由 /status full 查看
@@ -166,7 +168,7 @@ def test_compact_failure_reports_and_leaves_session_unchanged(
     assert result.exit_code == 0, result.output
     assert "compaction failed: summary down" in result.output
     # 失败后 REPL 仍能响应后续命令
-    assert "Current context (estimated):" in result.output
+    assert style.row("Context", "~") in result.output
     entries = JsonlSession.load(next((tmp_path / "sessions").rglob("*.jsonl"))).entries
     assert len(entries) == 5
     assert all(isinstance(entry, MessageEntry) for entry in entries)
@@ -198,7 +200,7 @@ def test_auto_compaction_failure_is_reported_in_repl(
     assert "Agent stopped with an error: automatic compaction failed" in result.output
     assert "summary down" in result.output
     # 失败后 REPL 仍能响应后续命令
-    assert "Current context (estimated):" in result.output
+    assert style.row("Context", "~") in result.output
     entries = JsonlSession.load(next((tmp_path / "sessions").rglob("*.jsonl"))).entries
     assert len(entries) == 3
     assert all(isinstance(entry, MessageEntry) for entry in entries)
