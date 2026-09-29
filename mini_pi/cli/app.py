@@ -63,7 +63,7 @@ _HELP_TEXT = """Available commands:
   /sessions                  list validated sessions for this workspace
   /new                       start a new session (saved sessions only)
   /reset                     clear in-memory context (memory-only sessions)
-  /last [full]               show the last run's tool calls (collapsed ones included)
+  /last [full|N [full]|page N]  inspect recent tool calls and captured output
   /status [full]             show model, workspace, session, and context
   /context                   show estimated context categories
   /tools                     list available tools
@@ -293,6 +293,22 @@ def _is_model_command(command: str) -> bool:
     return command.split(maxsplit=1)[0] in {"/model", "/connect"}
 
 
+def _last_options(command: str) -> tuple[bool, int | None, int] | None:
+    """解析 /last 的摘要、单项、详细与翻页形式；非法输入不提交模型。"""
+    parts = command.split()[1:]
+    if not parts:
+        return False, None, 1
+    if parts == ["full"]:
+        return True, None, 1
+    if len(parts) in {1, 2} and parts[0].isdigit() and (len(parts) == 1 or parts[1] == "full"):
+        return len(parts) == 2, int(parts[0]), 1
+    if len(parts) == 2 and parts[0] == "page" and parts[1].isdigit():
+        return False, None, int(parts[1])
+    if len(parts) == 3 and parts[:2] == ["full", "page"] and parts[2].isdigit():
+        return True, None, int(parts[2])
+    return None
+
+
 def _run_compaction(
     console: Console,
     agent: Agent | AgentSession | None,
@@ -445,6 +461,7 @@ def cli(
     ),
     no_session: bool = typer.Option(False, "--no-session", help="Keep history in memory only."),
     no_banner: bool = typer.Option(False, "--no-banner", help="Do not print the startup banner."),
+    banner: str = typer.Option("compact", "--banner", help="Startup art: compact or full."),
     verbose: bool = typer.Option(False, "--verbose", help="Show tool arguments and bounded logs."),
     resume: Path | None = typer.Option(None, "--resume", help="Resume a Session JSONL file."),
     continue_session: bool = typer.Option(
@@ -456,6 +473,10 @@ def cli(
         raise typer.BadParameter("--resume and --continue are mutually exclusive")
     if no_session and (resume is not None or continue_session):
         raise typer.BadParameter("--no-session cannot be used with --resume or --continue")
+    if banner not in {"compact", "full"}:
+        raise typer.BadParameter("--banner must be compact or full")
+    if no_banner and banner == "full":
+        raise typer.BadParameter("--no-banner cannot be combined with --banner full")
 
     workspace = Workspace(cwd)
     # 关闭 Rich 的自动高亮：它会按数字/字符串上色，切碎这里刻意设计的语义色
@@ -546,7 +567,7 @@ def cli(
             raise typer.Exit(code=code)
         return
 
-    render_banner(console, enabled=not no_banner)
+    render_banner(console, enabled=not no_banner, mode=banner)
     if (
         agent is None
         and isinstance(config_error, MissingAPIKeyError)
@@ -634,9 +655,25 @@ def cli(
         if stripped == "/context":
             render_context(console, agent=agent, renderer=renderer)
             continue
-        if stripped in {"/last", "/last full"}:
-            # 折叠模式下的完整视图；数据来自 Session 活动链，恢复后同样可用
-            render_last_run(console, agent=agent, full=stripped.endswith(" full"))
+        if stripped == "/last" or stripped.startswith("/last "):
+            options = _last_options(stripped)
+            if options is None:
+                console.print(
+                    "usage: /last [full|N [full]|page N|full page N]",
+                    style="yellow",
+                    markup=False,
+                )
+                continue
+            full, index, page = options
+            # 展开仍只消费 Session 活动链；不生成新的模型消息。
+            render_last_run(
+                console,
+                agent=agent,
+                full=full,
+                index=index,
+                page=page,
+                redact=renderer.redact,
+            )
             continue
         if stripped == "/tools":
             render_tools(console, agent=agent, cwd=workspace.root)

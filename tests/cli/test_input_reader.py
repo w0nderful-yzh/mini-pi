@@ -162,3 +162,8 @@ def test_enter_with_multiple_matches_submits_raw_text() -> None:
 def test_enter_on_complete_command_submits_immediately() -> None:
     """已是完整命令时不插入额外字符，一次 Enter 提交。"""
     assert _prompt_with_chunks(["/context", "\r"]) == "/context"
+
+
+def test_empty_enter_stays_in_the_same_prompt() -> None:
+    """空回车不提交，后续有效输入仍由同一个 prompt 返回。"""
+    assert _prompt_with_chunks(["\r", "  \r", "task\r"]) == "task"

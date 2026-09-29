@@ -151,6 +151,10 @@ def _build_key_bindings() -> Any:
     def _submit(event: Any) -> None:
         """Enter：唯一匹配先把候选补全，其余情况提交当前文本。"""
         buffer = event.current_buffer
+        if not buffer.text.strip():
+            # 保持当前 prompt 活着：空回车不结束一次输入，也不会留下新提示符。
+            buffer.text = ""
+            return
         state = buffer.complete_state
         # 打了一半的命令直接回车不应变成 unknown command，先补全再让用户确认
         if state is not None and len(state.completions) == 1:

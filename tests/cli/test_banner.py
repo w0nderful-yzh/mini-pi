@@ -59,11 +59,20 @@ def test_banner_asset_is_preserved() -> None:
     assert lines[-1] == "                      |___||___|      |___||___|"
 
 
-def test_wide_terminal_prints_art_and_tagline() -> None:
-    """宽终端输出完整 Art 与中文标语。"""
+def test_default_banner_is_compact_even_on_wide_terminal() -> None:
+    """宽终端默认不展开 Art，身份栏独立承载启动信息。"""
     console = make_console(width=80)
 
     render_banner(console)
+
+    assert console.file.getvalue() == ""
+
+
+def test_explicit_full_banner_prints_art_and_tagline() -> None:
+    """显式 full 才输出完整 Art 与中文标语。"""
+    console = make_console(width=80)
+
+    render_banner(console, mode="full")
 
     output = re.sub(r"\x1b\[[0-9;]*m", "", console.file.getvalue())
     assert "No Bullshit," in output
@@ -74,7 +83,7 @@ def test_narrow_terminal_falls_back_to_single_line() -> None:
     """窄屏降级为单行，绝不触发自动换行。"""
     console = make_console(width=40)
 
-    render_banner(console)
+    render_banner(console, mode="full")
 
     output = console.file.getvalue()
     assert "No Bullshit," not in output
@@ -85,7 +94,7 @@ def test_non_terminal_falls_back_to_single_line() -> None:
     """管道/CI 等非 tty 场景同样降级。"""
     console = make_console(terminal=False)
 
-    render_banner(console)
+    render_banner(console, mode="full")
 
     output = console.file.getvalue()
     assert "No Bullshit," not in output
@@ -105,21 +114,42 @@ def test_tagline_is_bold_cyan() -> None:
     """标语使用加粗青色，NO_COLOR 由 Rich 负责处理。"""
     console = make_console(color=True)
 
-    render_banner(console)
+    render_banner(console, mode="full")
 
     assert "\x1b[1;36m" in console.file.getvalue()
 
 
-def test_interactive_startup_includes_tagline(
+def test_interactive_startup_is_compact_by_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """交互启动（非 tty 测试环境走降级）也带标语。"""
+    """交互启动默认只给身份栏，不占据整屏 Art。"""
     monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: None)
 
     result = runner.invoke(app, ["--cwd", str(tmp_path)], input="/exit\n")
 
     assert result.exit_code == 0
+    assert TAGLINE not in result.output
+    assert "mini-pi 0.1.0" in result.output
+
+
+def test_full_banner_flag_shows_art(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """用户可显式要求完整图案；非 tty 降级为保留标语的短行。"""
+    monkeypatch.setattr("mini_pi.cli.app.resolve_api_key", lambda *args, **kwargs: None)
+
+    result = runner.invoke(app, ["--cwd", str(tmp_path), "--banner", "full"], input="/exit\n")
+
+    assert result.exit_code == 0
     assert TAGLINE in result.output
+
+
+def test_full_banner_conflicts_with_no_banner(tmp_path: Path) -> None:
+    """相反的启动参数必须明确拒绝。"""
+    result = runner.invoke(app, ["--cwd", str(tmp_path), "--banner", "full", "--no-banner"])
+
+    assert result.exit_code != 0
+    assert "cannot be combined" in result.output
 
 
 def test_no_banner_flag_suppresses_art_and_tagline(

@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from rich.console import Console
 
 from mini_pi.agent.agent import Agent
 from mini_pi.cli import style
-from mini_pi.cli.console import ConsoleRenderer, _preview, _tool_action
+from mini_pi.cli.console import (
+    ConsoleRenderer,
+    _preview,
+    _tool_action,
+    bounded_output,
+    redact_text,
+)
 from mini_pi.context.policy import ContextPolicy
 from mini_pi.context.stats import ContextStats, context_stats
 from mini_pi.llm.types import Usage
@@ -290,29 +297,73 @@ def render_last_run(
     *,
     agent: Agent | AgentSession | None,
     full: bool = False,
+    index: int | None = None,
+    page: int = 1,
+    redact: Callable[[str], str] = redact_text,
 ) -> None:
-    """重新展开最近一次任务的工具调用；默认折叠时这是唯一的完整视图。"""
+    """最近一次任务按页列摘要；单项可展开已捕获的完整 observation。"""
     items = _last_run_tools(agent)
     if not items:
         console.print("Last run tool calls: none", markup=False, highlight=False)
         return
-    console.print(f"Last run tool calls ({len(items)}):", markup=False, highlight=False)
-    for item in items:
+    if index is not None and not 1 <= index <= len(items):
+        console.print(f"/last index must be 1..{len(items)}", markup=False, highlight=False)
+        return
+    page_size = 20
+    pages = (len(items) + page_size - 1) // page_size
+    if index is None and not 1 <= page <= pages:
+        console.print(f"/last page must be 1..{pages}", markup=False, highlight=False)
+        return
+    if index is not None:
+        selected = [(index, items[index - 1])]
         console.print(
-            _tool_result_line(item),
+            f"Last run tool call {index}/{len(items)}:", markup=False, highlight=False
+        )
+    else:
+        start = (page - 1) * page_size
+        selected = list(enumerate(items[start : start + page_size], start=start + 1))
+        console.print(
+            f"Last run tool calls ({len(items)}) · page {page}/{pages}:",
+            markup=False,
+            highlight=False,
+        )
+    for number, item in selected:
+        console.print(
+            redact(f"{number:>2}. {_tool_result_line(item)}"),
             markup=False,
             highlight=False,
             soft_wrap=not console.is_terminal,
         )
-        if full:
-            # 与 --verbose 同一有界口径：只展开工具已捕获的内容
+        if full or index is not None:
+            # 批量 full 只预览每项；单项 full 才输出工具已捕获的全部字节。
+            content = redact(item.result.content)
+            shown, shortened = (
+                (content, False)
+                if index is not None and full
+                else bounded_output(content, lines=3 if index is None else 20, chars=300 if index is None else 2000)
+            )
             console.print(
-                style.hanging(_preview(item.result.content, limit=200)),
+                style.hanging(shown),
                 style=style.MUTED,
                 markup=False,
                 highlight=False,
                 soft_wrap=not console.is_terminal,
             )
+            if shortened:
+                console.print(
+                    style.hanging(f"… display shortened; /last {number} full shows captured content"),
+                    style=style.MUTED,
+                    markup=False,
+                    highlight=False,
+                    soft_wrap=not console.is_terminal,
+                )
+    if index is None and page < pages:
+        console.print(
+            f"More tool calls: /last page {page + 1}",
+            style=style.MUTED,
+            markup=False,
+            highlight=False,
+        )
 
 
 def render_tools(console: Console, *, agent: Agent | AgentSession | None, cwd: Path) -> None:

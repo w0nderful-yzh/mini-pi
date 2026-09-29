@@ -10,7 +10,7 @@ from rich.console import Console
 from typer.testing import CliRunner
 
 from mini_pi.cli import style
-from mini_pi.cli.app import app
+from mini_pi.cli.app import _last_options, app
 from mini_pi.cli.status import render_last_run
 from mini_pi.session.jsonl import JsonlSession
 from mini_pi.session.runtime import AgentSession
@@ -60,9 +60,9 @@ def test_last_lists_tool_calls_from_the_session(
     render_last_run(console, agent=runtime)
 
     assert stream.getvalue().splitlines() == [
-        "Last run tool calls (2):",
-        f"{style.MARK_OK} echo · 1 file(s) changed",
-        f"{style.MARK_FAILED} fail · ToolError: boom",
+        "Last run tool calls (2) · page 1/1:",
+        f" 1. {style.MARK_OK} echo · 1 file(s) changed",
+        f" 2. {style.MARK_FAILED} fail · ToolError: boom",
     ]
 
 
@@ -138,11 +138,77 @@ def test_last_command_in_repl_does_not_touch_the_session(
     )
 
     assert result.exit_code == 0, result.output
-    assert "Last run tool calls (1):" in result.output
-    assert f"{style.MARK_OK} Read a.txt · completed" in result.output
+    assert "Last run tool calls (1) · page 1/1:" in result.output
+    assert f"1. {style.MARK_OK} Read a.txt · completed" in result.output
     # 两次 /last 都不产生新请求，也不写入新消息
     assert len(llm.calls) == 2
     entries = JsonlSession.load(next((tmp_path / "sessions").rglob("*.jsonl"))).entries
     assert [entry.message.role for entry in entries] == [
         "system", "user", "assistant", "tool", "assistant"
     ]
+
+
+def test_last_single_call_full_and_redaction(
+    tmp_path: Path, echo_registry: ToolRegistry
+) -> None:
+    """单项详情可读完整捕获内容，但已知凭据格式必须屏蔽。"""
+    runtime = _runtime(
+        tmp_path,
+        [
+            assistant(tool_calls=[tool_call("c1", "echo", {"text": "Bearer sk-secret"})]),
+            assistant("done"),
+        ],
+        echo_registry,
+    )
+    console, stream = _console()
+
+    render_last_run(console, agent=runtime, index=1, full=True)
+
+    output = stream.getvalue()
+    assert "Last run tool call 1/1:" in output
+    assert "Bearer [REDACTED]" in output
+    assert "sk-secret" not in output
+
+
+def test_last_pages_many_calls(tmp_path: Path, echo_registry: ToolRegistry) -> None:
+    """默认只列一页并提供明确续读入口，页码与单项编号稳定。"""
+    calls = [tool_call(f"c{index}", "echo", {"text": str(index)}) for index in range(1, 22)]
+    runtime = _runtime(tmp_path, [assistant(tool_calls=calls), assistant("done")], echo_registry)
+    first, first_stream = _console()
+    second, second_stream = _console()
+
+    render_last_run(first, agent=runtime)
+    render_last_run(second, agent=runtime, page=2)
+
+    assert "Last run tool calls (21) · page 1/2:" in first_stream.getvalue()
+    assert "More tool calls: /last page 2" in first_stream.getvalue()
+    assert "21. ✓ echo" not in first_stream.getvalue()
+    assert "21. ✓ echo" in second_stream.getvalue()
+
+
+def test_last_command_forms_are_explicit() -> None:
+    """按编号和页码查看是本地命令，错误参数不应流入模型。"""
+    assert _last_options("/last") == (False, None, 1)
+    assert _last_options("/last full") == (True, None, 1)
+    assert _last_options("/last 3") == (False, 3, 1)
+    assert _last_options("/last 3 full") == (True, 3, 1)
+    assert _last_options("/last page 2") == (False, None, 2)
+    assert _last_options("/last full page 2") == (True, None, 2)
+    assert _last_options("/last nonsense") is None
+
+
+def test_last_batch_full_keeps_short_preview(tmp_path: Path, echo_registry: ToolRegistry) -> None:
+    """批量 full 仍限每项预览，并指向单项完整捕获。"""
+    long_text = "\n".join(f"line-{index:02d}" for index in range(50))
+    runtime = _runtime(
+        tmp_path,
+        [assistant(tool_calls=[tool_call("c1", "echo", {"text": long_text})]), assistant("done")],
+        echo_registry,
+    )
+    console, stream = _console()
+
+    render_last_run(console, agent=runtime, full=True)
+
+    assert "line-00" in stream.getvalue()
+    assert "line-49" not in stream.getvalue()
+    assert "/last 1 full shows captured content" in stream.getvalue()

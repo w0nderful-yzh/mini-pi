@@ -25,6 +25,7 @@ from mini_pi.agent.events import (
     ToolExecutionStartEvent,
 )
 from mini_pi.cli import style
+from mini_pi.cli.body import BodyPresenter
 from mini_pi.llm.types import ToolCall
 
 # 终止原因在收尾统计行里的说法；具体解释由 _render_end 单独给出
@@ -40,6 +41,33 @@ _SHELL_CONTROL = re.compile(r"[;&|<>`\r\n]|\$\(|\$\{")
 _SENSITIVE_COMMAND = re.compile(
     r"(?i)(?:api[_-]?key|authorization|bearer|password|secret|token|credential)"
 )
+
+
+def redact_text(value: str, secrets: tuple[str, ...] = ()) -> str:
+    """展示前统一屏蔽已知凭据和常见 Key 参数格式。"""
+    for secret in secrets:
+        value = value.replace(secret, "[REDACTED]")
+    value = re.sub(
+        r"(?i)\b(OPENAI_API_KEY|DEEPSEEK_API_KEY)\s*=\s*([^\s,;]+)",
+        r"\1=[REDACTED]",
+        value,
+    )
+    return re.sub(
+        r"(?i)((?<!\w)--api-key(?:\s+|=)|\bBearer\s+)([^\s,;]+)",
+        r"\1[REDACTED]",
+        value,
+    )
+
+
+def bounded_output(content: str, *, lines: int = 20, chars: int = 2000) -> tuple[str, bool]:
+    """只限展示长度并标注省略；原始 ToolMessage 与捕获上限不受影响。"""
+    parts = content.splitlines(keepends=True)
+    selected = "".join(parts[:lines])
+    shortened = len(parts) > lines
+    if len(selected) > chars:
+        selected = selected[:chars]
+        shortened = True
+    return selected.rstrip("\n") or "(empty)", shortened
 
 
 def _preview(content: str, *, limit: int = 200) -> str:
@@ -206,9 +234,9 @@ class ConsoleRenderer:
     ) -> None:
         """初始化渲染器与本次 run 的用量/计时累加字段。"""
         self.console = console or Console()
-        self._printing_text = False
         self._verbose = verbose
         self._secrets: tuple[str, ...] = ()
+        self._body = BodyPresenter(self.console, self._redact)
         self._activity: Live | None = None
         self._activity_started = 0.0
         self._activity_label = style.THINKING_LABEL
@@ -275,6 +303,7 @@ class ConsoleRenderer:
     def close(self) -> None:
         """运行中断或抛错时清理终端状态。"""
         self._stop_activity()
+        self._body.start()
 
     def set_secrets(self, values: list[str]) -> None:
         """登记已配置凭据，避免 verbose 输出中直接出现其值。"""
@@ -282,19 +311,11 @@ class ConsoleRenderer:
 
     def _redact(self, value: str) -> str:
         """屏蔽已知凭据与常见 API Key 赋值形式。"""
-        for secret in self._secrets:
-            value = value.replace(secret, "[REDACTED]")
-        value = re.sub(
-            r"(?i)\b(OPENAI_API_KEY|DEEPSEEK_API_KEY)\s*=\s*([^\s,;]+)",
-            r"\1=[REDACTED]",
-            value,
-        )
-        value = re.sub(
-            r"(?i)((?<!\w)--api-key(?:\s+|=)|\bBearer\s+)([^\s,;]+)",
-            r"\1[REDACTED]",
-            value,
-        )
-        return value
+        return redact_text(value, self._secrets)
+
+    def redact(self, value: str) -> str:
+        """供本地命令展示复用与实时事件相同的凭据屏蔽。"""
+        return self._redact(value)
 
     @property
     def last_provider_usage(self) -> tuple[int, int] | None:
@@ -315,18 +336,16 @@ class ConsoleRenderer:
             self.last_tool_count = 0
             self._collapsed_tools = 0
         elif isinstance(event, MessageStartEvent):
+            self._body.start()
             self._start_activity(style.THINKING_LABEL)
         elif isinstance(event, MessageDeltaEvent):
             if event.kind == "thinking":
                 return
             self._stop_activity()
-            self._print(event.delta, end="", markup=False, highlight=False)
-            self._printing_text = True
+            self._body.feed(event.delta)
         elif isinstance(event, MessageEndEvent):
             self._stop_activity()
-            if self._printing_text:
-                self._print()
-                self._printing_text = False
+            self._body.finish(event.message.content)
             usage = event.message.usage
             self._requests += 1
             if usage is not None:
@@ -378,12 +397,20 @@ class ConsoleRenderer:
                 )
             if self._verbose:
                 # Tool 层已做有界截断；进程层丢弃的内容无法恢复。
+                preview, shortened = bounded_output(self._redact(event.result.content))
                 self._print(
-                    self._redact(event.result.content),
+                    preview,
                     style=style.MUTED,
                     markup=False,
                     highlight=False,
                 )
+                if shortened:
+                    self._print(
+                        f"… display shortened; /last {self.last_tool_count} full shows captured content",
+                        style=style.MUTED,
+                        markup=False,
+                        highlight=False,
+                    )
         elif isinstance(event, AgentEndEvent):
             self._stop_activity()
             self.last_end_reason = event.reason
@@ -420,7 +447,7 @@ class ConsoleRenderer:
         """工具标题（verbose 附带完整参数）；脱敏与单行化由 _event_line 统一处理。"""
         title = _tool_action(tool_call.name, tool_call.arguments)
         if self._verbose:
-            return f"{title} {_format_arguments(tool_call.arguments, limit=None)}"
+            return f"{title} {_format_arguments(tool_call.arguments, limit=600)}"
         return title
 
     def _event_line(self, value: str) -> str:

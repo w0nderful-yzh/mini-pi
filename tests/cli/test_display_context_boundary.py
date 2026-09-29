@@ -42,7 +42,7 @@ def test_display_metadata_does_not_enter_history_or_provider(tmp_path: Path) -> 
     llm = FakeLLMClient(
         [
             assistant(tool_calls=[tool_call("c1", "inspect_boundary", {})]),
-            assistant("done"),
+            assistant("**done** with `inspect_boundary`"),
         ]
     )
     runtime = AgentSession.create(
@@ -62,6 +62,8 @@ def test_display_metadata_does_not_enter_history_or_provider(tmp_path: Path) -> 
     wire = str(to_openai_messages(runtime.state.messages, include_reasoning=True))
     assert "safe observation" in history
     assert "safe observation" in wire
+    assert "**done** with `inspect_boundary`" in history
+    assert "**done** with `inspect_boundary`" in wire
     for ui_only in ("secret marker", "db         db", "provider tokens:", str(runtime.path)):
         assert ui_only not in history
         assert ui_only not in wire

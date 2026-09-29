@@ -1,4 +1,4 @@
-"""启动 Banner：Art 原样加载，宽终端完整输出，窄屏/非 tty 降级单行。"""
+"""启动 Banner：默认紧凑，显式 full 时保真输出 Art。"""
 
 from __future__ import annotations
 
@@ -29,10 +29,12 @@ def banner_width() -> int:
     return max(len(line) for line in load_banner().rstrip("\n").split("\n"))
 
 
-def render_banner(console: Console, *, enabled: bool = True) -> None:
-    """在交互启动时渲染 Banner；终端过窄或非 tty 时降级为单行。"""
-    if not enabled:
+def render_banner(console: Console, *, enabled: bool = True, mode: str = "compact") -> None:
+    """默认由身份栏承载品牌；完整 Art 只在显式 full 时显示。"""
+    if not enabled or mode == "compact":
         return
+    if mode != "full":
+        raise ValueError(f"unsupported banner mode: {mode}")
     required = max(banner_width(), 2 + cell_len(TAGLINE))
     if not console.is_terminal or console.width < required:
         console.print(FALLBACK, style="bold cyan", markup=False, highlight=False, soft_wrap=True)
