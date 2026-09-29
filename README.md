@@ -412,35 +412,35 @@ uv run pytest -m integration        # 需要 API Key
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
 | M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；[远端 CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 已通过） |
 | M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 已完成（M7.9.1–M7.9.4；[任务基线](docs/benchmarks/m7-9-baseline.md)：真实 DeepSeek 4/4 completed；[视觉验收](docs/benchmarks/m7-9-4-cli-visual.md)：80/40 列、`TERM=dumb`、`NO_COLOR`、非 tty 全部通过） |
-| M8 | 长任务交互、只读 LSP、按需 MCP、活动工具集与恢复 | 未开始；每项以真实任务收益或明确服务需求为准 |
+| M8 | 成本效率评测、CLI 再整理、请求/上下文/预算的逐项优化 | M8.0 已完成（[固定任务与真实基线](docs/benchmarks/m8-0-eval-baseline.md)）；下一批 M8.1 CLI 再整理 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
 
 M1-M6 的详细任务拆解见 [`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)。
 M7 的架构设计、子里程碑与验收见 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)。
-M7.8 的交付记录及 M7.9-M10 的任务拆解、准入与验收见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)。
+M7.8-M7.9 的交付依据、M8 的任务拆解和后续能力准入见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)。
 
-MVP 后的实施顺序保持为：先让会话可恢复、上下文可控，再扩展外部能力。
+MVP 后先让会话可恢复、上下文可控；当前先衡量并改进单任务效率，再评估外部能力。
 
 ```text
 M7 Session / Context（已完成）
   ↓
 M7.8 Runtime Hardening（已完成）
   ↓
-M7.9 完成语义、真实任务基线与 CLI 视觉整理
+M7.9 完成语义、真实任务基线与 CLI 视觉整理（已完成）
   ↓
-M8 长任务交互 / LSP / 按需 MCP
+M8 评测扩充 / CLI 再整理 / 单任务成本效率
   ↓
-M9 Task / Memory
+后续：按需交互、LSP、MCP
   ↓
-M10 Multi-Agent
+M9 Task / Memory；M10 Multi-Agent（按需准入）
 ```
 
 不要跨阶段同时开太多功能。每完成一个里程碑：
 
 1. 运行 `uv run pytest`
 2. 更新本表状态
-3. 更新计划中的交付、验收与提交号
+3. 更新计划状态；详细基准数据留在 `docs/benchmarks/`
 
 ---
 

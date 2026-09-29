@@ -1,110 +1,94 @@
-# Phase 3：可靠性、CLI 体验与外部能力
+# Phase 3：成本效率、CLI 体验与能力准入
 
-> 状态：M7.8 与 M7.9 全部完成；M8–M10 未开始。当前实施入口是 M8.0。已完成的交付与验收放在文末。
+> 状态：M7.8–M7.9 与 M8.0 已完成；下一批是 M8.1 CLI 再整理。以下 M8 编号替代旧版的交互/LSP/MCP 排期；后者等待真实需求与评测结果。
 
-本计划依据 mini-pi 当前源码、[Pi 本地生产链路](../design/pi-production-architecture.md)和已有验收记录。Pi 参考仓库基线为 `/Users/yzh666/workspace/pi` 的 `d1230ea`；它的能力是设计参考，不是必须逐项复制的清单。实现前核对当前代码，不能把计划写成已交付行为。
+本计划对照当前源码、[README 第 2 节](../../README.md#2-从-pi-学到的设计取舍)、[Pi 生产架构参考](../design/pi-production-architecture.md)、[M7.9 基线](../benchmarks/m7-9-baseline.md)和用户提供的《mini-pi 成本 / 效率优化计划》作出取舍。附件是待评审方案，其示例数字和拟议接口不是当前实现。两张截图仅作为 CLI 体验证据，截图里的另一项目任务不算本仓库评测样本。
 
-## 1. 下一步顺序与准入
+## 1. 目标、测量与顺序
 
-| 顺序 | 里程碑 | 进入下一步的条件 |
+目标是在任务真实完成、验证充分的前提下，减少模型请求、累计 Token、无效工具调用和耗时。`completed` 只表示模型结束；修复任务的成功由任务后测试、构建、改动范围等外部事实判定。`step_limit`、`budget_limit`、`error`、`cancelled` 分开统计，不能算成功。Provider `usage` 是实测，下一请求的 `RequestSnapshot` 是估算；部分或缺失 usage 保留覆盖率标记，不能冒充任务总成本。
+
+M7.9 四条真实 DeepSeek 任务各运行一次，合计 16 请求、20 工具调用、35,689 input、1,587 output、15.1 秒，两个修复任务经测试通过。这能校验采集链路，不能推断方差或优化收益。工具 schema 成本只在 `deepseek-flash` 的 0–7 个工具上对拍；扩大工具集需重测。
+
+每批用相同初始 workspace、提示词、Provider/模型/配置与任务后判定器对照基线和候选。离线 FakeLLM 证明协议与边界，真实 Provider 多次运行才讨论效率。记录逐任务原始样本、成功/失败原因、请求/工具数、实测 input/output、usage 覆盖率、耗时、疑似重复调用与全量验证次数。小样本报告原始值和范围，不计算无意义的 p95 或人为总分。候选先守住完成率、验证质量、无关改动和未完成终止率，再判断请求或 Token 是否稳定改善；无可归因收益则撤回行为改动。
+
+| 顺序 | 里程碑 | 交付与进入下一批的条件 |
 | --- | --- | --- |
-| 1 | M7.9.1–M7.9.3 完成语义与真实任务基线 | 已完成：未完成任务不会以成功退出，工作区状态与改动事实可观察，真实任务成功率/用量/耗时与 Session 规模已有可复现记录（[基线](../benchmarks/m7-9-baseline.md)） |
-| 2 | M7.9.4 CLI 视觉整理 | 已完成：宽屏、窄屏、`TERM=dumb`、`NO_COLOR` 与非 tty 均清晰，展示不改变模型或 Session 事实 |
-| 3 | M8.0 长任务交互 | 在真实长任务中确认追加指令的价值；安全轮次边界和持久化语义经测试 |
-| 4 | M8.1 只读 LSP | 固定任务证明定位、引用或诊断收益；若没有收益，暂缓扩展 |
-| 5 | M8.2–M8.4 MCP、活动工具集与恢复 | 至少一个明确要接入的本地服务；工具 schema、名称映射、恢复可验证 |
-| 6 | M8.5 对照评测 | 与 M7.9 的同一基线比较完成率、工具选择、用量和耗时 |
-| 7 | M9 Task / Memory、M10 Multi-Agent | 分别以真实跨 Session 工作流、需要隔离的并行任务为准入 |
+| 1 | M8.0 评测扩充 | 已完成；固定任务与外部判定、8 条真实逐次记录见[基线](../benchmarks/m8-0-eval-baseline.md) |
+| 2 | M8.1 CLI 再整理 | 解决第 3 节的启动刷屏、长行、Markdown、空提示符和长日志问题；只改展示/输入 |
+| 3 | M8.2 请求往返优化 | 小批 Prompt 试验鼓励已知独立检查同轮发起，保持工具串行执行 |
+| 4 | M8.3 上下文成本 | 用长任务对拍软工作上下文目标，复用现有投影与压缩事务 |
+| 5 | M8.4 预算收敛 | 基于现有预算与临时提示验证增量需求，硬停仍明确未完成 |
+| 6 | M8.5 重复验证观察 | 先测重复调用，再决定窄范围提示；不缓存或拦截 `bash` |
+| 7 | M8.6 Provider 推理参数 | 仅在参数受支持、实际成本可测时单独试验 |
 
-M7.9 是小批次修正与测量，不修改 Agent 架构；M8 按收益逐项放行。每个里程碑只实现当前编号，不提前造通用插件框架。
+每个编号是一批独立决策；不提前构造下一批的通用框架。
 
-### M7.9.1 未完成任务的退出语义
+## 2. 成本效率方案评审与批次边界
 
-**已交付。** `run_loop` 在 `agent_end(step_limit)` 中带上实际生效的 `max_steps`；渲染层说明上限值与「任务未完成」，不会把最后一条 assistant 正文当作完成态。一次性 CLI 的退出码改为按终止原因集中映射（`mini_pi/cli/app.py` 的 `EXIT_CODES`）：`completed 0` / `error 1` / `budget_limit 2` / `step_limit 3` / `cancelled 130`；拿不到 `agent_end` 时按 1 处理。`step_limit` 与 `budget_limit` 一样只结束本次 run，已提交的消息、工具结果、文件改动与 Session 保留，交互模式下一条提问重新计数。
+| 附件建议 | 取舍与依据 |
+| --- | --- |
+| Eval 先行、成功率优先 | 采纳。M7.9 样本太小；先扩充任务和外部判定器。事先定义“重复调用”和“全量验证”口径，避免把必要复验记为浪费。 |
+| Tool batching Prompt | 有条件采纳。Loop 已支持同轮多个 `ToolCall` 并串行执行；只鼓励事先已知且互不依赖的检查。不能写死 `read → edit → test`，也不为了少一次请求堆无关工具。 |
+| `RunBudget`、`BudgetController`、四阶段状态机 | 暂不照搬。`run_loop` 已有请求前快照、累计 input 预算、一次临时 notice 和按请求计的 `max_steps`。新增控制器会扩大 Loop/Session 边界；20/40/300000/20000 只是附件实验数值，不能设成默认。先测预算失败，再逐个增加必要维度。 |
+| `FINALIZE` 的 `tools=[]` 最后请求 | 不采纳为默认。任务若仍需工具，强制无工具回答可能制造“文字完成、实际未完”，也改变工具 schema、请求预测和终止语义。临时收敛提示不能承诺完成；硬上限继续以 `budget_limit` 或 `step_limit` 结束。若未来试验无工具总结，需单独设计未完成状态与恢复验收。 |
+| Adaptive Reasoning | 延后。先确认实际 OpenAI/DeepSeek 模型的参数、usage 和回放兼容；不支持时保持现有请求。不能按工具名猜复杂度。 |
+| Working Context 软目标 | 有条件采纳。窗口触发与成本感知旧 ToolResult 压缩已存在；先测长任务后半程的每请求 input 与摘要质量，再试软阈值。不能覆盖未知窗口的安全规则、改写 JSONL 或拆开工具调用/结果。 |
+| 重复工具与昂贵命令策略 | 先观测，不先拦截。相同 `read`/`search`/`git_diff`/`git_status` 参数也可能读到外部变化；`bash` 无沙箱且可访问网络、环境和工作区外，`modified_files` 对它是未知。“未观察到修改”不足以跳过命令。验证强度由任务与项目规则决定，不设通用固定流程。 |
+| Background process 与外部能力 | 暂缓。同步 `bash` 的超时、进程组和取消已有语义；只有长命令等待成为已测瓶颈才另立设计。LSP/MCP/更多工具须由具体任务证明当前工具不足。 |
 
-**验收：** `tests/cli/test_exit_semantics.py` 8 passed——五种终止原因的一次性退出码表（显式写死 0/1/2/3/130，并与 `EXIT_CODES` 对照）、`step_limit` 显示上限值与未完成并保留已提交的 tool 结果、REPL 在 `step_limit` 后继续接受输入、正常完成无未完成提示；`tests/test_console.py::test_renders_step_limit` 断言新文案。把 `EXIT_CODES["step_limit"]` 改回 0 会让专项用例失败。全部为 FakeLLM，不调用真实 API。
+### M8.0 评测扩充
 
-### M7.9.2 工作区状态与改动事实
+**已交付。** [`m8-0-eval.py`](../benchmarks/m8-0-eval.py) 与离线回归固定多文件修复、失败恢复、配置/CI 和真实仓库四类初态；真实仓库从固定提交导出。每条有提示词、允许改动与外部测试判定，重复运行逐次记录 Provider usage、请求/工具、改动范围及终止原因。[基线与原始数据](../benchmarks/m8-0-eval-baseline.md)保留真实仓库 1/2 成功的失败样本，不能据这八次推断稳定成功率或优化收益。M8.0 只扩充评测，未改 Agent 决策。
 
-**已交付。** 新增只读工具 `git_status`（`mini_pi/tools/git_status.py`，name=`git_status`）：`git rev-parse --show-prefix` 先确认 workspace 在 git worktree 内，再以 `git status --porcelain=v1 --branch --untracked-files=all --ignored=no -z -- .` 观察状态，输出给出分支与 `conflicted` / `staged` / `unstaged` / `untracked` 分组计数（冲突放最前，避免按 head 截断时被大量普通改动挤掉），组内按路径排序；重命名渲染为 `原路径 -> 新路径`，两侧都有改动的路径在两个分组各出现一次。路径基准统一为 workspace 相对（子目录 workspace 用 `--show-prefix` 去掉仓库根前缀），查询用 `-- .` 限定在 workspace 内，因此仓库其他目录的改动不会混入；前缀不匹配属于前提被破坏，直接 `ToolError`。非 git workspace 报可解释错误，不返回空的“干净”结果。`git_diff` 继续只负责内容差异，`bash` 与只读工具的 `modified_files` 一律留空，状态路径不写入 Session 元数据。CLI 侧补上 `Inspect git status` 标题与 `N changed path(s)` 结果行。
+### M8.2 请求往返优化
 
-**验收：** `tests/test_git_status.py` 11 passed——干净、未跟踪、已暂存、未暂存（含两种删除）、两侧同时改动、暂存重命名、合并冲突、忽略文件、子目录 workspace 只报告本子树、非 git 报错、`modified_files` 为空、`AgentSession` 落盘后 ToolMessage 与原始 JSONL 都没有把脏路径写成 `modifiedFiles`；`tests/test_bash.py` 增加“bash 从不声明 modified_files”；`tests/cli/test_tool_events.py` 增加 `Inspect git status` 标题与 `N changed path(s)` 结果行；`tests/test_registry_defaults.py` 与 README 工具清单同步。全量 588 passed / 5 deselected。全部为离线真实 git 命令，不调用真实 API。
+只调整模型可见 Prompt 的一小段，对比“已知独立检查同轮调用”和当前版本。相互依赖的检查仍等 observation。统计请求、工具调用、无效读取、完成率与工具错误。Prompt 变更按已有 section patch 机制记录，不改旧 JSONL；若少请求的代价是更多无效工具或完成率下降，撤回。
 
-**遗留：** `git_diff` 仍不显示未跟踪文件内容（未跟踪文件没有索引侧差异，用 `git_status` 定位后 `read` 查看）；`bash` 的改动继续标为未知。
+### M8.3 上下文成本
 
-### M7.9.3 真实任务基线与规模测量
+在确有历史膨胀的长任务上，对比当前窗口/成本触发与一个实验性软工作目标。优先调整现有 cost-aware compaction 和安全切点，不引入 ToolResult 双写协议。验收比较后半程逐请求与累计 input、摘要调用自身成本、摘要后完成率和 resume 一致性。摘要失败沿用窗口触发与成本触发的既有不同处理；写入失败必须停止运行。
 
-**已交付。** 新增离线基线用例 `tests/integration/test_task_baseline.py`（四条固定任务形态：只读、跨文件定位、修改后验证、命令失败后换命令并修复；脚本化 FakeLLM 走生产装配路径，断言请求数、工具调用数、终止原因、`modified_files`，任务完成与否由任务结束后重跑 pytest 的真实结果判定）与驱动器 `docs/benchmarks/m7-9-baseline.py`（`real` / `scale` / `tools` 三种模式，真实任务在临时 workspace 与临时 HOME 中运行，`--only` 可重跑单条，`--tool-counts` 扫描工具数）。记录见 [M7.9.3 基线](../benchmarks/m7-9-baseline.md)。
+### M8.4 预算收敛
 
-真实 Provider（`deepseek-flash`）四条任务各一次，全部 `completed`、退出码 0：合计 16 次请求、20 次工具调用、35,689 实测 input / 1,587 实测 output、15.1s，两个修复任务的 `calculator.py` 改动由 pytest 复验通过，两个只读任务没有改动文件。规模测量：1600 条消息恢复 129 ms / 6.87 MB 分配峰值，40 个候选 × 200 条时 `/sessions` 与 `--continue` 约 1.3 s。
+从现有 `RequestSnapshot`、`BudgetWarningEvent`、`max_steps`、`max_run_input_tokens` 出发，先记录真实任务触限频率。若新增请求/工具/output 维度，逐个定义计数时点、缺失 usage 口径、请求前预检与已提交批次的关系，并保持 per-run 重置。临时 notice 不写 JSONL、不替代用户消息；只在完整工具批次后准备下一请求。保持配对、durable-first、取消与恢复语义，硬停明确未完成。
 
-**验收与随之落地的估算修正：** 离线用例 5 passed 且可重复；真实样本按 Provider usage 记录，未把估算当实测。`tools` 模式复核发现 7 个工具时低估 16.6%（超出 M7.8.2 的 ±15% 容差），按 1/3/7 工具扫描拟合出「一次性 220 + 每工具 32 结构开销」，`estimate_tools_tokens()` 改为按工具数累加结构开销；0–7 个工具复验（含未参与拟合的 2 与 5）全部在 ±5% 内，预算夹具阈值随新预测重新标定。该修正只影响工具项，`source` 仍标为 estimated；只在 `deepseek-flash` 上对拍过。
+### M8.5 重复验证观察与 M8.6 推理参数
 
-### M7.9.4 CLI 视觉整理
+先按“相同调用参数 + 已知相关输入版本 + 任务阶段”在评测转录中离线标注疑似重复；未知依赖不能判为可安全跳过。验证命令按外部判定器区分必要复验和无效重跑。有明确收益再试 Prompt，工具执行与缓存语义暂不变。推理参数另做 Provider 对拍，记录支持矩阵、实际 usage、任务成本和质量；失败则保持默认。
 
-**已交付。** 新增 `mini_pi/cli/style.py` 作为唯一视觉词汇：语义色（青进行中 / 绿成功 / 黄注意 / 红失败）、行首标记（`● ✓ ✗ ⚠ ›`）、统一标签列宽与千位分隔。启动页改为两行身份栏（版本·模型 / 项目·短 Session ID + 右对齐 `/help for commands`），40 列、`TERM=dumb` 与非 tty 按字段分行。任务流中工具结束行重复操作标题（`✓ Read app.py · completed`）并合并结果，收尾统一为 `Completed/Stopped/Failed/Cancelled · N tools · M requests · in/out · 秒`；取消按失败色展示。状态页 `/status` 默认只给决策信息，请求/工具/耗时移到 `/status full`；`/context` 分三组，`/tools` 与 `/sessions` 对齐列。展示层关闭 Rich 自动高亮（它会切碎语义色），tty 内长行按宽度折行、非 tty 保持每事件一行的确定性文本。未改 `banner.txt`、未加依赖或 AgentEvent、未动输入键位。**后续调整：** 18 行 ASCII 思考图案（`assets/thinking.txt`）在高度不足的终端里会被裁剪、清除时光标回退量与屏幕内容不一致，退化成每轮刷屏；已删除该资源，改为单行固定宽度的帧动画（`mini_pi/cli/style.py` 的 `THINKING_FRAMES`，8 fps，`vertical_overflow="crop"`），并用测试钉住「帧宽守恒」这一前提。**工具展示随后按同一调研结论收敛：** tty 默认只保留一行活动区（动画 + 当前动作 + 已折叠计数），成功的工具调用不再逐行占滚动区，失败仍逐条保留；新增 `/last [full]` 从 Session 活动链重建最近一次任务的工具调用（标题按 assistant 参数、结果按 observation 与 `modified_files` 还原，`details` 不落盘就不假装有它），把「点击展开」换成终端可行的「默认折叠 + 命令展开」；`--no-banner` 与活动指示解耦，只关 Art。同一轮还补齐了取消语义的一个窗口：`tool_execution_start` 的渲染 I/O 期间中断会绕过 Loop 的配对补齐，现在 start 事件也在 try 内，中断落在渲染层同样补 cancelled observation（回归用例 `test_interrupt_while_emitting_tool_start_keeps_pairing`）。
+## 3. M8.1 CLI 再整理：从截图到终端契约
 
-**验收：** `tests/cli/test_visual_layout.py` 19 passed（全部状态都有文本标记、结果行重复标题、收尾行顺序与千位分隔、partial/缺失 usage 标注、状态页共用一个值列、窄屏/`TERM=dumb`/非 tty 字段行、宽屏身份栏不越界、会话列表对齐、非 tty 无 ANSI 且每事件一行）；既有终端测试同步到新契约。真实 pty 记录见 [M7.9.4 视觉验收](../benchmarks/m7-9-4-cli-visual.md)：80 列任务流与状态页、40 列窄屏、`TERM=dumb`、`NO_COLOR`、非 tty 一次性输出与任务中 Ctrl+C 全部通过断言，无残留 Live 区域。全量 612 passed / 5 deselected。展示改动不写 `ToolMessage`、JSONL 与模型请求。
+截图暴露四个具体问题：宽终端的大幅 ASCII 启动图抢占约二十行；流式正文把 `**`、反引号和很长的进度句原样铺满终端；失败日志和 `/last` 的长输出挤满滚动区、跨行难定位；连续回车留下多行空 `›`。M7.9.4 已有单行活动区、默认折叠成功工具、`/last [full]`、语义色与窄屏降级；在其上收紧密度与层级。
 
-## 2. M8 交互与外部能力
+**启动。** 默认两行紧凑身份/会话栏和 `/help` 提示。保留 `assets/banner.txt` 原文，提供显式完整 Art 入口；实施时确定参数形式并与既有 `--no-banner` 校验，不再因终端很宽就自动展开。默认显示项目名与短 Session ID，完整路径仍在 `/status full`。窄屏、非 tty、`TERM=dumb`、`NO_COLOR` 均可读；启动信息不进入模型消息。
 
-### M8.0 长任务交互
+**任务流。** 思考和执行中仍只占单行可清理活动区；成功工具继续折叠，失败永久留下短标题、退出码/超时/截断标记与一条脱敏摘要。`/last` 默认给带序号的工具摘要，并支持按序号查看单项详情；`/last full` 和 `--verbose` 是显式详细视图，长输出分页或给明确续读提示。脱敏先于截断、折行和分页；不能声称恢复 Tool 层已丢弃的字节，也不能把未落盘的 `details` 伪装成 Session 事实。非 tty 逐事件确定性输出，无光标控制序列。
 
-先定义最小的用户输入队列：steering 在完整 assistant/tool batch 后、下一次请求前提交；follow-up 在 Agent 原本要结束时提交。待发送输入不得提前进入模型消息或 JSONL；成功提交后仍遵守 durable-first、tool call/result 配对和预算边界。CLI 在运行期间可接收输入，但同一 Agent 仍串行执行模型请求与工具；Ctrl+C 继续表示取消当前 run。
+**正文。** 保留模型回复的全部内容。tty 对已闭合段落与代码块做轻量 Markdown 展示，使强调与行内代码不露出字面标记；流式片段边界未闭合前可暂存，但不能重复输出或丢失尾段。长单行按终端宽度折行，中文、ANSI、代码块和路径不破坏对齐。非 tty 保持原文纯文本供管道处理。UI 不能隐藏模型实际回复，也不把展示文字写进 Session。
 
-验收：输入先后顺序、取消前后的队列处理、提交失败、Session resume、非 tty 一次性模式与真实 tty 人工操作。先验证 M7.9 基线中确有长任务交互收益，再定具体输入并发机制；不引入并行工具执行。
+**输入与收尾。** 空白提交不启动 run，也不留下新的永久提示符；多行输入、历史、`/` 补全、Ctrl+C/Ctrl+L 保持已有语义。结果行区分完成、步数/预算未完成、错误和取消，显示请求/工具数与 usage 覆盖率；累计 input 不冒充上下文占用。取消后清理 Live 区域，保留真实错误和已提交改动。
 
-### M8.1 只读 LSP
+M8.1 仅改 `mini_pi/cli/` 的渲染与输入，不增加 AgentEvent、改变 Loop/Session/Provider 协议或引入全屏 TUI。验收用 FakeLLM 固定事件和真实 pty 转录覆盖 40/80/120/宽屏列数、低终端高度、长中英文正文、Markdown 分片、代码块、长路径、错误/超时/截断/取消、`--verbose`、`/last`、`/last full`、空 Enter、`NO_COLOR`、`TERM=dumb`、非 tty、`--no-banner`；检查无内容重复、Live 残影、凭据泄漏，纯展示变更前后模型请求与 JSONL 相同。截图里的重复英文进度句还要在 M8.0 的模型行为评测中观察，不能仅靠渲染判定已解决。
 
-`Tool → LspAdapter → JSON-RPC → Language Server`，先用一个实际语言服务器验证 `definition` / `references` / `symbols` / `diagnostics`。文件 URI 必须经 `Workspace.resolve`；初始化、`initialized`、崩溃、超时、JSON-RPC 错误及 workspace 越界都要明确处理。长驻进程在会话关闭和空闲超时回收，不在每次 `run()` 后重启。
+## 4. 后续能力准入与不变边界
 
-验收：离线假 server 覆盖握手、响应、崩溃、超时、越界；真实 server 人工验证一次；与 M7.9 相同定位任务对照完成率、耗时和模型用量。若现有 `search` + `bash` 已足够，保留原型而不继续扩展 rename / format / codeAction。
+- 长任务 steering/follow-up：M8.0 真实任务先证明运行中补充指令的价值。若进入设计，输入只在完整 assistant/tool batch 后安全提交，单 Agent 仍串行；验收取消、提交失败、resume 与非 tty。
+- 只读 LSP：固定定位任务先证明相对 `search` + `bash` 的收益，再设计 JSON-RPC 生命周期、Workspace URI 限界、崩溃和超时；无收益即停止。
+- MCP stdio 与活动工具集：须有明确本地 server，连同 schema 校验、Provider 名称映射、禁用工具错误、恢复和凭据边界一起设计；测量新增 schema 的每请求成本，不造通用插件框架。
+- 后台进程：只有同步长命令等待成为瓶颈时单独设计进程生命周期，保持现有进程组取消和有界输出。
+- M9 Task/Memory、M10 Multi-Agent：分别等待真实跨 Session 工作流与确需隔离的并行任务。
 
-### M8.2 MCP stdio client
+文件工具经 Workspace 限界；`bash` 仅固定 cwd 且无沙箱。原始 JSONL 不因展示或压缩被改写；工具调用/结果保持配对；意外异常直接冒泡；只支持 OpenAI 与 DeepSeek。改变 Agent Core、Session 或 Context 设计前重新核对 README 第 2 节与 Pi 生产架构参考，并同步真正改变的设计决定。
 
-只做 client 和 stdio transport，且以明确的本地 server 场景启动。外部工具经 `ToolRegistry` 调度，Loop 不感知 MCP。Provider 工具名须符合函数名限制并稳定映射到 server/tool 原名；反向映射要可持久恢复。JSON Schema 必须完整校验受支持子集，不支持的构造 Fail Fast。配置和凭据仅在用户级目录或环境变量，Session 不存 Key。
+## 5. 已完成的基线
 
-验收：真实 subprocess 驱动的离线假 server 覆盖初始化、`tools/list`、`tools/call`、重名、非法 schema、崩溃、超时和错误结果。没有明确 server 需求时暂缓此项。
+| 里程碑 | 已交付事实与详细依据 |
+| --- | --- |
+| M7.8 Runtime Hardening | 请求前预测、窗口与成本触发压缩、持久化/取消边界；[验收](../benchmarks/m7-8-final-acceptance.md) |
+| M7.9.1–M7.9.2 | 未完成终止的退出码与 `git_status` 工作区状态；提交和测试记录留在 Git 历史 |
+| M7.9.3 | 四条真实任务的一次性基线、Session 规模、工具 schema 估算修正；[数据与局限](../benchmarks/m7-9-baseline.md) |
+| M7.9.4 | 统一 CLI 视觉、单行活动区、默认折叠成功工具与 `/last`；[终端验收](../benchmarks/m7-9-4-cli-visual.md) |
+| M8.0 | 四类可重置任务、外部判定和 8 条真实 DeepSeek 逐次记录；[基线](../benchmarks/m8-0-eval-baseline.md) |
 
-### M8.3 活动工具集
-
-外部工具多起来后再引入显式 allowlist，稳定过滤请求 schema 与实际可执行工具；`/tools` 区分活动和全部工具。禁用工具的调用返回明确错误。基于 M7.9 用量记录证明过滤收益，不做 AI 自动挑选工具。
-
-### M8.4 外部工具恢复
-
-Prompt section patch 只记录模型可见文本，无法单独恢复 server 配置、完整 schema、名称映射及 allowlist。采用不含凭据的工具集快照/变更记录，或引用有版本与摘要的用户级配置；resume 时校验当前 `tools/list`，缺失或漂移明确报错，不静默删工具。
-
-### M8.5 对照评测
-
-在 M7.9 固定任务和模型上对比 builtin、少量 LSP/MCP、较多工具及活动过滤。记录请求、工具调用、实测用量、完成率、耗时、工具选择错误；可附加 System Prompt `# Tools` 段保留/精简 A/B，同时检查任务完成率。没有真实 Provider 结果前不宣称节省费用。
-
-## 3. M9 与 M10 准入
-
-**M9 Task / Project Memory：** 仅在出现跨 Session 工作流后启动。Task 记录目标、状态、验收、关联 Session、改动与真实验证命令；`bash` 改动未知不能伪称完整。Memory 只存带来源和时间、可核对且默认经人工确认的项目事实；compaction summary 不是事实库。不引入 RAG 或向量数据库。
-
-**M10 Multi-Agent：** 仅在角色确实不同、上下文需要隔离且任务可以并行时启动。先交付 Session fork/多 leaf 和通过 Tool 建立的 worktree 隔离，再验证 Parent → Worker（独立 worktree、可写）→ Reviewer（只读）。父子只交换结构化任务与结果，不共享 transcript；暂不做通用调度器。
-
-## 4. 始终保持的边界
-
-- `CLI → AgentSession → Agent → run_loop → (LLM, ToolRegistry) → Tool → Workspace`。CLI 只消费事件；Agent 不直接执行 Shell，Tool 不控制 Loop。
-- JSONL 保存完整事实；展示摘要不改 `ToolMessage`；压缩只更换可重建的模型投影，不拆散 tool call/result。
-- 当前请求的窗口与任务预算共用 RequestSnapshot；历史 Provider usage 与估算分开，未知窗口不启用自动压缩。
-- `/sessions` 与 `--continue` 继续严格加载全部候选：任一候选损坏即整体失败，不静默跳过；若真实遇到损坏再补显式定位与隔离操作，不因此放宽校验或预先改存储格式。
-- 文件工具经 Workspace 限界；`bash` 是无沙箱本地 Shell，仅固定 cwd。接入不可信外部工具前要重新评估执行权限；不能把 cwd 描述成沙箱。
-- 只支持 OpenAI / DeepSeek；不因参考 Pi 而引入其他 Provider、Agent 框架或通用扩展系统。
-- 非预期异常直接冒泡；预期的工具、模型和 Session 错误按现有协议显式处理。
-
-## 5. 状态与交付记录
-
-| 里程碑 | 状态 | 交付依据 |
-| --- | --- | --- |
-| M7.8 Runtime Hardening | 已完成 | `0e5848e`、`0517a4e`、`4fbedde`、`e19182b`、`2bc65ee`、`96c6279`；总验收 `5247b55`；[记录](../benchmarks/m7-8-final-acceptance.md) |
-| M7.8 CI 修补 | 已完成 | `fb5f387`；彩色帮助输出回归，566 passed / 5 deselected；[GitHub CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 的 Test/Lint/Compile 通过 |
-| M7.9.1 未完成任务的退出语义 | 已完成 | `step_limit` 携带上限值、一次性退出码按终止原因映射（0/1/2/3/130）；全量 574 passed / 5 deselected；`8a8d297` |
-| M7.9.2 工作区状态与改动事实 | 已完成 | 新增只读 `git_status`（分组状态 + workspace 相对路径 + 非 git 可解释失败），状态路径不进入 Session 元数据；全量 588 passed / 5 deselected |
-| M7.9.3 真实任务基线与规模测量 | 已完成 | 离线基线用例 5 passed；真实 DeepSeek 四条任务 4/4 completed（16 请求 / 20 工具调用 / 35,689 input）；工具开销按 1/3/7 扫描改为「一次性 220 + 每工具 32」，0–7 工具复验 ±5% 内；全量 593 passed / 5 deselected；[基线](../benchmarks/m7-9-baseline.md) |
-| M7.9.4 CLI 视觉整理 | 已完成 | 统一视觉词汇、身份栏、工具结果行带标题、收尾统计行、状态页对齐与分组；[视觉验收](../benchmarks/m7-9-4-cli-visual.md)；全量 612 passed / 5 deselected |
-| M8.0–M8.5 | 未开始 | 交互、只读 LSP、MCP、活动工具集、恢复、对照评测 |
-| M9 / M10 | 未开始 | 分别等待跨 Session 工作流和隔离并行任务 |
-
-M7.8 细节留在上述提交、测试与验收记录中，已完成任务不再占据计划正文。每批代码、测试、README 与计划状态合并提交；验证只写实际运行结果。修改 Agent Core、Session 或 Context 的设计前，先核对 [Pi 生产架构参考](../design/pi-production-architecture.md)对应章节和 README 第 2 节。
+里程碑落地时更新 README 第 8 节和本计划状态；基准数据留在 `docs/benchmarks/`，不在计划中重复写交付日志。

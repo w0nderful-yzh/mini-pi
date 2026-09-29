@@ -41,4 +41,4 @@ testpaths = ["tests"]
 markers = ["integration: tests that call real LLM APIs"]
 addopts = "-m 'not integration'"
 # tests/fixtures 下的样例项目故意保留失败用例，默认发现时跳过
-norecursedirs = ["sample_project"]
+norecursedirs = ["sample_project", "m8_eval"]
