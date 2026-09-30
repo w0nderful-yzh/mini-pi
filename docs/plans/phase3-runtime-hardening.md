@@ -1,6 +1,6 @@
 # Phase 3：最终能力收尾
 
-> 状态：M8 在 M8.3 后按用户要求收尾；M8.4–M8.6 取消排期，未实现。后续仅完成简单 MITL、安全控制、只读 LSP、本地 MCP 和最终验收。本文是目标设计，M9–M12 均未实现；下一批为 M9.1。
+> 状态：M8 在 M8.3 后按用户要求收尾；M8.4–M8.6 取消排期，未实现。M9.1 简单 MITL 已实现；下一批为 M9.2 安全控制，之后仅完成只读 LSP、本地 MCP 和最终验收。M9.2–M12 是尚未实现的目标设计。
 
 MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题，等待人回答后继续”。项目结束边界为一个可恢复、能问人、能查代码语义、能接受控本地工具的单 Agent CLI。原 M9 Task/Memory、M10 Multi-Agent 排期撤销；以下编号重新分配，不保留这些能力的隐含承诺。
 
@@ -8,7 +8,7 @@ MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题�
 
 | 批次 | 目标 | 进入下一批的条件 |
 | --- | --- | --- |
-| M9.1 | 简单 MITL：`ask_user` 与 CLI 回答 | 真正等待、回答后继续，取消和无交互端不猜答案，消息配对完整 |
+| M9.1（已实现） | 简单 MITL：`ask_user` 与 CLI 回答 | 真正等待、回答后继续，取消和无交互端不猜答案，消息配对完整 |
 | M9.2 | 工具权限与外部进程启动审批 | 拒绝时无执行副作用，授权不可由模型/仓库扩大，复用 M9.1 交互 |
 | M10.1 | LSP 生命周期、definition、references | 本地 Python server 查询正确，位置编码、路径和退出边界通过 |
 | M10.2 | LSP diagnostics 与文件版本同步 | 编辑后的诊断来自当前内容，过期/未就绪不冒充零错误 |
@@ -24,18 +24,18 @@ MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题�
 
 | 当前源码 / 符号 | 已有行为 | 后续修改边界 |
 | --- | --- | --- |
-| `mini_pi/agent/loop.py::_execute_tool_calls` | 串行执行；ToolError 回传；Ctrl+C 补齐当前与剩余调用后 cancelled | 问询独占批次校验、交互不可用时结束 run；Loop 不读 stdin |
+| `mini_pi/agent/loop.py::_execute_tool_calls` | 串行执行；问询混合批次先整体拒绝；取消/交互不可用补齐结果后停止 | M9.1 已落地；后续仍保持 Loop 不读 stdin |
 | `mini_pi/tools/registry.py::ToolRegistry.execute` | 查找工具、Pydantic 校验、执行 | 在校验后、执行前插入权限检查；扩展工具自己的参数校验入口 |
 | `mini_pi/tools/base.py::Tool` | Pydantic Args、schema、execute；ToolResult 分离模型正文和 UI details | 内置工具保持默认校验；MCP 使用原始 JSON Schema 校验，不假造宽松 Args |
-| `mini_pi/cli/app.py` / `cli/input.py` / `cli/console.py` | 同步 REPL，run 期间仅处理取消，没有问答通道 | 注入交互处理函数，等待时收起 Live；TTY/非 TTY 行为明确 |
+| `mini_pi/cli/app.py` / `cli/interaction.py` / `cli/console.py` | 同步 REPL；新建/恢复/内存运行时注入问询处理函数，等待前收起 Live | M9.2 复用交互契约加入审批；输入与展示仍由 CLI 负责 |
 | `mini_pi/session/runtime.py::AgentSession` | 组装运行时、durable-first、严格恢复与投影 | 装配交互、权限和外部连接生命周期；不把这些塞入 Provider |
 | `mini_pi/session/models.py` / `context/projection.py` | 已知 entry 联合；残缺工具批次严格拒绝恢复 | 审批和工具目录使用显式已知元数据 entry；投影不发送它们给模型 |
 | `mini_pi/tools/process.py::run_process/run_shell` | 一次性进程、有界捕获、超时/取消杀进程组；继承父环境 | 提供明确子进程环境；长驻 LSP/MCP 另管生命周期，不复用等结束的运行器 |
 | `mini_pi/context/sections.py` / `context/request.py` | 工具描述 patch、当前 wire/schema 的请求快照 | 活动目录变化只在空闲边界安装，下一请求按实际工具重新预测 |
 
-新增文件仅在对应批次创建：`mini_pi/interaction.py`、`cli/interaction.py`、`tools/ask_user.py`、`security.py`、`config.py`，以及小规模 `lsp/`、`mcp/` 客户端模块和各自 Tool 文件。工具执行仍经过 Registry；Agent 不读文件、启动进程或处理终端。
+M9.1 已新增 `mini_pi/interaction.py`、`cli/interaction.py`、`tools/ask_user.py`；`security.py`、`config.py` 以及小规模 `lsp/`、`mcp/` 客户端模块和各自 Tool 文件仅在后续对应批次创建。工具执行仍经过 Registry；Agent 不读文件、启动进程或处理终端。
 
-## 3. M9.1：简单 MITL
+## 3. M9.1：简单 MITL（已实现）
 
 ### 行为
 
@@ -44,7 +44,7 @@ MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题�
 - `ask_user` 必须独占 assistant 的工具批次。混入 edit/bash 等时整批不执行，补齐错误 observations，要求模型单独问询；避免提问前或同批后续工具已经修改代码。
 - CLI 显示问题并等待；等待期间不调用模型、不执行后续工具、不轮询 API。用户提交后由 Tool 返回真实回答，按原有 ToolMessage 提交，再继续同一 run；等待本身不消耗步骤，后续模型请求照常计数。
 - CLI 提供回答 / 取消任务。Ctrl+C 或 EOF 取消并补齐工具配对；已提交消息和改动保留。非 TTY 或没有交互处理函数时，关键问询使 run 以现有 `error` 结束，并给出可交互续跑提示，不能返回空答案让模型继续猜。
-- 问询与审批共用一个小型请求/响应结构及注入函数；stdin 仅由 CLI 读取，事件渲染不是回答通道。UI 的编号、色彩和提示语不写入消息。
+- 问询使用小型 `InteractionRequest/InteractionResponse` 及 `InteractionHandler` 注入函数；stdin 仅由 CLI 读取，事件渲染不是回答通道。UI 的编号、色彩和提示语不写入消息。M9.2 审批可沿用此交互边界，审批类型尚未加入。
 
 ### 恢复与限制
 
@@ -53,6 +53,8 @@ MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题�
 框架保证发起问询后等待，不保证模型识别所有需要人工判断的情形。必须阻止的操作由 M9.2 的硬权限检查处理。
 
 **验收：** FakeLLM 断言回答前没有下一请求或副作用、回答后准确继续；混合批次零执行；取消/EOF/非 TTY/写盘失败；正常 resume、强杀后严格报错；真实 TTY 至少完成一次“问人→选方案→修复→验证”。
+
+已执行的离线边界与真实 DeepSeek PTY 链路见 [M9.1 验收](../benchmarks/m9-1-interaction.md)。真实回答与 Ctrl+C 由脚本提交，成功修复与取消两条链路通过。
 
 ## 4. M9.2：最小安全控制
 
@@ -153,5 +155,6 @@ M8 的成本优化评审和 CLI 设计已经落在源码、测试及下列评测
 | M8.2 | 合批 Prompt 对照完成，候选未采纳；[结果](../benchmarks/m8-2-prompt-batching.md) |
 | M8.3 | 修正区域估算；8k 候选未采纳，默认 20k；[结果](../benchmarks/m8-3-context-cost.md) |
 | M8.4–M8.6 | 预算维度、重复验证与推理参数的后续研究取消，不继续排期 |
+| M9.1 | 独占问询、真实回答续跑、取消与严格恢复；[验收](../benchmarks/m9-1-interaction.md) |
 
 设计继续遵循 [README 第 2 节](../../README.md#2-从-pi-学到的设计取舍)与 [Pi 生产架构参考](../design/pi-production-architecture.md)：单 Agent、串行工具、JSONL 不改写、工具调用/结果配对、宿主与 Provider 分层、非预期异常冒泡。里程碑落地时更新 README 第 8 节和本计划状态，不能把目标设计写成已实现行为。

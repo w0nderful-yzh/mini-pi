@@ -21,6 +21,12 @@ _RULES = (
     "- After each observation, decide whether you already have enough evidence to answer. For simple read-only questions, keep inspection focused; investigate further when the task requires it.",
     "- When the task is complete, stop calling tools and summarize what changed and how it was verified.",
 )
+_INTERACTION_RULE = (
+    "- When a necessary human decision about the approach, data migration, or a destructive "
+    "action cannot be determined from the user's request or repository evidence, call ask_user "
+    "alone in its tool batch and wait for the answer. Do not guess the decision or ask only "
+    "in prose. Resolve ordinary implementation details yourself."
+)
 
 
 def build_sections(
@@ -31,6 +37,9 @@ def build_sections(
 ) -> tuple[PromptSection, ...]:
     """按固定顺序构建 system prompt，并可追加已加载的项目规则。"""
     tool_lines = "\n".join(f"- {tool.name}: {tool.description}" for tool in tools)
+    rules = _RULES
+    if any(tool.name == "ask_user" for tool in tools):
+        rules = _RULES[:-2] + (_INTERACTION_RULE,) + _RULES[-2:]
     sections = (
         PromptSection(id="preamble", content=_PREAMBLE),
         PromptSection(
@@ -40,7 +49,7 @@ def build_sections(
                 f"- Platform: {platform.system().lower()}"
             ),
         ),
-        PromptSection(id="rules", content="\n".join(_RULES)),
+        PromptSection(id="rules", content="\n".join(rules)),
         PromptSection(id="tools", content=tool_lines),
     )
     if not project_instructions:

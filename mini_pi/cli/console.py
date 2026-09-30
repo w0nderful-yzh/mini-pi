@@ -305,6 +305,10 @@ class ConsoleRenderer:
         self._stop_activity()
         self._body.start()
 
+    def prepare_for_interaction(self) -> None:
+        """用户输入前移除 Live 活动区，保持任务计数和已输出正文不变。"""
+        self._stop_activity()
+
     def set_secrets(self, values: list[str]) -> None:
         """登记已配置凭据，避免 verbose 输出中直接出现其值。"""
         self._secrets = tuple(value for value in values if value)

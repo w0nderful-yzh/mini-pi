@@ -27,7 +27,7 @@ from mini_pi.agent.state import (
     commit_message,
 )
 from mini_pi.context.request import RequestSnapshot, estimate_request
-from mini_pi.errors import MiniPiError, ToolError
+from mini_pi.errors import InteractionUnavailableError, MiniPiError, ToolError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.types import (
     AssistantMessage,
@@ -50,7 +50,7 @@ _TRUNCATED_MESSAGE = (
 )
 
 _CANCELLED_MESSAGE = (
-    "Tool execution was cancelled by the user (Ctrl+C). "
+    "Tool execution was cancelled by the user. "
     "The command may have been terminated; re-run it if the result is still needed."
 )
 
@@ -231,9 +231,16 @@ def run_loop(
             emit(TurnEndEvent(step=step))
             emit(AgentEndEvent(reason="completed", message=assistant))
             return assistant
-        cancelled = _execute_tool_calls(
-            state, registry, assistant.tool_calls, emit, on_message_commit
-        )
+        try:
+            cancelled = _execute_tool_calls(
+                state, registry, assistant.tool_calls, emit, on_message_commit
+            )
+        except InteractionUnavailableError as exc:
+            # 关键问询不可用时已补齐错误结果，不能再发请求让模型猜人工决定。
+            emit(TurnEndEvent(step=step))
+            stopped = AssistantMessage(stop_reason="error", error_message=str(exc))
+            emit(AgentEndEvent(reason="error", message=stopped, error=str(exc)))
+            return stopped
         emit(TurnEndEvent(step=step))
         if cancelled:
             # 当前与剩余 tool call 已补齐 cancelled observation，配对完整后结束本次 run
@@ -303,33 +310,51 @@ def _execute_tool_calls(
     on_message_commit: MessageCommit | None,
 ) -> bool:
     """顺序执行工具调用；ToolError 转 observation，用户中断补齐配对后返回 True。"""
+    rejection: str | None = None
+    try:
+        registry.validate_batch(calls)
+    except ToolError as exc:
+        rejection = f"{type(exc).__name__}: {exc}"
     for index, call in enumerate(calls):
         is_error = False
         try:
             # start 事件也在 try 内：渲染层的 I/O 是中断可能落下的窗口之一，
             # 落在那里同样必须补齐 cancelled observation，否则历史里只剩 tool_call
             emit(ToolExecutionStartEvent(tool_call=call))
-            result = registry.execute(call.name, call.arguments)
+            if rejection is not None:
+                result = ToolResult(content=rejection)
+                is_error = True
+            else:
+                result = registry.execute(call.name, call.arguments)
+        except InteractionUnavailableError as exc:
+            _append_failed_calls(
+                state, calls[index:], emit, on_message_commit,
+                f"InteractionUnavailableError: {exc}; this run stopped without executing this call.",
+            )
+            raise
         except ToolError as exc:
             result = ToolResult(content=f"{type(exc).__name__}: {exc}")
             is_error = True
         except KeyboardInterrupt:
             # 中断发生在当前调用内外：先补当前结果，再补齐剩余调用，
             # 保证 assistant tool_calls 与 ToolMessage 一一配对后才结束这次 run
-            _append_cancelled_calls(state, calls[index:], emit, on_message_commit)
+            _append_failed_calls(
+                state, calls[index:], emit, on_message_commit, _CANCELLED_MESSAGE
+            )
             return True
         _append_tool_message(state, call, result, is_error, on_message_commit)
         emit(ToolExecutionEndEvent(tool_call=call, result=result, is_error=is_error))
     return False
 
 
-def _append_cancelled_calls(
+def _append_failed_calls(
     state: AgentState,
     calls: list[ToolCall],
     emit: EventSink,
     on_message_commit: MessageCommit | None,
+    content: str,
 ) -> None:
-    """为被中断的当前调用及其余调用补 cancelled observation。
+    """为中止的当前调用及其余调用补错误 observation。
 
     调用方已发出第一个 tool_execution_start，这里只补它的 end 与后续调用的 start/end，
     避免出现只有 tool_call 没有 tool_result 的历史。
@@ -337,7 +362,7 @@ def _append_cancelled_calls(
     for offset, call in enumerate(calls):
         if offset > 0:
             emit(ToolExecutionStartEvent(tool_call=call))
-        result = ToolResult(content=_CANCELLED_MESSAGE)
+        result = ToolResult(content=content)
         _append_tool_message(
             state, call, result, is_error=True, on_message_commit=on_message_commit
         )

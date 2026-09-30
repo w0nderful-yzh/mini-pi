@@ -22,6 +22,7 @@ from mini_pi.auth import (
 from mini_pi.cli.banner import render_banner, render_startup
 from mini_pi.cli.console import ConsoleRenderer
 from mini_pi.cli.input import create_repl_reader
+from mini_pi.cli.interaction import create_interaction_handler
 from mini_pi.cli.sessions import render_sessions
 from mini_pi.cli.status import (
     current_context_tokens,
@@ -236,7 +237,7 @@ def _build_agent(
     """装配纯内存 Agent（--no-session）；事件走 renderer，不接持久化。"""
     return Agent(
         llm=llm,
-        registry=build_default_registry(workspace),
+        registry=build_default_registry(workspace, interaction=create_interaction_handler(renderer)),
         cwd=workspace.root,
         max_steps=max_steps,
         max_run_input_tokens=max_run_input_tokens,
@@ -277,7 +278,7 @@ def _build_runtime(
     return AgentSession.create(
         cwd=workspace.root,
         llm=llm,
-        registry=build_default_registry(workspace),
+        registry=build_default_registry(workspace, interaction=create_interaction_handler(renderer)),
         provider=provider,
         model=model,
         max_steps=max_steps,
@@ -491,7 +492,9 @@ def cli(
             path = resume if resume is not None else latest_session_path(workspace.root)
             agent = AgentSession.resume(
                 path,
-                registry=build_default_registry(workspace),
+                registry=build_default_registry(
+                    workspace, interaction=create_interaction_handler(renderer)
+                ),
                 cwd=workspace.root,
                 provider=provider,
                 model=model,

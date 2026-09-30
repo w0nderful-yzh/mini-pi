@@ -18,4 +18,5 @@ def test_default_registry_contains_builtin_tools(tmp_path: Path) -> None:
         "bash",
         "git_diff",
         "git_status",
+        "ask_user",
     ]

@@ -7,7 +7,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from mini_pi.errors import ToolArgumentError, ToolNotFoundError
-from mini_pi.llm.types import ToolSchema
+from mini_pi.llm.types import ToolCall, ToolSchema
 from mini_pi.tools.base import Tool, ToolResult
 
 
@@ -40,3 +40,14 @@ class ToolRegistry:
             raise ToolArgumentError(f"invalid arguments for {name!r}: {exc}") from exc
         # 浅取字段：model_dump() 会递归把嵌套模型转成 dict，破坏 execute 的类型标注
         return tool.execute(**dict(validated))
+
+    def validate_batch(self, calls: list[ToolCall]) -> None:
+        """独占工具不能混入其他调用，必须在整批任何执行前拒绝。"""
+        if len(calls) > 1:
+            for call in calls:
+                tool = self._tools.get(call.name)
+                if tool is not None and tool.exclusive_batch:
+                    raise ToolArgumentError(
+                        f"{call.name} must be the only tool call in its batch; "
+                        "no calls in this batch were executed."
+                    )

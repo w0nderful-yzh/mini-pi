@@ -70,7 +70,7 @@ Python Coding Agent Harness
 
 | 设计点 | pi 的做法 | mini-pi 的选择 |
 | --- | --- | --- |
-| 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 当前是单层 tool batch 循环；`prepare_next_turn` 接收单次运行的 `RunContext` 并可替换投影。M9.1 规划以独占批次的 `ask_user` 同步等待回答；不做 steering / follow-up 双队列 |
+| 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 当前是单层 tool batch 循环；`prepare_next_turn` 接收单次运行的 `RunContext` 并可替换投影。M9.1 的 `ask_user` 独占批次并同步等待真实回答，混合批次在任何执行前整体拒绝；不做 steering / follow-up 双队列 |
 | 事件驱动 | `AgentEvent` 事件流驱动 TUI/print/RPC，UI 是纯消费者 | Loop 发 `AgentEvent`，CLI 只做渲染；M7.C7 的命令标题和失败提示不进入 ToolMessage，也不改变 Agent 决策 |
 | 思考与终端展示 | thinking 事件可供 UI 展示，Provider 保留必要回放字段 | M7.C 默认只显示思考状态图标；CLI 元数据不进入消息历史，DeepSeek 的 `reasoning_content` 回放保持协议兼容。指示器是单行固定宽度的帧动画（`style.THINKING_FRAMES`），只占一行才能保证 Live 清除不留残影 |
 | 用量与上下文 | 模型请求返回 usage，compaction 缩短后续模型投影 | M7.C6 已区分单次任务累计 Provider 用量和当前上下文估算；M7.C8 提供默认关闭、显式启用的请求边界任务预算，窗口阈值只负责压缩安全 |
@@ -190,10 +190,12 @@ mini-pi/
 ├── mini_pi/
 │   ├── errors.py                      # Tool / LLM / Workspace / Session 错误
 │   ├── auth.py                        # API Key 与上次连接的安全持久化
+│   ├── interaction.py                 # 问题 / 回答与宿主交互函数契约
 │   │
 │   ├── cli/
 │   │   ├── app.py                     # Typer 入口：一次性 / 交互式
 │   │   ├── input.py                   # prompt_toolkit 行编辑与单行回退
+│   │   ├── interaction.py             # 关键问询的终端显示与回答读取
 │   │   ├── banner.py                  # 启动图案与紧凑元数据
 │   │   ├── console.py                 # AgentEvent -> Rich 渲染
 │   │   ├── sessions.py                # 严格 Session 列表展示
@@ -225,6 +227,7 @@ mini-pi/
 │   │   ├── edit.py
 │   │   ├── search.py
 │   │   ├── bash.py
+│   │   ├── ask_user.py
 │   │   ├── git.py
 │   │   └── git_status.py
 │   │
@@ -305,11 +308,13 @@ search     搜索代码（依赖自带 rg，无可用 rg 时用 Python 扫描）
 bash       执行命令（cwd=workspace、timeout、stdout/stderr 分离、exit code）
 git_diff   查看内容差异（支持 staged）
 git_status 观察工作区状态（分支、已暂存/未暂存/未跟踪/冲突，只读）
+ask_user   关键问题等待真实回答（可选 2–3 个选项，必须独占工具批次）
 ```
 
 约定：
 
 - 参数用 pydantic 模型声明，registry 统一校验
+- `ask_user` 通过宿主交互函数取得回答；Loop 不读终端。缺少处理函数或非 TTY 时停止本次 run，不继续让模型猜答案
 - 可预期失败抛 `ToolError`，Loop 转成 `is_error` observation 回传模型
 - 非预期异常直接冒泡（Fail Fast）
 - 文件操作必须经过 `Workspace`，禁止工具自行 `open()`
@@ -373,6 +378,7 @@ mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入
 - 一次性模式的退出码与终止原因一一对应，脚本可据此判断任务是否真的完成：`0` completed、`1` error、`2` budget_limit、`3` step_limit、`130` cancelled（128+SIGINT）。只有 `completed` 返回 0；其余情况不回滚已提交的消息、工具结果与文件改动，持久化会话保留，可用 `--resume` 继续；拿不到 `agent_end` 时按失败（1）处理，不因缺少终止事件报成功
 - 交互输入默认使用 `prompt_toolkit`：输入 `/` 时命令菜单自动出现在输入行下方，Tab（或 `→`）采纳高亮项；只剩**唯一匹配**时 Enter 会先补全、再按一次 Enter 才提交，其他情况 Enter 直接提交原文；纯空白 Enter 留在当前提示符且不启动任务；Ctrl+J 或 Alt+Enter 换行、Ctrl+L 清屏。输入历史保存在 `~/.mini-pi/history`（目录 0700、文件 0600，不写入项目目录，Key 输入走独立的隐藏提示因此不进入历史）。stdin/stdout 不是 tty 时静默回退内建 `input()` 的单行 REPL（按行读取、每行一次提交）；交互终端但输入库缺失时同样回退，并在 REPL 顶部打印一行降级原因，避免静默失去补全与历史
 - Ctrl+C 取消当前任务：任务中的中断由 Loop 在流式与工具边界转成 `cancelled`（不是 `completed`），已提交的消息、工具结果与文件改动保留；工具轮里被中断和未执行的调用会补 cancelled observation 保持 call/result 配对，`bash` 的独立进程组会被整组杀掉。空闲时第一次 Ctrl+C 只提示、连续第二次退出；刚取消任务后的下一次空闲 Ctrl+C 直接退出。一次性模式被中断返回退出码 130。tty 人工记录见 [`docs/benchmarks/m7-d2-tty-input-cancel.md`](docs/benchmarks/m7-d2-tty-input-cancel.md)
+- M9.1 起，模型可调用 `ask_user(question, options?)` 提出关键决策问题。CLI 收起活动区后等待，输入编号选择原始选项或输入自由文本；空白与无效序号只在本地重问，没有默认答案。回答作为带 `source=user` 的 ToolMessage 提交后，同一任务继续；等待期间不发新模型请求、不执行后续工具。`/cancel`、Ctrl+C、EOF 取消任务；stdin/stdout 任一非 TTY 时以 error 停止（一次性退出码 1），可在交互终端恢复会话并提供决定。回答不写入 REPL 输入历史，终端编号和提示不进入模型消息
 - `--max-run-input-tokens` 显式启用每次 `run()` 的累计输入预算，默认关闭。Loop 在下一次模型请求前用 Provider 已报告 input 加当前投影估算检查；接近上限时只提示模型收敛一次，预计超限则以 `budget_limit` 停止。它是请求边界控制，单次请求仍可能超过预测；已提交的消息、工具结果和文件改动保留，交互模式下一条任务获得新预算
 
 ---
@@ -413,7 +419,7 @@ uv run pytest -m integration        # 需要 API Key
 | M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；[远端 CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 已通过） |
 | M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 已完成（M7.9.1–M7.9.4；[任务基线](docs/benchmarks/m7-9-baseline.md)：真实 DeepSeek 4/4 completed；[视觉验收](docs/benchmarks/m7-9-4-cli-visual.md)：80/40 列、`TERM=dumb`、`NO_COLOR`、非 tty 全部通过） |
 | M8 | 成本效率评测、CLI 与上下文优化 | 已收尾于 M8.3；[M8.2](docs/benchmarks/m8-2-prompt-batching.md)合批 Prompt、[M8.3](docs/benchmarks/m8-3-context-cost.md)8k 候选未采纳；M8.4–M8.6 取消排期，未实现 |
-| M9 | 简单 MITL 与安全控制 | 已规划、未实现；下一批 M9.1 `ask_user`，然后 M9.2 权限检查与审批 |
+| M9 | 简单 MITL 与安全控制 | M9.1 `ask_user` 已实现；下一批 M9.2 权限检查与审批 |
 | M10 | 只读 LSP | 已规划、未实现；定义、引用、诊断与版本同步，首先验收 Python server |
 | M11 | 本地 MCP | 已规划、未实现；stdio、白名单工具、schema、权限与严格恢复 |
 | M12 | 联合验收与项目结束 | 已规划；四项能力闭环后停止新增功能，保留缺陷与必要兼容修复 |
@@ -433,7 +439,7 @@ M7.9 完成语义、真实任务基线与 CLI 视觉整理（已完成）
   ↓
 M8 评测扩充 / CLI 再整理 / 上下文修正（已收尾）
   ↓
-M9.1 问询 → M9.2 权限控制
+M9.2 权限控制（M9.1 问询已实现）
   ↓
 M10 只读 LSP → M11 本地 MCP
   ↓
@@ -492,18 +498,19 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 ### 已知限制（当前实现）
 
 - `git_diff` 只显示已跟踪内容的差异，未跟踪文件需要 `git_status` 定位后用 `read` 查看
-- 长任务中不能追加 steering / follow-up 输入，也没有真正等待回答的 `ask_user`；简单 MITL 在 M9.1 规划，双队列不在最终范围内
+- `ask_user` 发起后会真正等待，但是否识别关键决策由模型判断；它不等于强制审批。长任务中不能追加 steering / follow-up 输入，双队列不在最终范围内
+- 正常回答或取消后可 resume，旧问询不会重放；等待期间被 SIGKILL 或崩溃可能留下缺失工具结果，严格恢复会报错。未实现跨重启待答恢复
 - `read` 分页输出前仍会读取整个文件；多候选 `/sessions` 与 `--continue` 会逐个完整加载会话，规模表现待 M7.9.3 测量。损坏候选会严格阻断列表和自动恢复，不静默跳过
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行
 - **`bash` 不是沙箱**：文件工具的 Workspace 边界只约束 read/write/edit/search/git_diff，`bash` 是 `cwd = workspace root` 的无沙箱本地 shell（可以读写 workspace 之外、可以联网），也没有危险命令确认机制
-- 当前请求按 wire 消息与工具 schema 估算，字符类权重与工具模式开销都用真实 DeepSeek input usage 校准（[M7.8.2 四组固定样本](docs/benchmarks/m7-8-token-estimation.md)、[M7.9.3 工具数扫描与复验](docs/benchmarks/m7-9-baseline.md)）。工具开销按「一次性模式开销 + 每工具 wire 结构开销 + schema 文本」计算，0–7 个工具实测偏差在 ±5% 内；OpenAI 与接近 1M 窗口的会话仍未量化。摘要切点与成本模型按片段自身消息内容估算，历史整次请求 usage 不属于单条消息或截取区域，预测始终标为 estimated
+- 当前请求按 wire 消息与工具 schema 估算，字符类权重与工具模式开销都用真实 DeepSeek input usage 校准（[M7.8.2 四组固定样本](docs/benchmarks/m7-8-token-estimation.md)、[M7.9.3 工具数扫描与复验](docs/benchmarks/m7-9-baseline.md)）。工具开销按「一次性模式开销 + 每工具 wire 结构开销 + schema 文本」计算，0–7 个工具实测偏差在 ±5% 内；M9.1 默认增加到八工具，未完成八工具的完整估算校准；OpenAI 与接近 1M 窗口的会话仍未量化。摘要切点与成本模型按片段自身消息内容估算，历史整次请求 usage 不属于单条消息或截取区域，预测始终标为 estimated
 - 手动 `/compact`、prompt 前与工具轮之间的窗口触发，以及旧工具结果的成本感知提前压缩都已可用；[M8.3](docs/benchmarks/m8-3-context-cost.md)已记录真实任务逐请求 input 和全部摘要开销，默认成本近期保留目标仍为 20k，没有真实计费结论
 - 已知模型的窗口都是 1M 级；自定义小窗口的自动压缩只经离线夹具验证，尚无真实长任务样本。M7.7b 只用 DeepSeek 验证了手动 `/compact` 事务后的继续与 resume，OpenAI 因未配置 Key 未测
 - `prompt_toolkit` 是可降级能力：非 tty 或未安装时回退单行 REPL；交互终端缺依赖会在 REPL 顶部打印降级原因（补全/历史/多行编辑不可用）
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
 - 支持平台为 macOS / Linux；进程组与文件权限语义依赖 POSIX，Windows 未支持
-- MITL / 权限控制 / LSP / MCP 尚未实现，最后路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)；Task / Memory / Multi-Agent 不在本项目范围内
+- 简单 MITL 已实现；权限控制 / LSP / MCP 尚未实现，最后路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)；Task / Memory / Multi-Agent 不在本项目范围内
 
 ---
 

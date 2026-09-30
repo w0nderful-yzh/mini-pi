@@ -119,3 +119,13 @@ def test_soft_stop_guidance_does_not_cap_tool_calls(tmp_path: Path) -> None:
     assert result.content == "done"
     assert len(llm.calls) == 7
     assert agent.state.step_count == 7
+
+
+def test_question_guidance_requires_registered_tool() -> None:
+    """问询指引仅随实际工具声明进入 Prompt，不要求自定义宿主调用不存在的工具。"""
+    plain = build_system_prompt(cwd=Path("/work/project"), tools=[])
+    interactive = build_system_prompt(
+        cwd=Path("/work/project"), tools=[tool("ask_user", "Ask a human.")]
+    )
+    assert "call ask_user" not in plain
+    assert "call ask_user alone in its tool batch and wait for the answer" in interactive

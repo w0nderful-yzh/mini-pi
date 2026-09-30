@@ -979,7 +979,7 @@ AgentSession._runAutoCompaction
 | usage + trailing estimate | 仅保留为历史诊断 | 下一请求由当前 wire 的 RequestSnapshot 预测；M8.3 切点与成本区域按消息自身内容估算，不能把整次历史 usage 重复归入片段 |
 | split turn | M7 纳入设计 | 避免单个超长 turn 无法压缩 |
 | message_end 持久化 | 采用语义，提交顺序不同 | mini-pi 保持 Fail Fast/durable-first |
-| steering/follow-up 双队列 | 不在最终范围内 | M9.1 只规划独占批次的 ask_user 等待回答；Loop 不读取终端，不做任意运行中输入队列 |
+| steering/follow-up 双队列 | 不在最终范围内 | M9.1 已实现独占批次的 ask_user 等待真实回答；宿主函数由 CLI 注入，Loop 不读取终端，不做任意运行中输入队列 |
 | 工具执行前审批 | M9.2 规划，未实现 | Registry 检查权限，CLI 返回单次决定，Session 保存非模型元数据；审批不等于 OS 沙箱 |
 | LSP / MCP 扩展 | M10/M11 规划，未实现 | 只读 LSP、本地 stdio MCP，共用工具权限；受管连接不引入并行工具或通用插件框架 |
 | parallel tools | 延后 | Phase 1 明确串行 |

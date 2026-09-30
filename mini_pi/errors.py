@@ -9,6 +9,10 @@ class ToolError(MiniPiError):
     """Tool 可预期失败：Agent Loop 转为 is_error observation 回传模型。"""
 
 
+class InteractionUnavailableError(MiniPiError):
+    """关键问询缺少交互端；必须停止 run，不能当普通工具错误让模型继续猜。"""
+
+
 class ToolNotFoundError(ToolError):
     """模型请求了未注册的工具。"""
 

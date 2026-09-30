@@ -25,6 +25,7 @@ class Tool(ABC):
     name: ClassVar[str]
     description: ClassVar[str]
     args_model: ClassVar[type[BaseModel]]
+    exclusive_batch: ClassVar[bool] = False
 
     def schema(self) -> ToolSchema:
         """由 pydantic 参数模型生成 JSON Schema，交给模型做参数约束。"""
