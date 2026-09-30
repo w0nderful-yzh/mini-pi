@@ -412,7 +412,7 @@ uv run pytest -m integration        # 需要 API Key
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
 | M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；[远端 CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 已通过） |
 | M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 已完成（M7.9.1–M7.9.4；[任务基线](docs/benchmarks/m7-9-baseline.md)：真实 DeepSeek 4/4 completed；[视觉验收](docs/benchmarks/m7-9-4-cli-visual.md)：80/40 列、`TERM=dumb`、`NO_COLOR`、非 tty 全部通过） |
-| M8 | 成本效率评测、CLI 再整理、请求/上下文/预算的逐项优化 | M8.0 评测与 M8.1 CLI 再整理已完成（[真实基线](docs/benchmarks/m8-0-eval-baseline.md)、[终端验收](docs/benchmarks/m8-1-cli-visual.md)）；下一批 M8.2 请求往返优化 |
+| M8 | 成本效率评测、CLI 再整理、请求/上下文/预算的逐项优化 | M8.0 评测与 M8.1 CLI 已完成；[M8.2 对照试验](docs/benchmarks/m8-2-prompt-batching.md)已完成，合批 Prompt 候选未采纳；下一批 M8.3 上下文成本 |
 | M9 | Task / Memory | 未开始 |
 | M10 | Multi-Agent | 未开始 |
 

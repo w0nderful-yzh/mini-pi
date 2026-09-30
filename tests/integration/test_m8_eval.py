@@ -11,14 +11,16 @@ from uuid import uuid4
 
 import pytest
 
-from mini_pi.llm.types import SystemMessage, ToolMessage
+from mini_pi.llm.types import SystemMessage, ToolMessage, UserMessage
+from mini_pi.session.jsonl import JsonlSession
 from mini_pi.session.models import CompactionEntry, MessageEntry
+from tests.conftest import assistant, tool_call
 
 
-def _driver() -> ModuleType:
+def _driver(filename: str = "m8-0-eval.py") -> ModuleType:
     """按脚本路径加载评测驱动器，避免在生产包中加入评测依赖。"""
-    path = Path(__file__).resolve().parents[2] / "docs" / "benchmarks" / "m8-0-eval.py"
-    spec = importlib.util.spec_from_file_location("m8_eval_driver", path)
+    path = Path(__file__).resolve().parents[2] / "docs" / "benchmarks" / filename
+    spec = importlib.util.spec_from_file_location(filename.replace("-", "_"), path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -125,3 +127,50 @@ def test_external_pass_does_not_turn_step_limit_into_success() -> None:
     assert not DRIVER._task_success("step_limit", external_pass=True)
     assert not DRIVER._task_success("budget_limit", external_pass=True)
     assert not DRIVER._task_success("completed", external_pass=False)
+
+
+def test_batch_metrics_distinguish_failed_reads_and_repeated_reads(tmp_path: Path) -> None:
+    """合批数按 assistant 轮计；失败与同参读取分开计，避免冒充节省。"""
+    session = JsonlSession.create(
+        cwd=tmp_path, provider="deepseek", model="deepseek-flash", sessions_root=tmp_path / "s"
+    )
+    messages = [
+        UserMessage(content="inspect"),
+        assistant(tool_calls=[
+            tool_call("c1", "read", {"path": "a.py"}),
+            tool_call("c2", "read", {"path": "missing.py"}),
+        ]),
+        ToolMessage(tool_call_id="c1", name="read", content="a"),
+        ToolMessage(tool_call_id="c2", name="read", content="not a file", is_error=True),
+        assistant(tool_calls=[tool_call("c3", "read", {"path": "a.py"})]),
+        ToolMessage(tool_call_id="c3", name="read", content="a"),
+        assistant("done"),
+    ]
+    for message in messages:
+        session.append_message(message, provider="deepseek", model="deepseek-flash")
+
+    counts = DRIVER._tool_observations(session.active_entries())
+
+    assert counts == {
+        "repeated_exact_calls": 1,
+        "verification_commands": 0,
+        "tool_errors": 1,
+        "failed_reads": 1,
+        "repeated_exact_reads": 1,
+        "tool_turns": 2,
+        "multi_call_turns": 1,
+        "max_calls_per_turn": 2,
+    }
+
+
+def test_m8_2_candidate_only_adds_one_rule() -> None:
+    """两种评测规则从固定提交构造，差异只有候选的一段文本。"""
+    driver = _driver("m8-2-eval.py")
+    variants = driver.variants()
+
+    assert len(variants["baseline"]) == 7
+    assert variants["batched"] == (*variants["baseline"], driver.BATCH_RULE)
+    assert "read-only" in driver.BATCH_RULE
+    assert "fully known arguments" in driver.BATCH_RULE
+    assert "Tools run sequentially" in driver.BATCH_RULE
+    assert "wait for observations" in driver.BATCH_RULE

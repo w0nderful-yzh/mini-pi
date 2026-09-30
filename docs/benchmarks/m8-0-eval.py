@@ -27,7 +27,7 @@ sys.path.insert(0, str(PROJECT))
 
 from mini_pi.auth import resolve_api_key  # noqa: E402
 from mini_pi.cli.app import EXIT_CODES  # noqa: E402
-from mini_pi.llm.types import ToolMessage  # noqa: E402
+from mini_pi.llm.types import AssistantMessage, ToolMessage  # noqa: E402
 from mini_pi.session.jsonl import JsonlSession, discover_session_files  # noqa: E402
 from mini_pi.session.models import MessageEntry  # noqa: E402
 from mini_pi.session.usage import recent_session_run_tools, recent_session_run_usage  # noqa: E402
@@ -186,11 +186,14 @@ def _tool_observations(entries: Sequence[Any]) -> dict[str, int]:
     repeated = 0
     verification = 0
     errors = 0
+    failed_reads = 0
+    repeated_reads = 0
     for pair in calls:
         call = pair.call
         identity = (call.name, json.dumps(call.arguments, sort_keys=True, ensure_ascii=False))
         if identity in seen:
             repeated += 1
+            repeated_reads += int(call.name == "read")
         seen.add(identity)
         if call.name == "bash" and re.search(
             r"(?:^|\W)(?:pytest|ruff|compileall|gradle)(?:\W|$)",
@@ -199,10 +202,23 @@ def _tool_observations(entries: Sequence[Any]) -> dict[str, int]:
             verification += 1
         if pair.result.is_error:
             errors += 1
+            failed_reads += int(call.name == "read")
+    tool_turns = [
+        len(entry.message.tool_calls)
+        for entry in entries
+        if isinstance(entry, MessageEntry)
+        and isinstance(entry.message, AssistantMessage)
+        and entry.message.tool_calls
+    ]
     return {
         "repeated_exact_calls": repeated,
         "verification_commands": verification,
         "tool_errors": errors,
+        "failed_reads": failed_reads,
+        "repeated_exact_reads": repeated_reads,
+        "tool_turns": len(tool_turns),
+        "multi_call_turns": sum(count > 1 for count in tool_turns),
+        "max_calls_per_turn": max(tool_turns, default=0),
     }
 
 
@@ -221,7 +237,14 @@ def _task_success(end_reason: str, *, external_pass: bool) -> bool:
     return end_reason == "completed" and external_pass
 
 
-def run_task(spec: TaskSpec, *, repeat: int, key: str, max_steps: int) -> dict[str, Any]:
+def run_task(
+    spec: TaskSpec,
+    *,
+    repeat: int,
+    key: str,
+    max_steps: int,
+    prompt_rules: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
     """运行一次隔离的真实任务，并保留可归因的逐次指标。"""
     with tempfile.TemporaryDirectory(prefix=f"m8-0-{spec.name}-{repeat}-") as raw_root:
         root = Path(raw_root)
@@ -248,10 +271,17 @@ def run_task(spec: TaskSpec, *, repeat: int, key: str, max_steps: int) -> dict[s
             "TERM": "dumb",
             "PYTHONDONTWRITEBYTECODE": "1",
         }
+        bootstrap = "from mini_pi.cli.app import main; main()"
+        if prompt_rules is not None:
+            # 只在评测子进程替换规则；不增加生产参数、不修改 workspace 项目规则。
+            bootstrap = (
+                "import mini_pi.agent.prompt as prompt; "
+                f"prompt._RULES = {prompt_rules!r}; " + bootstrap
+            )
         command = (
             sys.executable,
             "-c",
-            "from mini_pi.cli.app import main; main()",
+            bootstrap,
             spec.prompt,
             "--provider",
             PROVIDER,

@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from mini_pi.agent import prompt as prompt_module
 from mini_pi.auth import save_api_key
 from mini_pi.context.projection import project_messages
 from mini_pi.errors import MiniPiError, SessionError
+from mini_pi.llm.openai_client import to_openai_messages
 from mini_pi.llm.types import AssistantMessage, SystemMessage, UserMessage
 from mini_pi.session.jsonl import JsonlSession
 from mini_pi.session.runtime import AgentSession
@@ -318,3 +320,54 @@ def test_resume_replays_prompt_patch(tmp_path: Path) -> None:
     resolved = project_messages(JsonlSession.load(session.path).active_entries()).system_prompt
     assert resolved is not None
     assert resolved.sections == {"preamble": "p", "rules": "new"}
+
+
+def test_resume_builtin_rules_change_appends_one_patch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """内置规则升级只追加一次 rules patch，历史字节和工具配对不改写。"""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    current_rules = prompt_module._RULES
+    with monkeypatch.context() as old_version:
+        old_version.setattr(prompt_module, "_RULES", (*current_rules, "- Legacy extra rule."))
+        first = create_runtime(
+            workspace,
+            tmp_path / "sessions",
+            FakeLLMClient([
+                assistant(tool_calls=[
+                    tool_call("c1", "echo", {"text": "one"}),
+                    tool_call("c2", "echo", {"text": "two"}),
+                ]),
+                assistant("first done"),
+            ]),
+        )
+        first.run("inspect")
+    before_bytes = first.path.read_bytes()
+    before = JsonlSession.load(first.path)
+    llm = FakeLLMClient([assistant("continued"), assistant("again")])
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    resumed = AgentSession.resume(
+        first.path, registry=registry, llm_factory=lambda p, m: llm, cwd=workspace
+    )
+
+    resumed.run("continue")
+    resumed.run("continue again")
+
+    after = JsonlSession.load(first.path)
+    assert first.path.read_bytes().startswith(before_bytes)
+    assert after.entries[:len(before.entries)] == before.entries
+    added = after.entries[len(before.entries):]
+    assert [entry.message.role for entry in added] == [
+        "system", "user", "assistant", "user", "assistant"
+    ]
+    patch = added[0].message
+    assert isinstance(patch, SystemMessage)
+    assert patch.section_patch is not None
+    assert [(item.op, item.id) for item in patch.section_patch] == [("set", "rules")]
+    assert patch.section_patch[0].content == "\n".join(current_rules)
+    wire = to_openai_messages(llm.calls[0])
+    assert "Legacy extra rule" not in wire[0]["content"]
+    results = [message for message in wire if message["role"] == "tool"]
+    assert [message["tool_call_id"] for message in results] == ["c1", "c2"]
