@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from mini_pi.context.compaction import CompactionPlan
 from mini_pi.context.serializer import serialize_transcript
 from mini_pi.context.summarizer import build_summary_messages
-from mini_pi.context.tokens import estimate_text_tokens, estimate_tokens
+from mini_pi.context.tokens import estimate_content_tokens, estimate_text_tokens
 from mini_pi.llm.types import Message, ToolMessage
 
 # 摘要体积的保守上界：模板要求 “Keep each section concise”，实测摘要远小于此。首次
@@ -23,6 +23,9 @@ ASSUMED_REMAINING_REQUESTS = 3
 # 旧工具结果在被摘要区域中的 token 占比下限：低于它说明收益主要来自普通对话，摘要掉
 # 模型自己的推理与用户原话代价更高，这类历史交给窗口阈值处理。
 TOOL_RESULT_SHARE_FLOOR = 0.5
+
+# 成本优化的近期内容软目标；与窗口安全检查的保留预算分开做对照，不是请求硬上限。
+COST_KEEP_RECENT_TOKENS = 20_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,9 +72,9 @@ def measure_tool_results(messages: Sequence[Message]) -> ToolResultFootprint:
     items = list(messages)
     tool_messages = [message for message in items if isinstance(message, ToolMessage)]
     return ToolResultFootprint(
-        tokens=sum(estimate_tokens([message]).tokens for message in tool_messages),
+        tokens=estimate_content_tokens(tool_messages).tokens,
         messages=len(tool_messages),
-        region_tokens=estimate_tokens(items).tokens,
+        region_tokens=estimate_content_tokens(items).tokens,
     )
 
 
@@ -86,9 +89,9 @@ def estimate_compaction_cost(
     """
     if assumed_requests <= 0:
         raise ValueError("assumed_requests must be > 0")
-    region_tokens = estimate_tokens(plan.messages_to_summarize).tokens
+    region_tokens = estimate_content_tokens(plan.messages_to_summarize).tokens
     transcript = serialize_transcript(plan.messages_to_summarize)
-    summary_input_tokens = estimate_tokens(
+    summary_input_tokens = estimate_content_tokens(
         build_summary_messages(transcript, previous_summary=plan.previous_summary)
     ).tokens
     if plan.previous_summary is None:

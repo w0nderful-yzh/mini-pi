@@ -14,7 +14,7 @@ from mini_pi.context.projection import (
 )
 from mini_pi.context.serializer import serialize_transcript
 from mini_pi.context.summarizer import summarize_transcript
-from mini_pi.context.tokens import TokenEstimate, estimate_tokens
+from mini_pi.context.tokens import TokenEstimate, estimate_message_tokens, estimate_tokens
 from mini_pi.errors import CompactionError, SessionError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.types import (
@@ -137,13 +137,14 @@ def _segment(messages: Sequence[Message]) -> list[_Segment]:
     while index < len(messages):
         start = index
         message = messages[index]
-        tokens = estimate_tokens([message]).tokens
+        # 切点只度量片段自身；usage 是历史整次请求，不能重复算入每条 assistant。
+        tokens = estimate_message_tokens(message)
         if isinstance(message, AssistantMessage) and message.tool_calls:
             call_ids = {item.id for item in message.tool_calls}
             result_ids: set[str] = set()
             index += 1
             while index < len(messages) and isinstance(messages[index], ToolMessage):
-                tokens += estimate_tokens([messages[index]]).tokens
+                tokens += estimate_message_tokens(messages[index])
                 result_ids.add(messages[index].tool_call_id)
                 index += 1
             complete = result_ids == call_ids

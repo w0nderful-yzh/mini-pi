@@ -11,10 +11,10 @@ from uuid import uuid4
 
 import pytest
 
-from mini_pi.llm.types import SystemMessage, ToolMessage, UserMessage
+from mini_pi.llm.types import SystemMessage, ToolMessage, Usage, UserMessage
 from mini_pi.session.jsonl import JsonlSession
 from mini_pi.session.models import CompactionEntry, MessageEntry
-from tests.conftest import assistant, tool_call
+from tests.conftest import FakeLLMClient, assistant, tool_call
 
 
 def _driver(filename: str = "m8-0-eval.py") -> ModuleType:
@@ -174,3 +174,47 @@ def test_m8_2_candidate_only_adds_one_rule() -> None:
     assert "fully known arguments" in driver.BATCH_RULE
     assert "Tools run sequentially" in driver.BATCH_RULE
     assert "wait for observations" in driver.BATCH_RULE
+
+
+@pytest.mark.parametrize("name", ["real_repo", "multi_repo"])
+def test_m8_3_long_repo_initial_state_and_repair(name: str, tmp_path: Path) -> None:
+    """两种长任务的初态都失败，按允许范围修复后外部判定通过。"""
+    driver = _driver("m8-3-eval.py")
+    task = next(task for task in driver.TASKS if task.name == name)
+    workspace = tmp_path / "project"
+    driver.prepare(task, workspace)
+    before = DRIVER._fingerprints(workspace)
+    assert DRIVER._score(task, workspace, before)["scorer_exit"] != 0
+
+    _repair("real_repo", workspace)
+    if name == "multi_repo":
+        path = workspace / "mini_pi" / "cli" / "console.py"
+        path.write_text(path.read_text().replace(
+            "self._input_tokens += usage.output_tokens", "self._input_tokens += usage.input_tokens"
+        ))
+    assert DRIVER._score(task, workspace, before)["external_pass"]
+
+
+def test_m8_3_trace_counts_summary_usage_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """真实评测审计不能漏记 complete 发出的摘要开销，也不能重复记一次。"""
+    driver = _driver("m8-3-eval.py")
+    script = FakeLLMClient([
+        assistant("task").model_copy(update={
+            "usage": Usage(input_tokens=10, output_tokens=2, total_tokens=12)
+        }),
+        assistant("summary").model_copy(update={
+            "usage": Usage(input_tokens=5, output_tokens=1, total_tokens=6)
+        }),
+    ])
+    monkeypatch.setattr(
+        driver.DeepSeekClient, "stream", lambda self, messages, tools: script.stream(messages, tools)
+    )
+    client = driver.AuditedDeepSeek("offline-test-key")
+
+    client.complete([UserMessage(content="task")], [])
+    client.complete([UserMessage(content="history")], None)
+
+    assert [r["kind"] for r in client.records] == ["task", "summary"]
+    assert sum(r["input_tokens"] for r in client.records) == 15
+    assert sum(r["output_tokens"] for r in client.records) == 3
+    assert all(r["paired"] for r in client.records)

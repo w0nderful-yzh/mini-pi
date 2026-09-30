@@ -976,7 +976,7 @@ AgentSession._runAutoCompaction
 | JSONL entry tree | M7 采用最小子集 | 为 resume/compaction 提供事实源 |
 | Prompt sections/diff | M7 采用 | AGENTS/tool 变化可重放 |
 | CompactionEntry 不删原文 | M7 采用 | 可逆、可验证 |
-| usage + trailing estimate | M7 采用 | 比全量字符估算可靠 |
+| usage + trailing estimate | 仅保留为历史诊断 | 下一请求由当前 wire 的 RequestSnapshot 预测；M8.3 切点与成本区域按消息自身内容估算，不能把整次历史 usage 重复归入片段 |
 | split turn | M7 纳入设计 | 避免单个超长 turn 无法压缩 |
 | message_end 持久化 | 采用语义，提交顺序不同 | mini-pi 保持 Fail Fast/durable-first |
 | steering/follow-up 双队列 | 延后 | 当前同步 CLI 无真实需求 |

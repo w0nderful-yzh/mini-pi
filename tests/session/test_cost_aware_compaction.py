@@ -11,7 +11,7 @@ from mini_pi.context.cost import CostDecision
 from mini_pi.context.projection import SUMMARY_TAG
 from mini_pi.context.tokens import estimate_tokens
 from mini_pi.errors import LLMError
-from mini_pi.llm.types import AssistantMessage, Message, ToolMessage, UserMessage
+from mini_pi.llm.types import AssistantMessage, Message, ToolMessage, Usage, UserMessage
 from mini_pi.session.jsonl import JsonlSession
 from mini_pi.session.models import CompactionEntry, MessageEntry, SessionEntry
 from mini_pi.session.runtime import AgentSession
@@ -135,6 +135,26 @@ def test_early_compaction_fires_when_old_tool_results_dominate(
     assert isinstance(continuation[1], UserMessage) and SUMMARY_TAG in continuation[1].content
     kept_tools = [message for message in continuation if isinstance(message, ToolMessage)]
     assert [message.tool_call_id for message in kept_tools] == ["c2"]
+    assert runtime.state.messages == list(JsonlSession.load(runtime.path).replay().messages)
+
+
+def test_realistic_usage_does_not_hide_old_tool_result_cost(tmp_path: Path) -> None:
+    """携带历史请求 usage 的短 assistant 不应掩盖大工具结果的压缩收益。"""
+    tool = SizedTool(_HUGE_OUTPUT, _BIG_OUTPUT)
+    script = _two_round_script(assistant("## Goal\n整理日志"))
+    script[0] = script[0].model_copy(update={
+        "usage": Usage(input_tokens=120_000, output_tokens=100, total_tokens=120_100)
+    })
+    llm = FakeLLMClient(script)
+    runtime = _session(tmp_path, llm, tool)
+    runtime.run("task")
+
+    reply = runtime.run("second")
+
+    assert reply.content == "final answer"
+    assert len(_compactions(runtime)) == 1
+    assert tool.calls == 2
+    assert _tool_contents(runtime) == [_HUGE_OUTPUT, _BIG_OUTPUT]
     assert runtime.state.messages == list(JsonlSession.load(runtime.path).replay().messages)
 
 

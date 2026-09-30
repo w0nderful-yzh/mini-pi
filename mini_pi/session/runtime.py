@@ -17,6 +17,7 @@ from mini_pi.context.compaction import (
     prepare_compaction,
 )
 from mini_pi.context.cost import (
+    COST_KEEP_RECENT_TOKENS,
     decide_cost_aware_compaction,
     estimate_compaction_cost,
     measure_tool_results,
@@ -403,7 +404,7 @@ class AgentSession:
         if run_context.cost_compaction_attempted or self._context_policy is None:
             return
         preparation = prepare_compaction(
-            self._session.active_entries(), keep_recent_tokens=DEFAULT_KEEP_RECENT_TOKENS
+            self._session.active_entries(), keep_recent_tokens=COST_KEEP_RECENT_TOKENS
         )
         if preparation.plan is None:
             # 没有安全切点或没有新内容：提前压缩没有对象，也不该报错

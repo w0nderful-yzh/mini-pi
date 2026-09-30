@@ -11,6 +11,7 @@ from mini_pi.llm.types import (
     Message,
     ToolCall,
     ToolMessage,
+    Usage,
     UserMessage,
 )
 
@@ -128,3 +129,20 @@ def test_keep_recent_tokens_must_be_positive() -> None:
     """非法预算直接报错，不进入切点计算。"""
     with pytest.raises(ValueError, match="keep_recent_tokens"):
         find_cut_point([UserMessage(content="aaaa")], keep_recent_tokens=0)
+
+
+def test_cut_point_ignores_historical_request_usage() -> None:
+    """相同消息内容的安全切点不能被历史整次请求的 usage 改变。"""
+    messages: list[Message] = [
+        UserMessage(content="aaaa"), AssistantMessage(content="bbbb"),
+        UserMessage(content="cccc"), AssistantMessage(content="dddd"),
+    ]
+    measured = [
+        message.model_copy(update={"usage": Usage(input_tokens=90_000, total_tokens=90_100)})
+        if isinstance(message, AssistantMessage) else message
+        for message in messages
+    ]
+
+    assert find_cut_point(measured, keep_recent_tokens=2) == find_cut_point(
+        messages, keep_recent_tokens=2
+    ) == CutPoint(start_index=2, boundary="user", kept_tokens=2)

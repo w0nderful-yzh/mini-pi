@@ -67,6 +67,13 @@ def estimate_message_tokens(message: Message) -> int:
     return _estimate_message(message)
 
 
+def estimate_content_tokens(messages: Sequence[Message]) -> TokenEstimate:
+    """按消息自身内容累加区域大小，历史 usage 不属于单条消息或截取区域。"""
+    return TokenEstimate(
+        tokens=sum(_estimate_message(message) for message in messages), source="estimated"
+    )
+
+
 def estimate_text_tokens(text: str) -> int:
     """按 ASCII、东亚字符和其他宽字符权重估算，供成本与统计共用。"""
     weight = sum(_character_weight(char) for char in text)
