@@ -1,6 +1,6 @@
 # Pi 生产架构参考
 
-> 用途：作为 mini-pi M7 及后续阶段的源码级设计参考，不是 mini-pi 的实施规范。具体取舍以 `docs/plans/phase2-session-context.md` 为准。
+> 用途：作为 mini-pi M7 及后续阶段的源码级设计参考，不是 mini-pi 的实施规范。M7 取舍以 `docs/plans/phase2-session-context.md` 为准，最终能力范围以 `docs/plans/phase3-runtime-hardening.md` 为准。
 
 ## 0. 基线与阅读范围
 
@@ -979,7 +979,9 @@ AgentSession._runAutoCompaction
 | usage + trailing estimate | 仅保留为历史诊断 | 下一请求由当前 wire 的 RequestSnapshot 预测；M8.3 切点与成本区域按消息自身内容估算，不能把整次历史 usage 重复归入片段 |
 | split turn | M7 纳入设计 | 避免单个超长 turn 无法压缩 |
 | message_end 持久化 | 采用语义，提交顺序不同 | mini-pi 保持 Fail Fast/durable-first |
-| steering/follow-up 双队列 | 延后 | 当前同步 CLI 无真实需求 |
+| steering/follow-up 双队列 | 不在最终范围内 | M9.1 只规划独占批次的 ask_user 等待回答；Loop 不读取终端，不做任意运行中输入队列 |
+| 工具执行前审批 | M9.2 规划，未实现 | Registry 检查权限，CLI 返回单次决定，Session 保存非模型元数据；审批不等于 OS 沙箱 |
+| LSP / MCP 扩展 | M10/M11 规划，未实现 | 只读 LSP、本地 stdio MCP，共用工具权限；受管连接不引入并行工具或通用插件框架 |
 | parallel tools | 延后 | Phase 1 明确串行 |
 | ToolDefinition 四层 | 延后 | 当前 Tool 单层足够 |
 | branch/tree/summary | 延后 | M7 只需线性 leaf |

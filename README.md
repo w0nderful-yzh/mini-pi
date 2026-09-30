@@ -44,7 +44,7 @@ LLM 继续决策
 - Workspace 安全边界：所有文件操作限制在工作区内，路径逃逸直接报错
 - 任务过程中持续观察、修复、验证
 - Session 与 Context 已完成（M7）：JSONL 会话、项目 `AGENTS.md`、恢复、任务预算与 compaction
-- 逐步加入 LSP、MCP、Task、Memory、Multi-Agent
+- 最后补齐简单 MITL、工具权限控制、只读 LSP 与本地 MCP，联合验收后结束项目
 
 最终形态：
 
@@ -56,11 +56,10 @@ Python Coding Agent Harness
 ├── Tool System
 ├── Workspace
 ├── Session
-├── Task System
-├── Memory
-├── MCP
-├── LSP
-└── Multi-Agent
+├── MITL（关键问询）
+├── Tool Permissions（执行前审批）
+├── LSP（只读）
+└── MCP（本地 stdio）
 ```
 
 ---
@@ -71,7 +70,7 @@ Python Coding Agent Harness
 
 | 设计点 | pi 的做法 | mini-pi 的选择 |
 | --- | --- | --- |
-| 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 当前是单层 tool batch 循环；`prepare_next_turn` 接收单次运行的 `RunContext` 并可替换投影。steering / follow-up 尚未实现，是否进入 M8.0 先由真实长任务基线验证 |
+| 循环结构 | 双层循环：内层 tool batch + steering，外层 follow-up 队列 | 当前是单层 tool batch 循环；`prepare_next_turn` 接收单次运行的 `RunContext` 并可替换投影。M9.1 规划以独占批次的 `ask_user` 同步等待回答；不做 steering / follow-up 双队列 |
 | 事件驱动 | `AgentEvent` 事件流驱动 TUI/print/RPC，UI 是纯消费者 | Loop 发 `AgentEvent`，CLI 只做渲染；M7.C7 的命令标题和失败提示不进入 ToolMessage，也不改变 Agent 决策 |
 | 思考与终端展示 | thinking 事件可供 UI 展示，Provider 保留必要回放字段 | M7.C 默认只显示思考状态图标；CLI 元数据不进入消息历史，DeepSeek 的 `reasoning_content` 回放保持协议兼容。指示器是单行固定宽度的帧动画（`style.THINKING_FRAMES`），只占一行才能保证 Live 清除不留残影 |
 | 用量与上下文 | 模型请求返回 usage，compaction 缩短后续模型投影 | M7.C6 已区分单次任务累计 Provider 用量和当前上下文估算；M7.C8 提供默认关闭、显式启用的请求边界任务预算，窗口阈值只负责压缩安全 |
@@ -85,6 +84,7 @@ Python Coding Agent Harness
 | edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 只做精确唯一匹配，fuzzy 后置 |
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | Shell 边界 | `bash` 是无沙箱本地 shell | 同样是无沙箱本地 shell：`bash` 只约束 `cwd`，可读写 workspace 之外、可联网；文件工具的边界不适用于它。接入不可信外部工具前重新评估执行权限 |
+| 执行权限 | 参考工具执行与 UI 交互分层 | M9.2 规划在 Registry 执行前检查权限，CLI 处理单次批准/拒绝；外部进程先审批启动，授权不从模型或历史会话恢复。审批不提供 OS 沙箱隔离，当前尚未实现 |
 | 上下文估算 | usage 锚点 + 其后消息的字符估算 | M7.8.1 按当前 wire 消息与工具 schema 预测下一请求；M7.8.2 用字符类权重校准 DeepSeek 输入；M7.9.3 按 1/3/7 工具实测把工具开销拆成「一次性模式开销 + 每工具 wire 结构开销 + schema 文本」，避免工具变多后系统性低估；M7.8.3 由运行时持有解析后的窗口策略，压缩决策与 CLI 展示共用。M8.3 的摘要切点与成本模型按片段自身内容估算，不重复计入历史整次请求的 `usage.total_tokens`；旧 usage 锚点仅保留在压缩前诊断，历史 input usage 单独展示 |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
@@ -155,7 +155,7 @@ ruff（静态检查；CI 使用 Python 3.12）
 
 ```text
 LSP / MCP
-asyncio / 并行工具执行
+MCP 官方 SDK 所需的受管异步连接（Agent 与工具调度仍同步串行）
 ```
 
 不使用：
@@ -184,7 +184,7 @@ mini-pi/
 │   ├── plans/
 │   │   ├── phase1-core-runtime.md         # M1-M6 实施计划
 │   │   ├── phase2-session-context.md      # M7 设计与实施计划
-│   │   └── phase3-runtime-hardening.md    # M7.8-M10 路线与实施计划
+│   │   └── phase3-runtime-hardening.md    # M8 收尾及 M9-M12 最终能力计划
 │   └── benchmarks/                    # M7 用量 / 成本 / 验收记录与离线 tty 驱动器
 │
 ├── mini_pi/
@@ -258,7 +258,7 @@ mini-pi/
 
 `tests/integration/` 是离线端到端目录（CLI → Session → Loop → Tool → Context 全链路，FakeLLM 驱动），与 `@pytest.mark.integration`（真实 API）无关；后者默认被 `addopts` 排除。
 
-后续 Task / Memory / MCP / LSP 目录在对应里程碑前不创建。
+后续交互、安全、MCP / LSP 模块在对应里程碑前不创建；Task / Memory / Multi-Agent 已移出本项目范围。
 
 ---
 
@@ -412,15 +412,17 @@ uv run pytest -m integration        # 需要 API Key
 | M7 | Session / Context 与 CLI：JSONL、AGENTS.md、resume、任务成本控制、compaction、可观测性 | 已完成（M7.1-M7.6、M7.C1-C8、M7.D1-D2、M7.7 验收；验收记录见 `docs/benchmarks/`） |
 | M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；[远端 CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 已通过） |
 | M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 已完成（M7.9.1–M7.9.4；[任务基线](docs/benchmarks/m7-9-baseline.md)：真实 DeepSeek 4/4 completed；[视觉验收](docs/benchmarks/m7-9-4-cli-visual.md)：80/40 列、`TERM=dumb`、`NO_COLOR`、非 tty 全部通过） |
-| M8 | 成本效率评测、CLI 再整理、请求/上下文/预算的逐项优化 | M8.0–M8.3 已完成；[M8.2](docs/benchmarks/m8-2-prompt-batching.md)合批 Prompt 未采纳；[M8.3](docs/benchmarks/m8-3-context-cost.md)修正区域估算，8k 保留目标未采纳；下一批 M8.4 预算收敛 |
-| M9 | Task / Memory | 未开始 |
-| M10 | Multi-Agent | 未开始 |
+| M8 | 成本效率评测、CLI 与上下文优化 | 已收尾于 M8.3；[M8.2](docs/benchmarks/m8-2-prompt-batching.md)合批 Prompt、[M8.3](docs/benchmarks/m8-3-context-cost.md)8k 候选未采纳；M8.4–M8.6 取消排期，未实现 |
+| M9 | 简单 MITL 与安全控制 | 已规划、未实现；下一批 M9.1 `ask_user`，然后 M9.2 权限检查与审批 |
+| M10 | 只读 LSP | 已规划、未实现；定义、引用、诊断与版本同步，首先验收 Python server |
+| M11 | 本地 MCP | 已规划、未实现；stdio、白名单工具、schema、权限与严格恢复 |
+| M12 | 联合验收与项目结束 | 已规划；四项能力闭环后停止新增功能，保留缺陷与必要兼容修复 |
 
 M1-M6 的详细任务拆解见 [`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)。
 M7 的架构设计、子里程碑与验收见 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)。
-M7.8-M7.9 的交付依据、M8 的任务拆解和后续能力准入见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)。
+M7.8-M8 的交付依据与最后 M9-M12 的任务拆解见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)。原 Task/Memory 和 Multi-Agent 排期撤销，M9/M10 编号已重新分配。
 
-MVP 后先让会话可恢复、上下文可控；当前先衡量并改进单任务效率，再评估外部能力。
+M8 收尾后只完成以下路线，不再扩展为通用 Agent 平台。
 
 ```text
 M7 Session / Context（已完成）
@@ -429,11 +431,13 @@ M7.8 Runtime Hardening（已完成）
   ↓
 M7.9 完成语义、真实任务基线与 CLI 视觉整理（已完成）
   ↓
-M8 评测扩充 / CLI 再整理 / 单任务成本效率
+M8 评测扩充 / CLI 再整理 / 上下文修正（已收尾）
   ↓
-后续：按需交互、LSP、MCP
+M9.1 问询 → M9.2 权限控制
   ↓
-M9 Task / Memory；M10 Multi-Agent（按需准入）
+M10 只读 LSP → M11 本地 MCP
+  ↓
+M12 联合验收 → 项目完成
 ```
 
 不要跨阶段同时开太多功能。每完成一个里程碑：
@@ -488,7 +492,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 ### 已知限制（当前实现）
 
 - `git_diff` 只显示已跟踪内容的差异，未跟踪文件需要 `git_status` 定位后用 `read` 查看
-- 长任务中不能追加 steering / follow-up 输入；当前只能等待或取消，M8.0 以前先用真实任务验证需求
+- 长任务中不能追加 steering / follow-up 输入，也没有真正等待回答的 `ask_user`；简单 MITL 在 M9.1 规划，双队列不在最终范围内
 - `read` 分页输出前仍会读取整个文件；多候选 `/sessions` 与 `--continue` 会逐个完整加载会话，规模表现待 M7.9.3 测量。损坏候选会严格阻断列表和自动恢复，不静默跳过
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行
@@ -499,7 +503,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 - `prompt_toolkit` 是可降级能力：非 tty 或未安装时回退单行 REPL；交互终端缺依赖会在 REPL 顶部打印降级原因（补全/历史/多行编辑不可用）
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
 - 支持平台为 macOS / Linux；进程组与文件权限语义依赖 POSIX，Windows 未支持
-- LSP / MCP / Task / Memory / Multi-Agent 属于后续阶段，路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)
+- MITL / 权限控制 / LSP / MCP 尚未实现，最后路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)；Task / Memory / Multi-Agent 不在本项目范围内
 
 ---
 
@@ -538,5 +542,5 @@ Test Core Runtime
 - Pi 生产架构参考：[`docs/design/pi-production-architecture.md`](docs/design/pi-production-architecture.md)
 - Phase 1 计划：[`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)
 - Phase 2 计划：[`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)
-- Phase 3 计划（M7.8-M10）：[`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)
+- Phase 3 计划（M8 收尾、M9-M12 最终能力）：[`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)
 - M7 成本与验收记录：[`docs/benchmarks/`](docs/benchmarks/)（M7.8 用量与最终验收、[M7.9.3 真实任务基线与规模](docs/benchmarks/m7-9-baseline.md)、成本感知压缩、真实压缩验收、tty 输入与取消记录）
