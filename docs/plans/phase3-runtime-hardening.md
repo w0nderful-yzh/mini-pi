@@ -1,6 +1,6 @@
 # Phase 3：最终能力收尾
 
-> 状态：M8 在 M8.3 后按用户要求收尾；M8.4–M8.6 取消排期，未实现。M9.1 简单 MITL、M9.2 权限与单次审批已实现；下一批为 M10.1 只读 LSP，之后仅完成本地 MCP 和最终验收。M10–M12 是尚未实现的目标设计。
+> 状态：M8 在 M8.3 后按用户要求收尾；M8.4–M8.6 取消排期，未实现。M9.1 简单 MITL、M9.2 权限与单次审批、M10.1/M10.2 只读 Python LSP 已实现；下一批为 M11.1 本地 MCP stdio，之后完成工具装配和最终验收。M11–M12 是尚未实现的目标设计。
 
 MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题，等待人回答后继续”。项目结束边界为一个可恢复、能问人、能查代码语义、能接受控本地工具的单 Agent CLI。原 M9 Task/Memory、M10 Multi-Agent 排期撤销；以下编号重新分配，不保留这些能力的隐含承诺。
 
@@ -10,8 +10,8 @@ MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题�
 | --- | --- | --- |
 | M9.1（已实现） | 简单 MITL：`ask_user` 与 CLI 回答 | 真正等待、回答后继续，取消和无交互端不猜答案，消息配对完整 |
 | M9.2（已实现） | 工具权限与外部进程启动审批 | 拒绝时无执行副作用，授权不可由模型/仓库扩大，沿用宿主交互边界 |
-| M10.1 | LSP 生命周期、definition、references | 本地 Python server 查询正确，位置编码、路径和退出边界通过 |
-| M10.2 | LSP diagnostics 与文件版本同步 | 编辑后的诊断来自当前内容，过期/未就绪不冒充零错误 |
+| M10.1（已实现） | LSP 生命周期、definition、references | 本地 Python server 查询正确，位置编码、路径和退出边界通过 |
+| M10.2（已实现） | LSP diagnostics 与文件版本同步 | 编辑后的诊断来自当前内容，过期/未就绪不冒充零错误 |
 | M11.1 | MCP stdio 连接与协议生命周期 | 固定本地 server 初始化、发现、调用、超时与取消清理通过 |
 | M11.2 | MCP 工具装配、schema、权限与恢复 | 活动工具集有界，映射不歧义，外部工具服从同一权限检查 |
 | M12 | 联合验收与项目收尾 | 四项能力闭环通过，使用方式和限制准确，然后停止新增功能 |
@@ -33,7 +33,7 @@ MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题�
 | `mini_pi/tools/process.py::run_process/run_shell` | 一次性进程、有界捕获、超时/取消杀进程组；最小明确环境 | 长驻 LSP/MCP 另管生命周期，不复用等结束的运行器 |
 | `mini_pi/context/sections.py` / `context/request.py` | 工具描述 patch、当前 wire/schema 的请求快照 | 活动目录变化只在空闲边界安装，下一请求按实际工具重新预测 |
 
-M9 已新增 `mini_pi/interaction.py`、`cli/interaction.py`、`tools/ask_user.py`、`security.py`、`config.py`；小规模 `lsp/`、`mcp/` 客户端模块和各自 Tool 文件仅在后续对应批次创建。工具执行仍经过 Registry；Agent 不读文件、启动进程或处理终端。
+M9 已新增 `mini_pi/interaction.py`、`cli/interaction.py`、`tools/ask_user.py`、`security.py`、`config.py`；M10 的 `lsp/` 与三个 Tool 已装配，MCP 模块留到 M11。工具执行仍经过 Registry；Agent 只委托 Registry 清理，不读文件、启动进程或处理终端。
 
 ## 3. M9.1：简单 MITL（已实现）
 
@@ -68,7 +68,7 @@ CLI 参数 `--permissions workspace|readonly` 覆盖用户级配置，缺省 `wo
 | 内置 read/search/git_diff/git_status | 允许，保持 Workspace 边界 | 允许 |
 | 内置 write/edit | 允许，仅 Workspace 内 | 拒绝 |
 | bash 任意命令 | 每次审批 | 拒绝 |
-| 受信任配置的只读 LSP 查询（M10 待装配） | 启动批准后允许 | 启动批准后允许 |
+| 受信任配置的只读 LSP 查询（M10 已装配） | 启动批准后允许 | 启动批准后允许 |
 | MCP 工具（M11 待装配） | 本地策略标明可信只读的才自动允许，其他每次审批 | 仅允许本地策略明确标为可信只读的工具 |
 | 新 LSP/MCP 进程 | 启动前审批 argv、cwd 和环境变量名称 | 同样审批 |
 
@@ -81,7 +81,7 @@ CLI 参数 `--permissions workspace|readonly` 覆盖用户级配置，缺省 `wo
 
 新 entry 的解析与投影同时修改：新实现兼容旧 JSONL；旧实现遇到不认识的 entry 明确拒绝，未知 entry 仍不得静默跳过。原文件不改写，审批元数据不能插入 Provider 消息而破坏工具配对，compaction 保留这些事实且不把它们当摘要正文。
 
-当前实现以 `Tool.access` 表达可信宿主代码的分类；未知工具默认审批，外部 annotations 不参与判断。Registry 直接调用同样检查；Session 为每个运行时复制注册表并独立绑定 ControlEntry 提交入口，避免 `/new` 改走旧会话审计。`SecurityPolicy.start_server(id)` 只接收用户配置中的 id，展示 argv/cwd/env 名称并审批后才 Popen；M10/M11 再装配连接、超时和关闭生命周期，当前不对模型注册 LSP/MCP 工具。
+当前实现以 `Tool.access` 表达可信宿主代码的分类；未知工具默认审批，外部 annotations 不参与判断。Registry 直接调用同样检查；Session 为每个运行时复制注册表并独立绑定 ControlEntry 提交入口，避免 `/new` 改走旧会话审计。`SecurityPolicy.start_server(id)` 只接收用户配置中的 id，展示 argv/cwd/env 名称并审批后才 Popen。M10 仅在配置中有一个 LSP server 时注册三个查询工具并懒启动，连接由 Registry 持有，Session/CLI 负责关闭；MCP 留到 M11。
 
 ### 边界
 
@@ -91,7 +91,7 @@ CLI 参数 `--permissions workspace|readonly` 覆盖用户级配置，缺省 `wo
 
 ## 5. M10：只读 LSP
 
-### M10.1：连接、定义和引用
+### M10.1：连接、定义和引用（已实现）
 
 - 第一套验收环境选择 Python + 手动安装并固定版本的 Pyright language server；只配置一个 workspace、一个 server，不实现自动下载和全语言发现。默认关闭，用户显式配置后，第一次查询时审批并启动。
 - 实现 LSP 3.17 所需的 stdio 子集：Content-Length 分帧、请求 id、initialize/initialized、声明能力、超时、通知、有界 stderr、shutdown/exit 和进程组清理。配置/控制请求按已声明能力处理；不支持的请求明确返回协议错误，不能挂起等不到回应。
@@ -101,7 +101,7 @@ CLI 参数 `--permissions workspace|readonly` 覆盖用户级配置，缺省 `wo
 
 **验收：** 离线假 server 覆盖分帧、交错通知/请求、初始化失败、中文/emoji、非法位置、外部 URI、超大结果、超时与崩溃；真实 Pyright 在固定小仓库中返回正确跨文件定义与引用。断连不自动重放任何业务请求，下一次显式调用可重新启动并审批。
 
-### M10.2：诊断与同步
+### M10.2：诊断与同步（已实现）
 
 - 新增 `lsp_diagnostics(path)`，仅针对显式查询的文件获取诊断；按协商的 textDocumentSync 能力发送 didOpen/didChange/didClose，并维护文档版本。
 - 每次查询前检查磁盘实际内容并同步，不能只依赖 modified_files：bash 或用户也可能改文件。跟踪已打开文件即可，不扫描全仓库、不建设文件监听平台；诊断工具报告内容版本/指纹和是否确认新鲜。
@@ -109,6 +109,10 @@ CLI 参数 `--permissions workspace|readonly` 覆盖用户级配置，缺省 `wo
 - Session/CLI 管理长驻连接；退出、`/new` 替换运行时和启动失败都关闭旧资源。单次任务取消清理活动请求，协议状态不确定时关闭进程，下次重新初始化。不得每次请求重启 server；不得把一次性 `run_process` 当长驻客户端。
 
 **验收：** edit/write/bash/外部直接修改后诊断更新；错误消失、新错误、延迟通知与过期缓存；查询/取消/`/new`/退出无遗留子进程；真实 server 完成“查定义→编辑→当前诊断→测试”。诊断并不替代任务外部测试。
+
+**实现边界：** `lsp/transport.py` 负责有界双向 stdio 与进程组清理，`lsp/positions.py` 转换编码，`lsp/client.py` 按磁盘内容维护最多 32 个已打开文档，三个 Tool 经 Registry 和现有审批审计入口装配。文档 1 MB、帧 2 MB、模型结果 100 条/50 KB、stderr 16 KB；配置 `timeout` 缺省 10 秒、最大 120 秒。固定分析配置 `openFilesOnly/basic/autoSearchPaths=false`，不扫描或监听未打开依赖。没有版本的推送直接返回新鲜度错误，pull 每次要求完整当前结果，不传 previousResultId。`/new` 创建成功后关闭旧运行时，创建失败保留旧连接；SDK 使用者显式 `close()`。
+
+验收入口为 `tests/lsp/`（离线协议与生命周期）及 `tests/lsp/test_pyright.py`（显式 `MINI_PI_TEST_PYRIGHT`、固定 Pyright 1.1.414）。真实用例覆盖跨文件定义/引用、类型错误、edit 后错误消失、外部改动后新错误、实际 unittest 和进程复用/回收；模型脚本为 FakeLLM，未调用真实 Provider，Provider 联合验收留到 M12。
 
 ## 6. M11：本地 MCP 工具
 

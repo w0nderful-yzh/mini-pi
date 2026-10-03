@@ -43,9 +43,12 @@ class Workspace:
         """经 resolve 边界校验后读取文本。"""
         return self.resolve(path).read_text(encoding=encoding)
 
-    def read_bytes(self, path: str | Path) -> bytes:
+    def read_bytes(self, path: str | Path, *, max_bytes: int | None = None) -> bytes:
         """读取原始字节，供 read 工具做二进制嗅探与解码判断。"""
-        return self.resolve(path).read_bytes()
+        if max_bytes is not None and max_bytes <= 0:
+            raise ValueError("max_bytes must be positive")
+        with self.resolve(path).open("rb") as stream:
+            return stream.read(max_bytes) if max_bytes is not None else stream.read()
 
     def entry_names(self, path: str | Path = ".") -> set[str]:
         """返回目录项的精确名称，避免大小写不敏感文件系统误匹配。"""

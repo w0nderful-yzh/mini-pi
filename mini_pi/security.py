@@ -75,6 +75,15 @@ class SecurityPolicy:
         return self._config.permissions
 
     @property
+    def lsp_server_id(self) -> str | None:
+        """仅返回用户显式启用的 LSP，不从工作区发现或启动服务。"""
+        return next((name for name, server in self._config.servers.items() if server.kind == "lsp"), None)
+
+    def server_timeout(self, server_id: str) -> float:
+        """读取当前明确配置的协议等待时限。"""
+        return self._config.servers[server_id].timeout
+
+    @property
     def secrets(self) -> list[str]:
         """提供已配置环境引用的现存值供 CLI 脱敏，不显示或持久化。"""
         return [

@@ -73,20 +73,31 @@ class Agent:
         """执行一次用户任务；transcript 与步数在多次 run 之间保留。"""
         if not task.strip():
             raise ValueError("task must not be empty")
-        self._refresh_system_prompt()
-        commit_message(self.state, UserMessage(content=task), self._on_message_commit)
-        return run_loop(
-            self.state,
-            self._llm,
-            self._registry,
-            max_steps=self._max_steps,
-            max_run_input_tokens=self._max_run_input_tokens,
-            on_event=self._on_event,
-            on_message_commit=self._on_message_commit,
-            prepare_next_turn=self._prepare_next_turn,
-            provider=self._provider,
-            model=self._model,
-        )
+        try:
+            self._refresh_system_prompt()
+            commit_message(self.state, UserMessage(content=task), self._on_message_commit)
+            result = run_loop(
+                self.state,
+                self._llm,
+                self._registry,
+                max_steps=self._max_steps,
+                max_run_input_tokens=self._max_run_input_tokens,
+                on_event=self._on_event,
+                on_message_commit=self._on_message_commit,
+                prepare_next_turn=self._prepare_next_turn,
+                provider=self._provider,
+                model=self._model,
+            )
+        except BaseException:
+            self._registry.close()
+            raise
+        if result.stop_reason == "cancelled":
+            self._registry.close()
+        return result
+
+    def close(self) -> None:
+        """把资源清理委托给注册表，Agent 不操作进程或文件。"""
+        self._registry.close()
 
     def _refresh_system_prompt(self) -> None:
         """只在目标 sections 变化时向 transcript 追加快照或 patch。"""
@@ -128,6 +139,7 @@ class Agent:
 
     def reset(self) -> None:
         """清空会话状态，system prompt 会在下次 run 时重新注入。"""
+        self.close()
         self.state.messages.clear()
         self.state.step_count = 0
         self.state.modified_files.clear()

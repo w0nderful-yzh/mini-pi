@@ -32,4 +32,5 @@ def build_default_registry(
     registry.register(GitDiffTool(workspace))
     registry.register(GitStatusTool(workspace))
     registry.register(AskUserTool(interaction))
+    registry.configure_lsp(workspace)
     return registry

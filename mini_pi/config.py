@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -13,6 +13,7 @@ from pydantic import (
     StringConstraints,
     ValidationError,
     field_validator,
+    model_validator,
 )
 
 from mini_pi.errors import MiniPiError
@@ -31,6 +32,7 @@ class ServerConfig(BaseModel):
     argv: tuple[Text, ...] = Field(min_length=1)
     cwd: Path | None = None
     env: dict[EnvName, EnvName] = Field(default_factory=dict)
+    timeout: float = Field(default=10.0, gt=0, le=120)
 
     @field_validator("cwd")
     @classmethod
@@ -57,6 +59,13 @@ class UserConfig(BaseModel):
     servers: dict[
         Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$")], ServerConfig
     ] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def single_lsp(self) -> Self:
+        """当前只接一个 LSP server，多语言选择不能靠隐含默认值决定。"""
+        if sum(server.kind == "lsp" for server in self.servers.values()) > 1:
+            raise ValueError("only one LSP server can be configured")
+        return self
 
 
 def load_config(path: Path | None = None) -> UserConfig:

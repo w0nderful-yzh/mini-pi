@@ -459,6 +459,7 @@ def _switch_connection(
 
 @app.command()
 def cli(
+    ctx: typer.Context,
     prompt: str | None = typer.Argument(
         None, help="Task to run once; omit to start an interactive session."
     ),
@@ -519,6 +520,13 @@ def cli(
     if no_session:
         console.print("Memory mode: no durable approval audit.", markup=False)
     agent: Agent | AgentSession | None = None
+
+    def close_runtime() -> None:
+        """命令正常退出或异常退出均关闭当前运行时的外部连接。"""
+        if agent is not None:
+            agent.close()
+
+    ctx.call_on_close(close_runtime)
     startup_error: str | None = None
     config_error: MiniPiError | ValueError | None = None
     if resume is not None or continue_session:

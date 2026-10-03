@@ -981,7 +981,7 @@ AgentSession._runAutoCompaction
 | message_end 持久化 | 采用语义，提交顺序不同 | mini-pi 保持 Fail Fast/durable-first |
 | steering/follow-up 双队列 | 不在最终范围内 | M9.1 已实现独占批次的 ask_user 等待真实回答；宿主函数由 CLI 注入，Loop 不读取终端，不做任意运行中输入队列 |
 | 工具执行前审批 | M9.2 采用 | Registry 参数校验后检查宿主分类和当前模式，CLI 返回单次决定；Session 先 fsync ControlEntry，投影明确排除它；resume 不恢复授权。外部启动按固定配置审批；审批不等于 OS 沙箱 |
-| LSP / MCP 扩展 | M10/M11 规划，未实现 | 只读 LSP、本地 stdio MCP，共用工具权限；受管连接不引入并行工具或通用插件框架 |
+| LSP / MCP 扩展 | M10 只读 Python LSP 已采用，M11 MCP 待实现 | Registry 持有受管 stdio，Session/CLI 关闭；启动审批先写审计，查询按磁盘与版本同步，外部目标不读，server 编辑/命令请求拒绝；不改 Loop 为异步或并行，不引入插件框架 |
 | parallel tools | 延后 | Phase 1 明确串行 |
 | ToolDefinition 四层 | 延后 | 当前 Tool 单层足够 |
 | branch/tree/summary | 延后 | M7 只需线性 leaf |

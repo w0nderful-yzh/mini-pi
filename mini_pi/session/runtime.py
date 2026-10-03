@@ -296,7 +296,7 @@ class AgentSession:
 
     def new(self, *, sessions_root: str | Path | None = None) -> AgentSession:
         """用当前模型和工具创建独立会话，保留旧 JSONL 以供恢复。"""
-        return self.create(
+        runtime = self.create(
             cwd=self._session.header.cwd,
             llm=self._llm,
             registry=self._registry,
@@ -309,6 +309,12 @@ class AgentSession:
             reserve_tokens=self._reserve_tokens,
             on_event=self._on_event,
         )
+        self.close()
+        return runtime
+
+    def close(self) -> None:
+        """关闭当前运行时的外部连接，不删除 Session 或模型消息。"""
+        self._registry.close()
 
     def set_llm(self, llm: LLMClient, *, provider: str, model: str) -> None:
         """替换运行时客户端，仅让后续提交消息使用新的模型元数据。"""
@@ -330,7 +336,11 @@ class AgentSession:
         if not task.strip():
             # 空任务不触发压缩检查，也不产生任何 Session 写入
             raise ValueError("task must not be empty")
-        failure = self._auto_compact_if_needed(pending_task=task)
+        try:
+            failure = self._auto_compact_if_needed(pending_task=task)
+        except BaseException:
+            self.close()
+            raise
         if failure is not None:
             # 压缩没能把投影降到阈值内：这次任务以明确 agent error 结束
             return self._abort_before_prompt(failure)
