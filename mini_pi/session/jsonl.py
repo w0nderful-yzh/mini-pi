@@ -18,7 +18,14 @@ from mini_pi.context.projection import (
 )
 from mini_pi.errors import SessionError
 from mini_pi.llm.types import AssistantMessage, Message, SystemMessage, ToolMessage, Usage
-from mini_pi.session.models import CompactionEntry, MessageEntry, SessionEntry, SessionHeader
+from mini_pi.security import ControlDecision
+from mini_pi.session.models import (
+    CompactionEntry,
+    ControlEntry,
+    MessageEntry,
+    SessionEntry,
+    SessionHeader,
+)
 
 _ENTRY_ADAPTER = TypeAdapter(SessionEntry)
 
@@ -330,6 +337,16 @@ class JsonlSession:
             model=model,
             stepCount=step_count,
             message=message,
+        )
+        self._append(entry)
+        return entry
+
+    def append_control(self, decision: ControlDecision) -> ControlEntry:
+        """在副作用前同步审批事实，原始参数和环境秘密不写入文件。"""
+        entry = ControlEntry(
+            type="control", id=uuid4(), parentId=self._leaf_id,
+            timestamp=datetime.now(timezone.utc), target=decision.target,
+            identity=decision.identity, fingerprint=decision.fingerprint, decision=decision.decision,
         )
         self._append(entry)
         return entry

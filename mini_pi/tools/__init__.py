@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mini_pi.interaction import InteractionHandler
+from mini_pi.security import SecurityPolicy
 from mini_pi.tools.ask_user import AskUserTool
 from mini_pi.tools.bash import BashTool
 from mini_pi.tools.edit import EditTool
@@ -18,10 +19,11 @@ __all__ = ["build_default_registry"]
 
 
 def build_default_registry(
-    workspace: Workspace, *, interaction: InteractionHandler | None = None
+    workspace: Workspace, *, interaction: InteractionHandler | None = None,
+    security: SecurityPolicy | None = None,
 ) -> ToolRegistry:
     """装配默认工具；顺序即 system prompt 与 schema 的展示顺序。"""
-    registry = ToolRegistry()
+    registry = ToolRegistry(security or SecurityPolicy(cwd=workspace.root))
     registry.register(ReadTool(workspace))
     registry.register(WriteTool(workspace))
     registry.register(EditTool(workspace))

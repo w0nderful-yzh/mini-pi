@@ -74,6 +74,7 @@ class _StatusEntry:
 
 
 class GitStatusTool(Tool):
+    access = "read"
     name = "git_status"
     description = (
         "Show the git working tree status of the workspace: branch plus staged, unstaged, "

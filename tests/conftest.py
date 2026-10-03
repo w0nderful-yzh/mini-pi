@@ -96,6 +96,7 @@ class EchoArgs(BaseModel):
 
 class EchoTool(Tool):
     """回显工具，显式声明 modified_files 用于验证改动追踪。"""
+    access = "read"
 
     name = "echo"
     description = "Echo the input text."
@@ -115,6 +116,7 @@ class InspectArgs(BaseModel):
 
 class InspectTool(Tool):
     """只读工具：details 带 path，但不得声明 modified_files。"""
+    access = "read"
 
     name = "inspect"
     description = "Read-only inspection."
@@ -130,6 +132,7 @@ class FailingArgs(BaseModel):
 
 class FailingTool(Tool):
     """可预期失败：抛 ToolError，应转成 error observation。"""
+    access = "read"
 
     name = "fail"
     description = "Always raises ToolError."
@@ -147,6 +150,7 @@ class CrashArgs(BaseModel):
 
 class CrashTool(Tool):
     """程序缺陷：抛非 ToolError 异常，应直接冒泡。"""
+    access = "read"
 
     name = "crash"
     description = "Raises an unexpected exception."

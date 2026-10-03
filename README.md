@@ -84,7 +84,7 @@ Python Coding Agent Harness
 | edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 只做精确唯一匹配，fuzzy 后置 |
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | Shell 边界 | `bash` 是无沙箱本地 shell | 同样是无沙箱本地 shell：`bash` 只约束 `cwd`，可读写 workspace 之外、可联网；文件工具的边界不适用于它。接入不可信外部工具前重新评估执行权限 |
-| 执行权限 | 参考工具执行与 UI 交互分层 | M9.2 规划在 Registry 执行前检查权限，CLI 处理单次批准/拒绝；外部进程先审批启动，授权不从模型或历史会话恢复。审批不提供 OS 沙箱隔离，当前尚未实现 |
+| 执行权限 | 参考工具执行与 UI 交互分层 | M9.2 在 Registry 参数校验后检查权限，CLI 处理单次批准/拒绝/取消；Session 在执行前 fsync 审批身份与指纹，元数据不进入模型、不恢复成授权。本地 server 有独立启动审批入口，连接客户端留到 M10/M11；审批不提供 OS 沙箱隔离 |
 | 上下文估算 | usage 锚点 + 其后消息的字符估算 | M7.8.1 按当前 wire 消息与工具 schema 预测下一请求；M7.8.2 用字符类权重校准 DeepSeek 输入；M7.9.3 按 1/3/7 工具实测把工具开销拆成「一次性模式开销 + 每工具 wire 结构开销 + schema 文本」，避免工具变多后系统性低估；M7.8.3 由运行时持有解析后的窗口策略，压缩决策与 CLI 展示共用。M8.3 的摘要切点与成本模型按片段自身内容估算，不重复计入历史整次请求的 `usage.total_tokens`；旧 usage 锚点仅保留在压缩前诊断，历史 input usage 单独展示 |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
@@ -191,6 +191,8 @@ mini-pi/
 │   ├── errors.py                      # Tool / LLM / Workspace / Session 错误
 │   ├── auth.py                        # API Key 与上次连接的安全持久化
 │   ├── interaction.py                 # 问题 / 回答与宿主交互函数契约
+│   ├── config.py                      # 用户级权限与显式 server 配置
+│   ├── security.py                    # 单次审批、审计契约与启动边界
 │   │
 │   ├── cli/
 │   │   ├── app.py                     # Typer 入口：一次性 / 交互式
@@ -315,6 +317,7 @@ ask_user   关键问题等待真实回答（可选 2–3 个选项，必须独�
 
 - 参数用 pydantic 模型声明，registry 统一校验
 - `ask_user` 通过宿主交互函数取得回答；Loop 不读终端。缺少处理函数或非 TTY 时停止本次 run，不继续让模型猜答案
+- Registry 直接调用也经过权限检查；宿主内置工具明确声明 `Tool.access`，未知工具默认需要审批。模型参数、工具名称或外部只读描述不能改变分类，未来 MCP annotations 不能用作自动授权依据
 - 可预期失败抛 `ToolError`，Loop 转成 `is_error` observation 回传模型
 - 非预期异常直接冒泡（Fail Fast）
 - 文件操作必须经过 `Workspace`，禁止工具自行 `open()`
@@ -353,6 +356,7 @@ mini-pi --continue              # 继续当前 workspace 最近的会话
 mini-pi --banner full            # 显式显示完整 ASCII Banner（默认紧凑启动）
 mini-pi --no-banner             # 不显示启动 Art
 mini-pi --verbose               # 显示工具参数与有界日志
+mini-pi --permissions readonly  # 只允许内置只读工具与问询
 mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入预算
 # REPL 支持 /status /context /tools /sessions /help；持久化模式另有 /new、/compact，纯内存模式支持 /reset
 ```
@@ -379,6 +383,16 @@ mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入
 - 交互输入默认使用 `prompt_toolkit`：输入 `/` 时命令菜单自动出现在输入行下方，Tab（或 `→`）采纳高亮项；只剩**唯一匹配**时 Enter 会先补全、再按一次 Enter 才提交，其他情况 Enter 直接提交原文；纯空白 Enter 留在当前提示符且不启动任务；Ctrl+J 或 Alt+Enter 换行、Ctrl+L 清屏。输入历史保存在 `~/.mini-pi/history`（目录 0700、文件 0600，不写入项目目录，Key 输入走独立的隐藏提示因此不进入历史）。stdin/stdout 不是 tty 时静默回退内建 `input()` 的单行 REPL（按行读取、每行一次提交）；交互终端但输入库缺失时同样回退，并在 REPL 顶部打印一行降级原因，避免静默失去补全与历史
 - Ctrl+C 取消当前任务：任务中的中断由 Loop 在流式与工具边界转成 `cancelled`（不是 `completed`），已提交的消息、工具结果与文件改动保留；工具轮里被中断和未执行的调用会补 cancelled observation 保持 call/result 配对，`bash` 的独立进程组会被整组杀掉。空闲时第一次 Ctrl+C 只提示、连续第二次退出；刚取消任务后的下一次空闲 Ctrl+C 直接退出。一次性模式被中断返回退出码 130。tty 人工记录见 [`docs/benchmarks/m7-d2-tty-input-cancel.md`](docs/benchmarks/m7-d2-tty-input-cancel.md)
 - M9.1 起，模型可调用 `ask_user(question, options?)` 提出关键决策问题。CLI 收起活动区后等待，输入编号选择原始选项或输入自由文本；空白与无效序号只在本地重问，没有默认答案。回答作为带 `source=user` 的 ToolMessage 提交后，同一任务继续；等待期间不发新模型请求、不执行后续工具。`/cancel`、Ctrl+C、EOF 取消任务；stdin/stdout 任一非 TTY 时以 error 停止（一次性退出码 1），可在交互终端恢复会话并提供决定。回答不写入 REPL 输入历史，终端编号和提示不进入模型消息
+- M9.2 的权限配置仅来自 `~/.mini-pi/config.json`，CLI `--permissions workspace|readonly` 可显式覆盖，缺省为 `workspace`。workspace 允许工作区文件读写，**每次 bash 都要审批**；readonly 拒绝 write/edit/bash。审批显示完整已校验参数、工具身份和实际 cwd，先脱敏并转义控制字符；输入 `1/allow` 允许本次、`2/deny` 拒绝本次、`3/cancel` 取消任务，无默认批准。拒绝成为错误 observation，模型可继续已允许的工作；非 TTY 需要审批时停止为 error。批次内逐个审批，取消保留此前事实并补齐剩余结果
+- 审批的 `ControlEntry` 在副作用前写盘，只保存目标、宿主身份、参数/目录/配置指纹和 allow/deny，不保存参数正文或环境秘密，也不参与模型投影、usage 或摘要。写盘失败不执行；resume 和 `/new` 不继承一次性允许。`--no-session` 明确没有持久审批审计。包含新 entry 的会话不能由不认识它的旧版本恢复
+- 一次性进程默认只继承 PATH/HOME/TMPDIR、语言编码和时区环境，Provider Key 和其他任意父环境变量不透传；依赖 DATABASE_URL 等父环境的命令可能因此失败。本地 server 配置采用 `servers.<id> = {"kind":"lsp"或"mcp", "argv":[...], "cwd":绝对路径（可省略）, "env":{"子变量名":"宿主变量名"}}`，env 只存引用且禁止转发 Provider Key。未配置的 server 拒绝启动，固定 argv 不拼 shell；当前宿主 API 为 `SecurityPolicy.start_server(id)`，返回进程的协议与关闭生命周期由后续 LSP/MCP 客户端负责，CLI 尚无语义查询或 MCP 调用入口
+
+最小用户级配置：
+
+```json
+{"permissions": "readonly", "servers": {}}
+```
+
 - `--max-run-input-tokens` 显式启用每次 `run()` 的累计输入预算，默认关闭。Loop 在下一次模型请求前用 Provider 已报告 input 加当前投影估算检查；接近上限时只提示模型收敛一次，预计超限则以 `budget_limit` 停止。它是请求边界控制，单次请求仍可能超过预测；已提交的消息、工具结果和文件改动保留，交互模式下一条任务获得新预算
 
 ---
@@ -419,7 +433,7 @@ uv run pytest -m integration        # 需要 API Key
 | M7.8 | Runtime Hardening：统一请求口径、CJK 安全估算、窗口配置化、RunContext 与 turn 边界、CI | 已完成（M7.8.0–M7.8.6；[最终验收](docs/benchmarks/m7-8-final-acceptance.md)：566 passed、5 deselected，DeepSeek 四组实测；[远端 CI](https://github.com/w0nderful-yzh/mini-pi/actions/runs/36373856072) 已通过） |
 | M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 已完成（M7.9.1–M7.9.4；[任务基线](docs/benchmarks/m7-9-baseline.md)：真实 DeepSeek 4/4 completed；[视觉验收](docs/benchmarks/m7-9-4-cli-visual.md)：80/40 列、`TERM=dumb`、`NO_COLOR`、非 tty 全部通过） |
 | M8 | 成本效率评测、CLI 与上下文优化 | 已收尾于 M8.3；[M8.2](docs/benchmarks/m8-2-prompt-batching.md)合批 Prompt、[M8.3](docs/benchmarks/m8-3-context-cost.md)8k 候选未采纳；M8.4–M8.6 取消排期，未实现 |
-| M9 | 简单 MITL 与安全控制 | M9.1 `ask_user` 已实现；下一批 M9.2 权限检查与审批 |
+| M9 | 简单 MITL 与安全控制 | M9.1 问询、M9.2 权限与单次审批已实现；下一批 M10.1 只读 LSP |
 | M10 | 只读 LSP | 已规划、未实现；定义、引用、诊断与版本同步，首先验收 Python server |
 | M11 | 本地 MCP | 已规划、未实现；stdio、白名单工具、schema、权限与严格恢复 |
 | M12 | 联合验收与项目结束 | 已规划；四项能力闭环后停止新增功能，保留缺陷与必要兼容修复 |
@@ -439,7 +453,7 @@ M7.9 完成语义、真实任务基线与 CLI 视觉整理（已完成）
   ↓
 M8 评测扩充 / CLI 再整理 / 上下文修正（已收尾）
   ↓
-M9.2 权限控制（M9.1 问询已实现）
+M9 问询与权限控制（已完成）
   ↓
 M10 只读 LSP → M11 本地 MCP
   ↓
@@ -503,14 +517,14 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 - `read` 分页输出前仍会读取整个文件；多候选 `/sessions` 与 `--continue` 会逐个完整加载会话，规模表现待 M7.9.3 测量。损坏候选会严格阻断列表和自动恢复，不静默跳过
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行
-- **`bash` 不是沙箱**：文件工具的 Workspace 边界只约束 read/write/edit/search/git_diff，`bash` 是 `cwd = workspace root` 的无沙箱本地 shell（可以读写 workspace 之外、可以联网），也没有危险命令确认机制
+- **审批不是沙箱**：获准的 `bash` 是 `cwd = workspace root` 的无沙箱本地 shell（可以读写 workspace 之外、可以联网、读取用户凭据文件）。readonly 只限制客户端发起的操作，不能证明 git 或未来 server 进程没有副作用；明确环境隔离也不能阻止进程自行读取文件
 - 当前请求按 wire 消息与工具 schema 估算，字符类权重与工具模式开销都用真实 DeepSeek input usage 校准（[M7.8.2 四组固定样本](docs/benchmarks/m7-8-token-estimation.md)、[M7.9.3 工具数扫描与复验](docs/benchmarks/m7-9-baseline.md)）。工具开销按「一次性模式开销 + 每工具 wire 结构开销 + schema 文本」计算，0–7 个工具实测偏差在 ±5% 内；M9.1 默认增加到八工具，未完成八工具的完整估算校准；OpenAI 与接近 1M 窗口的会话仍未量化。摘要切点与成本模型按片段自身消息内容估算，历史整次请求 usage 不属于单条消息或截取区域，预测始终标为 estimated
 - 手动 `/compact`、prompt 前与工具轮之间的窗口触发，以及旧工具结果的成本感知提前压缩都已可用；[M8.3](docs/benchmarks/m8-3-context-cost.md)已记录真实任务逐请求 input 和全部摘要开销，默认成本近期保留目标仍为 20k，没有真实计费结论
 - 已知模型的窗口都是 1M 级；自定义小窗口的自动压缩只经离线夹具验证，尚无真实长任务样本。M7.7b 只用 DeepSeek 验证了手动 `/compact` 事务后的继续与 resume，OpenAI 因未配置 Key 未测
 - `prompt_toolkit` 是可降级能力：非 tty 或未安装时回退单行 REPL；交互终端缺依赖会在 REPL 顶部打印降级原因（补全/历史/多行编辑不可用）
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
 - 支持平台为 macOS / Linux；进程组与文件权限语义依赖 POSIX，Windows 未支持
-- 简单 MITL 已实现；权限控制 / LSP / MCP 尚未实现，最后路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)；Task / Memory / Multi-Agent 不在本项目范围内
+- 简单 MITL 与工具权限已实现；LSP / MCP 客户端尚未实现，最后路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)；Task / Memory / Multi-Agent 不在本项目范围内
 
 ---
 

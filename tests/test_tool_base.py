@@ -11,6 +11,7 @@ class EchoArgs(BaseModel):
 
 class EchoTool(Tool):
     """测试用最小工具：原样返回输入并附带长度。"""
+    access = "read"
 
     name = "echo"
     description = "Echo the provided text."

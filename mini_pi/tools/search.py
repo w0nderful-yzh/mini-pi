@@ -36,6 +36,7 @@ class SearchArgs(BaseModel):
 
 
 class SearchTool(Tool):
+    access = "read"
     name = "search"
     description = "Search text or regex across workspace files and return file:line:text matches. Skips .git/.venv/node_modules and binary files."
     args_model = SearchArgs

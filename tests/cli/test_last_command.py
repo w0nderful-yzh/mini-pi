@@ -12,6 +12,8 @@ from typer.testing import CliRunner
 from mini_pi.cli import style
 from mini_pi.cli.app import _last_options, app
 from mini_pi.cli.status import render_last_run
+from mini_pi.interaction import ApprovalResponse
+from mini_pi.security import SecurityPolicy
 from mini_pi.session.jsonl import JsonlSession
 from mini_pi.session.runtime import AgentSession
 from mini_pi.tools import build_default_registry
@@ -74,7 +76,9 @@ def test_last_marks_nonzero_shell_exit_as_failure(tmp_path: Path) -> None:
             assistant(tool_calls=[tool_call("c1", "bash", {"command": "false"})]),
             assistant("done"),
         ],
-        build_default_registry(Workspace(tmp_path)),
+        build_default_registry(Workspace(tmp_path), security=SecurityPolicy(
+            cwd=tmp_path, approval=lambda request: ApprovalResponse("allow")
+        )),
     )
     console, stream = _console()
 

@@ -24,6 +24,7 @@ class InspectArgs(BaseModel):
 
 class InspectTool(Tool):
     """返回模型 observation 与仅供展示的不同内容。"""
+    access = "read"
 
     name: ClassVar[str] = "inspect_boundary"
     description: ClassVar[str] = "Inspect the display boundary."

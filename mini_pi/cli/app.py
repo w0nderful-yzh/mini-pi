@@ -22,7 +22,7 @@ from mini_pi.auth import (
 from mini_pi.cli.banner import render_banner, render_startup
 from mini_pi.cli.console import ConsoleRenderer
 from mini_pi.cli.input import create_repl_reader
-from mini_pi.cli.interaction import create_interaction_handler
+from mini_pi.cli.interaction import create_approval_handler, create_interaction_handler
 from mini_pi.cli.sessions import render_sessions
 from mini_pi.cli.status import (
     current_context_tokens,
@@ -32,15 +32,18 @@ from mini_pi.cli.status import (
     render_status,
     render_tools,
 )
+from mini_pi.config import load_config
 from mini_pi.context.policy import DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS
 from mini_pi.errors import MiniPiError, MissingAPIKeyError, SessionError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
 from mini_pi.llm.openai_client import OpenAIClient
 from mini_pi.llm.types import UserMessage
+from mini_pi.security import SecurityPolicy
 from mini_pi.session.jsonl import latest_session_path
 from mini_pi.session.runtime import AgentSession
 from mini_pi.tools import build_default_registry
+from mini_pi.tools.registry import ToolRegistry
 from mini_pi.workspace.workspace import Workspace
 
 app = typer.Typer(add_completion=False, help="mini-pi: a lightweight Python coding agent")
@@ -190,6 +193,7 @@ def _prompt_and_build(
     console: Console,
     workspace: Workspace,
     max_steps: int,
+    security: SecurityPolicy | None = None,
     max_run_input_tokens: int | None = None,
     context_window: int | None = None,
     reserve_tokens: int = DEFAULT_RESERVE_TOKENS,
@@ -209,6 +213,7 @@ def _prompt_and_build(
         return None
     save_connection(provider, api_key, model)
     return _build_runtime(
+        security=security,
         llm=create_llm(provider, model, api_key=api_key),
         workspace=workspace,
         max_steps=max_steps,
@@ -222,11 +227,22 @@ def _prompt_and_build(
     )
 
 
+def _build_registry(
+    workspace: Workspace, renderer: ConsoleRenderer, security: SecurityPolicy | None,
+) -> ToolRegistry:
+    """装配权限和交互，所有模型调用仍通过 Registry 的执行前检查。"""
+    return build_default_registry(
+        workspace, interaction=create_interaction_handler(renderer),
+        security=security or SecurityPolicy(cwd=workspace.root, approval=create_approval_handler(renderer)),
+    )
+
+
 def _build_agent(
     *,
     llm: LLMClient,
     workspace: Workspace,
     max_steps: int,
+    security: SecurityPolicy | None = None,
     max_run_input_tokens: int | None = None,
     context_window: int | None = None,
     reserve_tokens: int = DEFAULT_RESERVE_TOKENS,
@@ -237,7 +253,7 @@ def _build_agent(
     """装配纯内存 Agent（--no-session）；事件走 renderer，不接持久化。"""
     return Agent(
         llm=llm,
-        registry=build_default_registry(workspace, interaction=create_interaction_handler(renderer)),
+        registry=_build_registry(workspace, renderer, security),
         cwd=workspace.root,
         max_steps=max_steps,
         max_run_input_tokens=max_run_input_tokens,
@@ -254,6 +270,7 @@ def _build_runtime(
     llm: LLMClient,
     workspace: Workspace,
     max_steps: int,
+    security: SecurityPolicy | None = None,
     max_run_input_tokens: int | None = None,
     context_window: int | None = None,
     reserve_tokens: int = DEFAULT_RESERVE_TOKENS,
@@ -265,6 +282,7 @@ def _build_runtime(
     """按 CLI 模式装配纯内存 Agent 或持久化 AgentSession。"""
     if no_session:
         return _build_agent(
+            security=security,
             llm=llm,
             workspace=workspace,
             max_steps=max_steps,
@@ -278,7 +296,7 @@ def _build_runtime(
     return AgentSession.create(
         cwd=workspace.root,
         llm=llm,
-        registry=build_default_registry(workspace, interaction=create_interaction_handler(renderer)),
+        registry=_build_registry(workspace, renderer, security),
         provider=provider,
         model=model,
         max_steps=max_steps,
@@ -352,6 +370,7 @@ def _switch_connection(
     model: str,
     workspace: Workspace,
     max_steps: int,
+    security: SecurityPolicy | None = None,
     max_run_input_tokens: int | None = None,
     context_window: int | None = None,
     reserve_tokens: int = DEFAULT_RESERVE_TOKENS,
@@ -403,6 +422,7 @@ def _switch_connection(
         new_llm = create_llm(chosen_provider, chosen_model, api_key=api_key)
         if agent is None:
             new_agent: Agent | AgentSession = _build_runtime(
+                security=security,
                 llm=new_llm,
                 workspace=workspace,
                 max_steps=max_steps,
@@ -460,6 +480,7 @@ def cli(
         DEFAULT_RESERVE_TOKENS, "--reserve-tokens", min=0,
         help="Tokens reserved below the context window for the next response.",
     ),
+    permissions: str | None = typer.Option(None, "--permissions", help="Tool permissions: workspace or readonly; not an OS sandbox."),
     no_session: bool = typer.Option(False, "--no-session", help="Keep history in memory only."),
     no_banner: bool = typer.Option(False, "--no-banner", help="Do not print the startup banner."),
     banner: str = typer.Option("compact", "--banner", help="Startup art: compact or full."),
@@ -479,11 +500,24 @@ def cli(
     if no_banner and banner == "full":
         raise typer.BadParameter("--no-banner cannot be combined with --banner full")
 
+    if permissions is not None and permissions not in {"workspace", "readonly"}:
+        raise typer.BadParameter("--permissions must be workspace or readonly")
+    try:
+        config = load_config()
+    except MiniPiError as exc:
+        Console(stderr=True).print(str(exc), markup=False)
+        raise typer.Exit(code=1) from exc
+    if permissions is not None:
+        config = config.model_copy(update={"permissions": permissions})
     workspace = Workspace(cwd)
     # 关闭 Rich 的自动高亮：它会按数字/字符串上色，切碎这里刻意设计的语义色
     console = Console(highlight=False)
     # --no-banner 只关启动 Art：思考/活动指示是 tty 内的瞬时状态，不应被它带走
     renderer = ConsoleRenderer(console, verbose=verbose)
+    security = SecurityPolicy(cwd=workspace.root, config=config, approval=create_approval_handler(renderer))
+    console.print(f"Permissions: {security.mode}", markup=False)
+    if no_session:
+        console.print("Memory mode: no durable approval audit.", markup=False)
     agent: Agent | AgentSession | None = None
     startup_error: str | None = None
     config_error: MiniPiError | ValueError | None = None
@@ -492,9 +526,7 @@ def cli(
             path = resume if resume is not None else latest_session_path(workspace.root)
             agent = AgentSession.resume(
                 path,
-                registry=build_default_registry(
-                    workspace, interaction=create_interaction_handler(renderer)
-                ),
+                registry=_build_registry(workspace, renderer, security),
                 cwd=workspace.root,
                 provider=provider,
                 model=model,
@@ -512,6 +544,7 @@ def cli(
         try:
             provider, model = _resolve_connection(provider, model)
             new_agent = _build_runtime(
+                security=security,
                 llm=create_llm(provider, model),
                 workspace=workspace,
                 max_steps=max_steps,
@@ -540,7 +573,7 @@ def cli(
     if isinstance(agent, AgentSession):
         provider, model = agent.provider, agent.model
     if agent is not None:
-        renderer.set_secrets(_configured_keys())
+        renderer.set_secrets(_configured_keys() + security.secrets)
 
     if prompt is not None:
         if agent is None:
@@ -578,6 +611,7 @@ def cli(
     ):
         # 交互启动缺 Key：直接提示输入，免去用户记命令的成本
         agent = _prompt_and_build(
+            security=security,
             console=console,
             workspace=workspace,
             max_steps=max_steps,
@@ -591,7 +625,7 @@ def cli(
         )
         if agent is not None:
             startup_error = None
-            renderer.set_secrets(_configured_keys())
+            renderer.set_secrets(_configured_keys() + security.secrets)
     session_label = (
         agent.session_id[:8]
         if isinstance(agent, AgentSession)
@@ -727,6 +761,7 @@ def cli(
             continue
         if _is_model_command(stripped):
             switched = _switch_connection(
+                security=security,
                 console=console,
                 agent=agent,
                 provider=provider,
@@ -742,7 +777,7 @@ def cli(
             )
             if switched is not None:
                 agent, provider, model = switched
-                renderer.set_secrets(_configured_keys())
+                renderer.set_secrets(_configured_keys() + security.secrets)
             continue
         if not stripped:
             continue

@@ -25,6 +25,7 @@ class EditArgs(BaseModel):
 
 
 class EditTool(Tool):
+    access = "write"
     name = "edit"
     description = "Apply exact, unique text replacements to an existing file. All edits match the original content and must not overlap. Returns a unified diff."
     args_model = EditArgs

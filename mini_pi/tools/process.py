@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Literal
 
+from mini_pi.security import child_environment
+
 # 单个流（stdout / stderr）的内存上限，超出部分按 keep 方向丢弃
 DEFAULT_MAX_OUTPUT_BYTES = 1_000_000
 
@@ -88,6 +90,7 @@ def run_process(
         bufsize=0,
         # 独立进程组，超时可整组杀掉，避免子孙进程逃逸
         start_new_session=True,
+        env=child_environment(),
     )
     return _run_bounded(process, timeout_s, max_output_bytes, keep)
 
@@ -109,6 +112,7 @@ def run_shell(
         stderr=subprocess.PIPE,
         bufsize=0,
         start_new_session=True,
+        env=child_environment(),
     )
     return _run_bounded(process, timeout_s, max_output_bytes, keep)
 

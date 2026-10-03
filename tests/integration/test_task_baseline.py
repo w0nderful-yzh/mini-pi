@@ -16,7 +16,9 @@ from pathlib import Path
 import pytest
 
 from mini_pi.agent.events import AgentEndEvent, AgentEvent
+from mini_pi.interaction import ApprovalResponse
 from mini_pi.llm.types import AssistantMessage
+from mini_pi.security import SecurityPolicy
 from mini_pi.session.jsonl import JsonlSession
 from mini_pi.session.runtime import AgentSession
 from mini_pi.session.usage import recent_session_run_usage
@@ -175,7 +177,9 @@ def run_task(spec: TaskSpec, tmp_path: Path) -> TaskMetrics:
     runtime = AgentSession.create(
         cwd=workspace,
         llm=llm,
-        registry=build_default_registry(Workspace(workspace)),
+        registry=build_default_registry(Workspace(workspace), security=SecurityPolicy(
+            cwd=workspace, approval=lambda request: ApprovalResponse("allow")
+        )),
         provider="deepseek",
         model="deepseek-chat",
         sessions_root=tmp_path / "sessions",

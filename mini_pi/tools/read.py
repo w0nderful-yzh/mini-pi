@@ -17,6 +17,7 @@ class ReadArgs(BaseModel):
 
 
 class ReadTool(Tool):
+    access = "read"
     name = "read"
     description = "Read a UTF-8 text file inside the workspace. Supports offset/limit paging and reports a continuation hint when truncated."
     args_model = ReadArgs

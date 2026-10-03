@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, Field
 
 from mini_pi.llm.types import ToolSchema
+from mini_pi.security import ToolAccess
 
 
 class ToolResult(BaseModel):
@@ -26,6 +28,12 @@ class Tool(ABC):
     description: ClassVar[str]
     args_model: ClassVar[type[BaseModel]]
     exclusive_batch: ClassVar[bool] = False
+    access: ClassVar[ToolAccess] = "approval"
+
+    @property
+    def execution_cwd(self) -> Path | None:
+        """外部工具默认使用宿主目录；固定 cwd 的 shell 显式覆盖。"""
+        return None
 
     def schema(self) -> ToolSchema:
         """由 pydantic 参数模型生成 JSON Schema，交给模型做参数约束。"""

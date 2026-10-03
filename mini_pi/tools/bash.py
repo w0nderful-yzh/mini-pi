@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field
 
 from mini_pi.tools.base import Tool, ToolResult
@@ -58,3 +60,8 @@ class BashTool(Tool):
                 "stderr_truncated": stderr_truncated or result.stderr_truncated,
             },
         )
+
+    @property
+    def execution_cwd(self) -> Path:
+        """审批必须展示 shell 实际的固定目录。"""
+        return self._workspace.root

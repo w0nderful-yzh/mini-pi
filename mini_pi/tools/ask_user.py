@@ -46,6 +46,7 @@ class AskUserArgs(BaseModel):
 class AskUserTool(Tool):
     """通过宿主函数同步询问用户，独占工具批次以避免未决策就发生副作用。"""
 
+    access = "interaction"
     name = "ask_user"
     description = (
         "Ask one necessary human decision and wait for the answer. "

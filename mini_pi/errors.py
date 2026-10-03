@@ -13,6 +13,10 @@ class InteractionUnavailableError(MiniPiError):
     """关键问询缺少交互端；必须停止 run，不能当普通工具错误让模型继续猜。"""
 
 
+class PermissionDeniedError(ToolError):
+    """宿主拒绝当前操作；模型可选择已获准的工具继续工作。"""
+
+
 class ToolNotFoundError(ToolError):
     """模型请求了未注册的工具。"""
 

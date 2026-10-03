@@ -35,6 +35,8 @@ milestone history or delivery logs into this file.
 - Workspace resolves a path and then verifies it is still inside the root; `../`, absolute paths and symlink escapes raise `WorkspaceViolationError`. Never rewrite a bad path into a safe one. File writes replace atomically.
 - `edit` requires exact, unique matches: empty old text, no match, multiple matches, overlapping edits and no-op replacements all fail explicitly, applied back to front. `read` and `bash` keep their line/byte caps and truncation hints.
 - File tools are bounded by Workspace; `bash` is an unsandboxed local shell with only cwd fixed, and it can reach outside the workspace and the network. Never call it a sandbox in README, CLI output or plans. Changing a security boundary needs its own design and verification.
+- Registry checks host-defined tool access after argument validation and before execution. Unknown tools require approval; external annotations and model arguments cannot grant access. Approved processes remain unsandboxed and use an explicit minimal environment.
+- Session persists each allow/deny ControlEntry before the approved side effect. Control entries never enter model projections, usage or summaries and never restore authorization; audit failure prevents execution.
 
 ## LLM, Session, Context
 

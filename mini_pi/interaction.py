@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,3 +30,26 @@ class InteractionResponse:
 
 
 InteractionHandler = Callable[[InteractionRequest], InteractionResponse]
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalRequest:
+    """完整的一次性执行请求；参数已序列化，不向交互端暴露可变工具对象。"""
+
+    target: str
+    identity: str
+    parameters: str
+    cwd: str
+    fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
+class ApprovalResponse:
+    """宿主单次审批结果，不接受模型文本或隐含默认值。"""
+
+    decision: Literal["allow", "deny", "cancel"]
+
+    def __post_init__(self) -> None:
+        """非法宿主决定属于程序错误，不能隐式当作允许。"""
+        if self.decision not in {"allow", "deny", "cancel"}:
+            raise ValueError("invalid approval decision")

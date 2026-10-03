@@ -53,6 +53,7 @@ class InterruptArgs(BaseModel):
 
 class InterruptTool(Tool):
     """执行时抛 KeyboardInterrupt，模拟工具内部被 Ctrl+C 打断。"""
+    access = "read"
 
     name = "interrupt"
     description = "Raise KeyboardInterrupt while executing."

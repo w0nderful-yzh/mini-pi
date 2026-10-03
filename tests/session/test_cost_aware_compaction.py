@@ -35,6 +35,7 @@ class _DumpArgs(BaseModel):
 
 class SizedTool(Tool):
     """按调用序号返回不同长度的输出；计数执行次数以证明工具不重放。"""
+    access = "read"
 
     name = "dump"
     description = "Return a scripted output."

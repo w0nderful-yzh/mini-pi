@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+import json
 import sys
+from typing import Any
 
 from mini_pi.cli.console import ConsoleRenderer
 from mini_pi.errors import InteractionUnavailableError
-from mini_pi.interaction import InteractionHandler, InteractionRequest, InteractionResponse
+from mini_pi.interaction import (
+    ApprovalRequest,
+    ApprovalResponse,
+    InteractionHandler,
+    InteractionRequest,
+    InteractionResponse,
+)
+from mini_pi.security import ApprovalHandler
 
 
 def _interactive_terminal(renderer: ConsoleRenderer) -> bool:
@@ -56,3 +65,40 @@ def create_interaction_handler(renderer: ConsoleRenderer) -> InteractionHandler:
             return InteractionResponse(answer)
 
     return ask
+
+
+def create_approval_handler(renderer: ConsoleRenderer) -> ApprovalHandler:
+    """完整展示当前请求并只接受允许、拒绝或取消，不设置默认批准。"""
+    def approve(request: ApprovalRequest) -> ApprovalResponse:
+        """先检查双向 TTY，再取得本次决定；所有显示先脱敏。"""
+        if not _interactive_terminal(renderer):
+            raise InteractionUnavailableError("approval requires an interactive terminal; resume there to decide")
+        renderer.prepare_for_interaction()
+        # JSON 将控制字符转成转义文本，不能让待执行参数操纵终端隐藏真实行为。
+        def redact_values(value: Any) -> Any:
+            """序列化前递归脱敏，秘密包含引号或反斜杠时也不能漏出转义值。"""
+            if isinstance(value, str):
+                return renderer.redact(value)
+            if isinstance(value, dict):
+                return {renderer.redact(key): redact_values(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [redact_values(item) for item in value]
+            return value
+
+        payload = {"target": request.target, "identity": request.identity,
+                   "cwd": request.cwd, "parameters": json.loads(request.parameters)}
+        details = json.dumps(redact_values(payload), ensure_ascii=False, indent=2)
+        details = "".join(char if char.isprintable() or char == "\n" else f"\\U{ord(char):08x}"
+                          for char in details)
+        renderer.console.print("Approval needed · allow once / deny once / cancel", markup=False)
+        renderer.console.print(details, markup=False, highlight=False)
+        renderer.console.print("1. Allow once   2. Deny once   3. Cancel task", markup=False)
+        while True:
+            text = input("Approve › ").strip().lower()
+            choices = {"1": "allow", "allow": "allow", "2": "deny", "deny": "deny",
+                       "3": "cancel", "cancel": "cancel", "/cancel": "cancel"}
+            if text in choices:
+                return ApprovalResponse(choices[text])
+            renderer.console.print("Choose 1, 2 or 3; no default approval.", markup=False)
+
+    return approve

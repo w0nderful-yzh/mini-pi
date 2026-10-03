@@ -14,6 +14,7 @@ class WriteArgs(BaseModel):
 
 
 class WriteTool(Tool):
+    access = "write"
     name = "write"
     description = "Create or fully rewrite a file inside the workspace. Parent directories are created automatically and writes are atomic."
     args_model = WriteArgs

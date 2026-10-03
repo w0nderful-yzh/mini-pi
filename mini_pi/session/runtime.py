@@ -37,6 +37,7 @@ from mini_pi.llm.base import LLMClient
 from mini_pi.llm.deepseek_client import DeepSeekClient
 from mini_pi.llm.openai_client import OpenAIClient
 from mini_pi.llm.types import AssistantMessage, Message, ToolSchema
+from mini_pi.security import ControlDecision
 from mini_pi.session.jsonl import JsonlSession
 from mini_pi.session.usage import (
     RunToolCall,
@@ -107,7 +108,7 @@ class AgentSession:
         """持有会话/依赖并构建 Agent，将提交回调接到自身的 durable-first 入口。"""
         self._session = session
         self._llm = llm
-        self._registry = registry
+        self._registry = registry.for_session(self._commit_control)
         self._max_steps = max_steps
         self._max_run_input_tokens = max_run_input_tokens
         self._on_event = on_event
@@ -118,7 +119,7 @@ class AgentSession:
         self._context_policy = context_policy
         self._agent = Agent(
             llm=llm,
-            registry=registry,
+            registry=self._registry,
             cwd=session.header.cwd,
             max_steps=max_steps,
             max_run_input_tokens=max_run_input_tokens,
@@ -129,6 +130,10 @@ class AgentSession:
             provider=provider,
             model=model,
         )
+
+    def _commit_control(self, decision: ControlDecision) -> None:
+        """宿主决定经现有 fsync 提交后才允许工具或进程执行。"""
+        self._session.append_control(decision)
 
     @classmethod
     def create(

@@ -57,6 +57,7 @@ class _DumpArgs(BaseModel):
 
 class GiantOutputTool(Tool):
     """固定大输出工具；计数执行次数，用于证明终止后工具不重放。"""
+    access = "read"
 
     name = "dump"
     description = "Return a fixed large output."

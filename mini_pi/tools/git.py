@@ -17,6 +17,7 @@ class GitDiffArgs(BaseModel):
 
 
 class GitDiffTool(Tool):
+    access = "read"
     name = "git_diff"
     description = "Show uncommitted changes in the workspace git repository as a unified diff."
     args_model = GitDiffArgs

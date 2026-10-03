@@ -15,6 +15,7 @@ class AddArgs(BaseModel):
 
 class AddTool(Tool):
     """测试用加法工具，带默认参数以验证校验与填充。"""
+    access = "read"
 
     name = "add"
     description = "Add two integers."
@@ -26,6 +27,7 @@ class AddTool(Tool):
 
 class ExplodingTool(Tool):
     """始终抛 ToolError，验证错误向上透传而不被 Registry 吞掉。"""
+    access = "read"
 
     name = "explode"
     description = "Always fails with ToolError."
@@ -45,6 +47,7 @@ class NestedArgs(BaseModel):
 
 class NestedTool(Tool):
     """嵌套参数工具，验证 Registry 传入的是模型对象而不是 dict。"""
+    access = "read"
 
     name = "nested"
     description = "Tool with nested pydantic args."

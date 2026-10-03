@@ -41,6 +41,7 @@ class _DumpArgs(BaseModel):
 
 class LargeOutputTool(Tool):
     """固定大输出工具；计数执行次数，用于证明压缩不会重放已执行的工具。"""
+    access = "read"
 
     name = "dump"
     description = "Return a fixed large output."

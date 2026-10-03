@@ -79,4 +79,14 @@ class CompactionEntry(SessionEntryBase):
     modified_files: list[str] = Field(default_factory=list, alias="modifiedFiles")
 
 
-SessionEntry = Annotated[MessageEntry | CompactionEntry, Field(discriminator="type")]
+class ControlEntry(SessionEntryBase):
+    """执行前的宿主审批事实，仅保存身份和指纹，不恢复成授权。"""
+
+    type: Literal["control"]
+    target: NonEmptyString
+    identity: NonEmptyString
+    fingerprint: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
+    decision: Literal["allow", "deny"]
+
+
+SessionEntry = Annotated[MessageEntry | CompactionEntry | ControlEntry, Field(discriminator="type")]
