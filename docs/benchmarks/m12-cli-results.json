@@ -1,0 +1,73 @@
+{
+  "artifact_root": "/private/var/folders/mq/qxsqs5t16g5dpy_fcgrl0xlm0000gn/T/mini-pi-m12-cli-dwewlqh3",
+  "model": "FakeLLM",
+  "tty": "real PTY with scripted input",
+  "cases": [
+    {
+      "columns": 80,
+      "no_color": false,
+      "interaction": true,
+      "approval_deny_allow": true,
+      "lsp_mcp": true,
+      "cancel_shell_and_servers": true,
+      "new": true,
+      "eof": true,
+      "resume": true,
+      "secret_redacted": true,
+      "processes_reaped": true
+    },
+    {
+      "columns": 40,
+      "no_color": false,
+      "interaction": true,
+      "approval_deny_allow": true,
+      "lsp_mcp": true,
+      "cancel_shell_and_servers": true,
+      "new": true,
+      "eof": true,
+      "resume": true,
+      "secret_redacted": true,
+      "processes_reaped": true
+    },
+    {
+      "columns": 80,
+      "no_color": true,
+      "interaction": true,
+      "approval_deny_allow": true,
+      "lsp_mcp": true,
+      "cancel_shell_and_servers": true,
+      "new": true,
+      "eof": true,
+      "resume": true,
+      "secret_redacted": true,
+      "processes_reaped": true
+    },
+    {
+      "mode": "success",
+      "exit_code": 0,
+      "no_ansi": true,
+      "no_unapproved_effect": true,
+      "strict_replay": true
+    },
+    {
+      "mode": "approval",
+      "exit_code": 1,
+      "no_ansi": true,
+      "no_unapproved_effect": true,
+      "strict_replay": true
+    },
+    {
+      "mode": "question",
+      "exit_code": 1,
+      "no_ansi": true,
+      "no_unapproved_effect": true,
+      "strict_replay": true
+    },
+    {
+      "mode": "one-shot-tty-EOF",
+      "exit_code": 130,
+      "strict_replay": true,
+      "no_model_continuation": true
+    }
+  ]
+}

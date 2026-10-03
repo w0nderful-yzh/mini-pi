@@ -313,6 +313,11 @@ class ConsoleRenderer:
         """登记已配置凭据，避免 verbose 输出中直接出现其值。"""
         self._secrets = tuple(value for value in values if value)
 
+    def add_secrets(self, values: list[str]) -> None:
+        """凭据刷新时保留旧值的屏蔽，历史结果和当前审批都不能泄漏。"""
+        secrets = set(self._secrets).union(value for value in values if value)
+        self._secrets = tuple(sorted(secrets, key=len, reverse=True))
+
     def _redact(self, value: str) -> str:
         """屏蔽已知凭据与常见 API Key 赋值形式。"""
         return redact_text(value, self._secrets)

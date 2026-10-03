@@ -2,6 +2,8 @@
 
 基于 Python 从零实现的轻量级 Coding Agent Harness，参考 [Pi](https://github.com/earendil-works/pi) / Claude Code 一类终端编程助手的架构思想。
 
+M12 联合验收已完成，项目功能范围收尾。后续只维护缺陷与必要兼容修复；验收范围与未测项见 [最终验收](docs/benchmarks/m12-final-acceptance.md)。
+
 项目目标不是“聊天机器人套 Shell”，而是一个真正具备自主代码操作能力的本地 AI 编程助手：
 
 ```text
@@ -79,7 +81,7 @@ Python Coding Agent Harness
 | Tool Call 拼装 | 按 `index` 聚合 SSE 增量，结束后解析 JSON | 复刻：`_AssistantAccumulator`，解析失败显式报错（不静默返回 `{}`） |
 | 工具错误 | 所有异常转成 `isError` ToolResult 回传模型 | ToolError 转 `is_error` observation；非预期异常直接冒泡（Fail Fast） |
 | 工具执行 | prepare 串行 + execute 并行 | 全部串行，未实现并行执行 |
-| 工具定义 | Schema → Definition → AgentTool → Renderer 四层 | 简化为 `pydantic Args + Tool` 单层，渲染由 CLI 事件层承担 |
+| 工具定义 | Schema → Definition → AgentTool → Renderer 四层 | 内置 `pydantic Args + Tool`，MCP 保留原始受支持 JSON Schema；Registry 统一在审批前校验，渲染由 CLI 事件层承担 |
 | 输出截断 | 行数 + 字节双限，附可操作续读提示 | 复刻（read / bash / search） |
 | edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 只做精确唯一匹配，fuzzy 后置 |
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
@@ -170,7 +172,7 @@ Agent Runtime 自己实现。
 
 ## 5. 目录结构
 
-当前实现范围（M1–M11 已落地，M8 收尾于 M8.3，M12 联合验收待完成）：
+当前实现范围（M12 已验收收尾；M8 仅实现至 M8.3，取消项保持未实现）：
 
 ```text
 mini-pi/
@@ -185,7 +187,7 @@ mini-pi/
 │   │   ├── phase1-core-runtime.md         # M1-M6 实施计划
 │   │   ├── phase2-session-context.md      # M7 设计与实施计划
 │   │   └── phase3-runtime-hardening.md    # M8 收尾及 M9-M12 最终能力计划
-│   └── benchmarks/                    # M7 用量 / 成本 / 验收记录与离线 tty 驱动器
+│   └── benchmarks/                    # 用量 / 成本 / 最终验收与复现驱动器
 │
 ├── mini_pi/
 │   ├── errors.py                      # Tool / LLM / Workspace / Session 错误
@@ -230,11 +232,13 @@ mini-pi/
 │   │   ├── search.py
 │   │   ├── bash.py
 │   │   ├── ask_user.py
+│   │   ├── lsp_definition.py / lsp_references.py / lsp_diagnostics.py
+│   │   ├── mcp.py                     # 原始 Schema、外部身份与有界结果
 │   │   ├── git.py
 │   │   └── git_status.py
 │   │
 │   ├── session/
-│   │   ├── models.py                 # Header / MessageEntry / CompactionEntry
+│   │   ├── models.py                 # Header / Message / Compaction / Control / ToolCatalog
 │   │   ├── jsonl.py                  # create / load / append / leaf / 路径发现
 │   │   ├── runtime.py                # AgentSession 创建 / 恢复 / 新会话 / 模型切换
 │   │   └── usage.py                  # 从活动链重建最近任务用量
@@ -263,7 +267,7 @@ mini-pi/
 
 `tests/integration/` 是离线端到端目录（CLI → Session → Loop → Tool → Context 全链路，FakeLLM 驱动），与 `@pytest.mark.integration`（真实 API）无关；后者默认被 `addopts` 排除。
 
-`mini_pi/lsp/` 已提供有界 stdio、位置转换与只读客户端；MCP 模块留到对应里程碑创建。Task / Memory / Multi-Agent 已移出本项目范围。
+`mini_pi/lsp/` 提供有界 stdio、位置转换与只读客户端；`mini_pi/mcp/` 提供受管 SDK、白名单目录与原始 Schema 校验。Task / Memory / Multi-Agent 不在最终范围内。
 
 ---
 
@@ -487,8 +491,8 @@ uv run pytest -m integration        # 需要 API Key
 | M8 | 成本效率评测、CLI 与上下文优化 | 已收尾于 M8.3；[M8.2](docs/benchmarks/m8-2-prompt-batching.md)合批 Prompt、[M8.3](docs/benchmarks/m8-3-context-cost.md)8k 候选未采纳；M8.4–M8.6 取消排期，未实现 |
 | M9 | 简单 MITL 与安全控制 | M9.1 问询、M9.2 权限与单次审批已实现 |
 | M10 | 只读 LSP | M10.1 定义/引用、M10.2 当前内容诊断/同步已实现；固定 Pyright 1.1.414 闭环通过 |
-| M11 | 本地 MCP | M11.1/M11.2 已实现；固定官方 filesystem server 读写/审批通过，两个 Provider 离线 wire、[DeepSeek 输入实测](docs/benchmarks/m11-mcp-input-cost.md)；下一批 M12 |
-| M12 | 联合验收与项目结束 | 已规划；四项能力闭环后停止新增功能，保留缺陷与必要兼容修复 |
+| M11 | 本地 MCP | M11.1/M11.2 已实现；固定官方 filesystem server 读写/审批通过，两个 Provider 离线 wire、[DeepSeek 输入实测](docs/benchmarks/m11-mcp-input-cost.md) |
+| M12 | 联合验收与项目结束 | 已完成；[最终验收](docs/benchmarks/m12-final-acceptance.md)：848 项离线测试、DeepSeek/Pyright/MCP 联合闭环、7 个 CLI 场景；停止新增功能，维护缺陷与必要兼容修复 |
 
 M1-M6 的详细任务拆解见 [`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)。
 M7 的架构设计、子里程碑与验收见 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md)。
@@ -509,7 +513,7 @@ M9 问询与权限控制（已完成）
   ↓
 M10 只读 LSP → M11 本地 MCP（已完成）
   ↓
-M12 联合验收 → 项目完成
+M12 联合验收（已完成）→ 项目收尾，后续仅缺陷与必要兼容修复
 ```
 
 不要跨阶段同时开太多功能。每完成一个里程碑：
@@ -576,7 +580,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 - `prompt_toolkit` 是可降级能力：非 tty 或未安装时回退单行 REPL；交互终端缺依赖会在 REPL 顶部打印降级原因（补全/历史/多行编辑不可用）
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
 - 支持平台为 macOS / Linux；进程组与文件权限语义依赖 POSIX，Windows 未支持
-- 简单 MITL、工具权限、只读 Python LSP 和本地 MCP 已实现；下一批联合验收，最后路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)；Task / Memory / Multi-Agent 不在本项目范围内
+- 简单 MITL、工具权限、只读 Python LSP 和本地 MCP 已实现并联合验收，最后路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)；Task / Memory / Multi-Agent 不在本项目范围内
 
 ---
 

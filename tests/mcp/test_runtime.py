@@ -6,19 +6,22 @@ import json
 import os
 import signal
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from mini_pi.cli.app import app
+from mini_pi.cli.console import ConsoleRenderer
+from mini_pi.cli.interaction import create_approval_handler
 from mini_pi.config import UserConfig
 from mini_pi.context.compaction import prepare_compaction
 from mini_pi.errors import SessionError
-from mini_pi.interaction import ApprovalResponse
+from mini_pi.interaction import ApprovalRequest, ApprovalResponse
 from mini_pi.llm.types import SystemMessage, ToolMessage
 from mini_pi.mcp.catalog import tool_alias
-from mini_pi.security import SecurityPolicy
+from mini_pi.security import ApprovalHandler, SecurityPolicy
 from mini_pi.session.jsonl import JsonlSession
 from mini_pi.session.models import ControlEntry, ToolCatalogEntry
 from mini_pi.session.runtime import AgentSession
@@ -27,6 +30,79 @@ from mini_pi.workspace.workspace import Workspace
 from tests.conftest import FakeLLMClient, assistant, tool_call
 from tests.lsp.test_client import assert_dead
 from tests.mcp.test_client import config
+
+
+def test_mcp_can_be_imported_before_tools() -> None:
+    """独立 SDK 使用者可先导入目录模块，不依赖 pytest 已加载工具包的顺序。"""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from mini_pi.mcp.catalog import MCPCatalog; from mini_pi.tools import build_default_registry",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_cli_reload_redacts_new_secrets_before_startup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """新环境引用在 reload 启动审批前登记，同时保留历史凭据的屏蔽。"""
+    old_secret, new_secret = "old-credential-123", "new-credential-456"
+    monkeypatch.setenv("OLD_CREDENTIAL", old_secret)
+    monkeypatch.setenv("NEW_CREDENTIAL", new_secret)
+    old = config(tmp_path)
+    old = UserConfig(
+        servers={
+            "local": old.servers["local"].model_copy(
+                update={"env": {"TEST_SECRET": "OLD_CREDENTIAL"}}
+            )
+        }
+    )
+    new = UserConfig(
+        servers={
+            "local": old.servers["local"].model_copy(
+                update={
+                    "env": {"TEST_SECRET": "NEW_CREDENTIAL"},
+                    "argv": (*old.servers["local"].argv, new_secret),
+                }
+            )
+        }
+    )
+    configurations = iter([old, new])
+    monkeypatch.setattr("mini_pi.cli.app.load_config", lambda: next(configurations))
+    monkeypatch.setattr("mini_pi.cli.app.create_llm", lambda *args, **kwargs: FakeLLMClient([]))
+    monkeypatch.setattr("mini_pi.cli.app.load_last_connection", lambda: None)
+    monkeypatch.setattr(
+        "mini_pi.cli.app.save_last_connection", lambda *args: tmp_path / "auth.json"
+    )
+    monkeypatch.setattr("mini_pi.session.jsonl._sessions_root", lambda path: tmp_path / "sessions")
+    approvals: list[str] = []
+    monkeypatch.setattr("mini_pi.cli.interaction._interactive_terminal", lambda renderer: True)
+
+    def handler(renderer: ConsoleRenderer) -> ApprovalHandler:
+        """实际 startup 回调先检查脱敏表已包含新旧值。"""
+        production_approval = create_approval_handler(renderer)
+
+        def approve(request: ApprovalRequest) -> ApprovalResponse:
+            """批准固定测试 server，不能用事后渲染证明先前没有泄漏。"""
+            assert renderer.redact(old_secret) == "[REDACTED]"
+            assert renderer.redact(new_secret) == "[REDACTED]"
+            approvals.append(request.target)
+            return production_approval(request)
+
+        return approve
+
+    monkeypatch.setattr("mini_pi.cli.app.create_approval_handler", handler)
+    result = CliRunner().invoke(
+        app, ["--cwd", str(tmp_path), "--no-banner"], input="/mcp reload\n1\n/tools\n/exit\n"
+    )
+    assert result.exit_code == 0 and approvals == ["local"], result.output
+    assert old_secret not in result.output and new_secret not in result.output
+    assert "[REDACTED]" in result.output
 
 
 def runtime(tmp_path: Path, mode: str = "normal") -> AgentSession:

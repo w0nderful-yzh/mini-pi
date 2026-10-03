@@ -7,6 +7,8 @@ milestone history or delivery logs into this file.
 
 ## Project boundaries
 
+- Feature scope is closed after M12. Maintain bugs and necessary compatibility; new capabilities require an explicit user request and scoped design.
+
 - Build a lightweight coding-agent harness in Python: the model decides the next step from tool observations. Never hard-code a `read → edit → test` flow.
 - Stack: Python 3.12+, uv, Pydantic v2, pytest, sync OpenAI SDK, Typer, Rich, prompt_toolkit, ripgrep-bin, pinned MCP Python SDK and jsonschema. Providers: the OpenAI and DeepSeek OpenAI-compatible APIs only.
 - No agent frameworks (LangGraph, AutoGen, CrewAI, Dify, Coze). Do not pull in a plugin framework, database, RAG, vector store, or parallel tool execution ahead of a real need.

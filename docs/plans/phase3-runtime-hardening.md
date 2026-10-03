@@ -1,6 +1,6 @@
 # Phase 3：最终能力收尾
 
-> 状态：M8 在 M8.3 后按用户要求收尾；M8.4–M8.6 取消排期，未实现。M9 问询与审批、M10 只读 Python LSP、M11.1/M11.2 本地 MCP 与工具目录已实现；下一批为 M12 联合验收，通过后结束新增功能。
+> 状态：M9 问询与审批、M10 只读 Python LSP、M11 本地 MCP 和 M12 联合验收均已完成，项目收尾，后续仅缺陷与必要兼容修复。M8 收尾于 M8.3；M8.4–M8.6 取消排期，未实现。
 
 MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题，等待人回答后继续”。项目结束边界为一个可恢复、能问人、能查代码语义、能接受控本地工具的单 Agent CLI。原 M9 Task/Memory、M10 Multi-Agent 排期撤销；以下编号重新分配，不保留这些能力的隐含承诺。
 
@@ -14,7 +14,7 @@ MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题�
 | M10.2（已实现） | LSP diagnostics 与文件版本同步 | 编辑后的诊断来自当前内容，过期/未就绪不冒充零错误 |
 | M11.1（已实现） | MCP stdio 连接与协议生命周期 | 固定本地 server 初始化、发现、调用、超时与取消清理通过 |
 | M11.2（已实现） | MCP 工具装配、schema、权限与恢复 | 活动工具集有界，映射不歧义，外部工具服从同一权限检查 |
-| M12 | 联合验收与项目收尾 | 四项能力闭环通过，使用方式和限制准确，然后停止新增功能 |
+| M12（已完成） | 联合验收与项目收尾 | 四项能力闭环通过，使用方式和限制准确，停止新增功能 |
 
 安全控制必须先于 LSP/MCP 对真实用户开放。每次只实现一批，代码、相关测试与必需文档同批提交；不同时搭建通用扩展框架。
 
@@ -112,7 +112,7 @@ CLI 参数 `--permissions workspace|readonly` 覆盖用户级配置，缺省 `wo
 
 **实现边界：** `lsp/transport.py` 负责有界双向 stdio 与进程组清理，`lsp/positions.py` 转换编码，`lsp/client.py` 按磁盘内容维护最多 32 个已打开文档，三个 Tool 经 Registry 和现有审批审计入口装配。文档 1 MB、帧 2 MB、模型结果 100 条/50 KB、stderr 16 KB；配置 `timeout` 缺省 10 秒、最大 120 秒。固定分析配置 `openFilesOnly/basic/autoSearchPaths=false`，不扫描或监听未打开依赖。没有版本的推送直接返回新鲜度错误，pull 每次要求完整当前结果，不传 previousResultId。`/new` 创建成功后关闭旧运行时，创建失败保留旧连接；SDK 使用者显式 `close()`。
 
-验收入口为 `tests/lsp/`（离线协议与生命周期）及 `tests/lsp/test_pyright.py`（显式 `MINI_PI_TEST_PYRIGHT`、固定 Pyright 1.1.414）。真实用例覆盖跨文件定义/引用、类型错误、edit 后错误消失、外部改动后新错误、实际 unittest 和进程复用/回收；模型脚本为 FakeLLM，未调用真实 Provider，Provider 联合验收留到 M12。
+验收入口为 `tests/lsp/`（离线协议与生命周期）及 `tests/lsp/test_pyright.py`（显式 `MINI_PI_TEST_PYRIGHT`、固定 Pyright 1.1.414）。真实用例覆盖跨文件定义/引用、类型错误、edit 后错误消失、外部改动后新错误、实际 unittest 和进程复用/回收；模型脚本为 FakeLLM。真实 Provider 的联合闭环已在 M12 完成，见最终验收。
 
 ## 6. M11：本地 MCP 工具
 
@@ -140,16 +140,18 @@ CLI 参数 `--permissions workspace|readonly` 覆盖用户级配置，缺省 `wo
 
 **实现边界：** 固定 `mcp==1.26.0` 与 `jsonschema==4.26.0`，SDK 协商 2025-11-25，接受 SDK 声明的 2024-11-05、2025-03-26、2025-06-18、2025-11-25。每连接一个线程持有异步 SDK 生命周期，同步调用串行等待。最多 4 个 MCP server、32 个启用工具，发现最多 16 页/256 个工具；描述 4096 字符、每份 schema 32 KB、目录 256 KB、协议帧 2 MB、stderr 尾部 16 KB、调用参数/结果 50 KB、内容块 100 个。Schema 为受限 2020-12/draft-07，不支持递归/远程引用、format、未知关键词或必须采用 tasks 的工具；不支持项明确失败。输入约束原样保留。
 
-配置和白名单只从用户文件读取；空白名单不启动。任务前完成发现和目录持久化，整次 run 冻结。`/mcp reload` 仅刷新 MCP 配置，权限模式与 LSP 配置保持当前运行时设置；要改变它们需重新启动。目录发现失败后旧外部工具被移除，下一任务可重新发现和审批，业务调用从不重放。官方 `@modelcontextprotocol/server-filesystem@2026.8.31` 已验证真实读/列目录/写入审批与连接回收；模型为 FakeLLM。两个 Provider 的工具 wire 已离线验证，DeepSeek 两个目录的真实 input usage 对比见 [M11 输入成本基线](../benchmarks/m11-mcp-input-cost.md)。真实模型联合任务留给 M12；OpenAI 未配置，真实 API 未测。
+配置和白名单只从用户文件读取；空白名单不启动。任务前完成发现和目录持久化，整次 run 冻结。`/mcp reload` 仅刷新 MCP 配置，权限模式与 LSP 配置保持当前运行时设置；要改变它们需重新启动。目录发现失败后旧外部工具被移除，下一任务可重新发现和审批，业务调用从不重放。官方 `@modelcontextprotocol/server-filesystem@2026.8.31` 已验证真实读/列目录/写入审批与连接回收；模型为 FakeLLM。两个 Provider 的工具 wire 已离线验证，DeepSeek 两个目录的真实 input usage 对比见 [M11 输入成本基线](../benchmarks/m11-mcp-input-cost.md)。真实模型联合任务已在 M12 完成；OpenAI 未配置，真实 API 未测。
 
-## 7. M12：验收通过后结束项目
+## 7. M12：联合验收与项目结束（已完成）
 
 1. **离线回归：** 四项能力的边界用例、旧会话兼容、取消、配对、durable-first、预算/压缩原有回归，全量 pytest、Ruff、compileall、diff 检查通过。
 2. **真实闭环：** 固定小仓库中完成问询选方案、LSP 定位/诊断、权限拒绝与批准、本地 MCP 调用、实际修改和任务后外部测试。真实运行至少一个已配置 Provider；另一 Provider 的协议兼容用离线测试验证，未配置的真实 API 如实列为未测。
 3. **生命周期与 CLI：** 交互/一次性/非 TTY，40/80 列、NO_COLOR、取消、EOF、`/new`、正常 resume；长驻进程无遗留，秘密不出现在宿主输出或元数据。
 4. **交付：** README 写清安装配置、默认关闭的外部能力、权限模式和所有限制；AGENTS 只保留有效约束；详细验收证据沿用 `docs/benchmarks/`。不声称审批等于沙箱，不声称强杀后的残缺工具轮可恢复。
 
-M12 达标即视为本项目完成，后续仅修 bug 和必要兼容问题。没有自动进入下一阶段的扩展清单。
+M12 四项验收证据见 [最终验收](../benchmarks/m12-final-acceptance.md)：848 项离线回归、真实 DeepSeek + 固定 Pyright/filesystem server 闭环、7 个真实 PTY/管道 CLI 场景。Review 修复了 MCP 独立导入循环依赖和 reload 凭据脱敏刷新问题。OpenAI 真实 API 未配置，未测项如实保留。
+
+本项目已按约定收尾，后续仅修 bug 和必要兼容问题。没有下一批新增功能或自动扩展清单。
 
 ## 8. 已完成与已收尾的基线
 

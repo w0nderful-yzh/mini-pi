@@ -584,7 +584,7 @@ def cli(
     if isinstance(agent, AgentSession):
         provider, model = agent.provider, agent.model
     if agent is not None:
-        renderer.set_secrets(_configured_keys() + security.secrets)
+        renderer.add_secrets(_configured_keys() + security.secrets)
 
     if prompt is not None:
         if agent is None:
@@ -632,7 +632,7 @@ def cli(
         )
         if agent is not None:
             startup_error = None
-            renderer.set_secrets(_configured_keys() + security.secrets)
+            renderer.add_secrets(_configured_keys() + security.secrets)
     session_label = (
         agent.session_id[:8]
         if isinstance(agent, AgentSession)
@@ -729,7 +729,11 @@ def cli(
                 )
                 continue
             try:
-                agent.reload_mcp(load_config())
+                updated_config = load_config()
+                # 启动审批可能展示新配置参数，必须在启动/发现前更新脱敏表。
+                updated_secrets = SecurityPolicy(cwd=workspace.root, config=updated_config).secrets
+                renderer.add_secrets(_configured_keys() + updated_secrets)
+                agent.reload_mcp(updated_config)
             except (MiniPiError, ValueError) as exc:
                 console.print(f"MCP reload failed: {exc}", style="red", markup=False)
             except KeyboardInterrupt:
@@ -803,7 +807,7 @@ def cli(
             )
             if switched is not None:
                 agent, provider, model = switched
-                renderer.set_secrets(_configured_keys() + security.secrets)
+                renderer.add_secrets(_configured_keys() + security.secrets)
             continue
         if not stripped:
             continue

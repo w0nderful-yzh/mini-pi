@@ -1,0 +1,78 @@
+{
+  "provider": "deepseek",
+  "model": "deepseek-flash",
+  "workspace": "/private/var/folders/mq/qxsqs5t16g5dpy_fcgrl0xlm0000gn/T/mini-pi-m12-joint-isljqy37",
+  "session": "/private/var/folders/mq/qxsqs5t16g5dpy_fcgrl0xlm0000gn/T/mini-pi-m12-joint-isljqy37/sessions/5a85b2fb3b1aab17/20261003T092723.635968Z_9e0482db-77b6-4938-a79f-b4422b142020.jsonl",
+  "pyright": "pyright 1.1.414",
+  "filesystem": "2026.8.31",
+  "duration_seconds": 18.21,
+  "tool_counts": {
+    "ask_user": 1,
+    "mcp_files_read_file_5f39c5953944372140f917c8": 2,
+    "mcp_files_list_directory_75e6e20b08741acb39057983": 1,
+    "git_status": 1,
+    "read": 3,
+    "lsp_definition": 1,
+    "lsp_references": 1,
+    "lsp_diagnostics": 3,
+    "write": 1,
+    "edit": 1,
+    "mcp_files_write_file_d0426ee745024fb923ac6fdd": 2,
+    "bash": 1
+  },
+  "usage": {
+    "input_tokens": 57674,
+    "output_tokens": 2906,
+    "requests": 10
+  },
+  "questions": [
+    {
+      "question": "非负金额的舍入应使用哪种规则？",
+      "options": [
+        "half-up（四舍五入，远离零方向进位）",
+        "bankers（银行家舍入，四舍六入五取偶）"
+      ],
+      "wait_without_progress": true
+    }
+  ],
+  "approvals": [
+    {
+      "target": "files",
+      "identity": "server:mcp",
+      "decision": "allow"
+    },
+    {
+      "target": "python",
+      "identity": "server:lsp",
+      "decision": "allow"
+    },
+    {
+      "target": "mcp_files_write_file_d0426ee745024fb923ac6fdd",
+      "identity": "[\"mcp\", \"files\", \"write_file\"]",
+      "decision": "deny"
+    },
+    {
+      "target": "mcp_files_write_file_d0426ee745024fb923ac6fdd",
+      "identity": "[\"mcp\", \"files\", \"write_file\"]",
+      "decision": "allow"
+    },
+    {
+      "target": "bash",
+      "identity": "mini_pi.tools.bash.BashTool",
+      "decision": "allow"
+    }
+  ],
+  "checks": {
+    "completed": true,
+    "wait_without_progress": true,
+    "mcp_deny_then_allow": true,
+    "definition_references": true,
+    "current_diagnostics": true,
+    "test_unchanged": true,
+    "external_unittest": true,
+    "strict_replay": true,
+    "resume_without_replay": true,
+    "processes_reaped": true,
+    "no_provider_key_in_jsonl": true
+  }
+}

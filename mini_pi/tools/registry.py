@@ -10,13 +10,13 @@ from pydantic_core import to_json
 from mini_pi.config import UserConfig
 from mini_pi.errors import ToolArgumentError, ToolNotFoundError
 from mini_pi.llm.types import ToolCall, ToolSchema
-from mini_pi.mcp.catalog import CatalogRecorder, MCPCatalog
 from mini_pi.security import ControlRecorder, SecurityPolicy
 from mini_pi.tools.base import Tool, ToolResult
 from mini_pi.workspace.workspace import Workspace
 
 if TYPE_CHECKING:
     from mini_pi.lsp.client import LspClient
+    from mini_pi.mcp.catalog import CatalogRecorder, MCPCatalog
 
 
 class ToolRegistry:
@@ -33,6 +33,9 @@ class ToolRegistry:
 
     def configure_mcp(self, record: CatalogRecorder | None = None) -> None:
         """仅装配明确的 MCP 配置，Session 在发现前绑定目录审计回调。"""
+        # tools 包装配和 MCPTool 相互引用，类型检查之外延后至模块加载完成。
+        from mini_pi.mcp.catalog import MCPCatalog
+
         self._catalog_record = record
         if self.security.mcp_servers:
             self._mcp = MCPCatalog(self.security, record)
@@ -63,6 +66,8 @@ class ToolRegistry:
 
     def reload_mcp(self, config: UserConfig) -> None:
         """仅空闲时刷新 MCP 配置，权限模式与 LSP 仍由当前运行时固定。"""
+        from mini_pi.mcp.catalog import MCPCatalog
+
         if self._running:
             raise ValueError("MCP reload is only allowed while idle")
         current = self.security.config
