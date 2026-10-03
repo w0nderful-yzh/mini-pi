@@ -21,6 +21,7 @@ from mini_pi.errors import MiniPiError
 PermissionMode = Literal["workspace", "readonly"]
 EnvName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$", strict=True)]
 Text = Annotated[str, StringConstraints(min_length=1, strict=True)]
+ToolName = Annotated[str, StringConstraints(min_length=1, max_length=1024, strict=True)]
 DEFAULT_CONFIG_PATH = Path.home() / ".mini-pi" / "config.json"
 
 
@@ -33,6 +34,21 @@ class ServerConfig(BaseModel):
     cwd: Path | None = None
     env: dict[EnvName, EnvName] = Field(default_factory=dict)
     timeout: float = Field(default=10.0, gt=0, le=120)
+    tools: tuple[ToolName, ...] = Field(default=(), max_length=32)
+    readonly_tools: tuple[ToolName, ...] = Field(default=(), max_length=32)
+
+    @model_validator(mode="after")
+    def validate_tools(self) -> Self:
+        """MCP 只启用显式白名单，可信只读必须是白名单的子集。"""
+        if len(set(self.tools)) != len(self.tools) or len(set(self.readonly_tools)) != len(
+            self.readonly_tools
+        ):
+            raise ValueError("duplicate configured tools")
+        if not set(self.readonly_tools) <= set(self.tools):
+            raise ValueError("readonly_tools must be a subset of tools")
+        if self.kind == "lsp" and (self.tools or self.readonly_tools):
+            raise ValueError("LSP tools are fixed by the host")
+        return self
 
     @field_validator("cwd")
     @classmethod
@@ -65,6 +81,10 @@ class UserConfig(BaseModel):
         """当前只接一个 LSP server，多语言选择不能靠隐含默认值决定。"""
         if sum(server.kind == "lsp" for server in self.servers.values()) > 1:
             raise ValueError("only one LSP server can be configured")
+        if sum(server.kind == "mcp" for server in self.servers.values()) > 4:
+            raise ValueError("at most four MCP servers can be configured")
+        if sum(len(server.tools) for server in self.servers.values()) > 32:
+            raise ValueError("at most 32 MCP tools can be enabled")
         return self
 
 

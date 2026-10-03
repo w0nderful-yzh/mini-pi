@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from mini_pi.config import UserConfig
+from mini_pi.config import ServerConfig, UserConfig
 from mini_pi.errors import InteractionUnavailableError, PermissionDeniedError, SessionError
 from mini_pi.interaction import ApprovalRequest, ApprovalResponse
 
@@ -68,6 +68,26 @@ class SecurityPolicy:
         return SecurityPolicy(
             cwd=self.cwd, config=self._config, approval=self._approval, record=record
         )
+
+    @property
+    def config(self) -> UserConfig:
+        """返回用户配置的独立副本，外部目录不能修改宿主规则。"""
+        return self._config.model_copy(deep=True)
+
+    def with_config(self, config: UserConfig) -> SecurityPolicy:
+        """显式空闲刷新复用审批与审计函数，但不继承任何批准。"""
+        return SecurityPolicy(
+            cwd=self.cwd, config=config, approval=self._approval, record=self._record
+        )
+
+    @property
+    def mcp_servers(self) -> dict[str, ServerConfig]:
+        """仅返回带显式工具白名单的本地 MCP 配置。"""
+        return {
+            name: server.model_copy(deep=True)
+            for name, server in self._config.servers.items()
+            if server.kind == "mcp" and server.tools
+        }
 
     @property
     def mode(self) -> str:

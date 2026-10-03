@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from mini_pi.agent.agent import Agent
 from mini_pi.agent.events import AgentEndEvent, AgentEvent, AgentStartEvent
 from mini_pi.agent.state import AgentState, RunContext
 from mini_pi.auth import resolve_api_key
+from mini_pi.config import UserConfig
 from mini_pi.context.compaction import (
     CompactionPreparation,
     CompactionResult,
@@ -81,8 +83,7 @@ def _create_auth_llm(provider: str, model: str) -> LLMClient:
     api_key = resolve_api_key(provider, env_var=client_type.api_key_env)
     if not api_key:
         raise MiniPiError(
-            f"{provider} API key is not configured; "
-            f"set {client_type.api_key_env} or use /connect"
+            f"{provider} API key is not configured; set {client_type.api_key_env} or use /connect"
         )
     return client_type(model=model, api_key=api_key)
 
@@ -108,7 +109,7 @@ class AgentSession:
         """持有会话/依赖并构建 Agent，将提交回调接到自身的 durable-first 入口。"""
         self._session = session
         self._llm = llm
-        self._registry = registry.for_session(self._commit_control)
+        self._registry = registry.for_session(self._commit_control, self._commit_catalog)
         self._max_steps = max_steps
         self._max_run_input_tokens = max_run_input_tokens
         self._on_event = on_event
@@ -134,6 +135,19 @@ class AgentSession:
     def _commit_control(self, decision: ControlDecision) -> None:
         """宿主决定经现有 fsync 提交后才允许工具或进程执行。"""
         self._session.append_control(decision)
+
+    def _commit_catalog(self, catalog: dict[str, Any]) -> None:
+        """持久目录仅记录有效身份，不从元数据启动 server 或恢复信任。"""
+        self._session.append_tool_catalog(catalog)
+
+    def reload_mcp(self, config: UserConfig) -> None:
+        """CLI 空闲时刷新当前配置，tools patch 在下一任务 user 前提交。"""
+        self._registry.reload_mcp(config)
+
+    @property
+    def mcp_status(self) -> str:
+        """只读展示目录来源和刷新状态，不写入模型历史。"""
+        return self._registry.mcp_status
 
     @classmethod
     def create(
@@ -336,6 +350,17 @@ class AgentSession:
         if not task.strip():
             # 空任务不触发压缩检查，也不产生任何 Session 写入
             raise ValueError("task must not be empty")
+        try:
+            self._registry.prepare_mcp()
+        except MiniPiError as exc:
+            self.close()
+            return self._abort_before_prompt(str(exc))
+        except KeyboardInterrupt:
+            self.close()
+            if self._on_event is not None:
+                self._on_event(AgentStartEvent())
+                self._on_event(AgentEndEvent(reason="cancelled"))
+            return AssistantMessage(stop_reason="cancelled")
         try:
             failure = self._auto_compact_if_needed(pending_task=task)
         except BaseException:

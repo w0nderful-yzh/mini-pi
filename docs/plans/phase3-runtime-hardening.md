@@ -1,6 +1,6 @@
 # Phase 3：最终能力收尾
 
-> 状态：M8 在 M8.3 后按用户要求收尾；M8.4–M8.6 取消排期，未实现。M9.1 简单 MITL、M9.2 权限与单次审批、M10.1/M10.2 只读 Python LSP 已实现；下一批为 M11.1 本地 MCP stdio，之后完成工具装配和最终验收。M11–M12 是尚未实现的目标设计。
+> 状态：M8 在 M8.3 后按用户要求收尾；M8.4–M8.6 取消排期，未实现。M9 问询与审批、M10 只读 Python LSP、M11.1/M11.2 本地 MCP 与工具目录已实现；下一批为 M12 联合验收，通过后结束新增功能。
 
 MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题，等待人回答后继续”。项目结束边界为一个可恢复、能问人、能查代码语义、能接受控本地工具的单 Agent CLI。原 M9 Task/Memory、M10 Multi-Agent 排期撤销；以下编号重新分配，不保留这些能力的隐含承诺。
 
@@ -12,8 +12,8 @@ MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题�
 | M9.2（已实现） | 工具权限与外部进程启动审批 | 拒绝时无执行副作用，授权不可由模型/仓库扩大，沿用宿主交互边界 |
 | M10.1（已实现） | LSP 生命周期、definition、references | 本地 Python server 查询正确，位置编码、路径和退出边界通过 |
 | M10.2（已实现） | LSP diagnostics 与文件版本同步 | 编辑后的诊断来自当前内容，过期/未就绪不冒充零错误 |
-| M11.1 | MCP stdio 连接与协议生命周期 | 固定本地 server 初始化、发现、调用、超时与取消清理通过 |
-| M11.2 | MCP 工具装配、schema、权限与恢复 | 活动工具集有界，映射不歧义，外部工具服从同一权限检查 |
+| M11.1（已实现） | MCP stdio 连接与协议生命周期 | 固定本地 server 初始化、发现、调用、超时与取消清理通过 |
+| M11.2（已实现） | MCP 工具装配、schema、权限与恢复 | 活动工具集有界，映射不歧义，外部工具服从同一权限检查 |
 | M12 | 联合验收与项目收尾 | 四项能力闭环通过，使用方式和限制准确，然后停止新增功能 |
 
 安全控制必须先于 LSP/MCP 对真实用户开放。每次只实现一批，代码、相关测试与必需文档同批提交；不同时搭建通用扩展框架。
@@ -25,15 +25,15 @@ MITL 按前文 human-in-the-loop 的诉求理解为“模型提出关键问题�
 | 当前源码 / 符号 | 已有行为 | 后续修改边界 |
 | --- | --- | --- |
 | `mini_pi/agent/loop.py::_execute_tool_calls` | 串行执行；问询混合批次先整体拒绝；取消/交互不可用补齐结果后停止 | M9.1 已落地；后续仍保持 Loop 不读 stdin |
-| `mini_pi/tools/registry.py::ToolRegistry.execute` | 校验参数并持有深拷贝，按宿主 access/mode 检查后执行 | MCP 后续扩展自己的 schema 校验，不能绕过同一权限入口 |
+| `mini_pi/tools/registry.py::ToolRegistry.execute` | 内置 Pydantic / MCP 原始 JSON Schema 校验并持有深拷贝，再按宿主 access/mode 执行 | 外部工具不能绕过同一权限入口 |
 | `mini_pi/tools/base.py::Tool` | Pydantic Args、schema、execute；ToolResult 分离模型正文和 UI details | 内置工具保持默认校验；MCP 使用原始 JSON Schema 校验，不假造宽松 Args |
 | `mini_pi/cli/app.py` / `cli/interaction.py` / `cli/console.py` | 注入问询和审批函数；审批完整参数脱敏、无默认允许、双向 TTY 检查 | 输入与展示仍由 CLI 负责 |
 | `mini_pi/session/runtime.py::AgentSession` | 组装运行时、durable-first、严格恢复与投影 | 装配交互、权限和外部连接生命周期；不把这些塞入 Provider |
-| `mini_pi/session/models.py` / `context/projection.py` | ControlEntry 明确已知且不进入模型；残缺工具批次严格拒绝恢复 | 后续工具目录也使用已知元数据 entry，不跳过未知 type |
+| `mini_pi/session/models.py` / `context/projection.py` | ControlEntry / ToolCatalogEntry 明确已知且不进入模型；残缺工具批次严格拒绝恢复 | 目录先持久化再安装，历史别名不可重绑定，不跳过未知 type |
 | `mini_pi/tools/process.py::run_process/run_shell` | 一次性进程、有界捕获、超时/取消杀进程组；最小明确环境 | 长驻 LSP/MCP 另管生命周期，不复用等结束的运行器 |
 | `mini_pi/context/sections.py` / `context/request.py` | 工具描述 patch、当前 wire/schema 的请求快照 | 活动目录变化只在空闲边界安装，下一请求按实际工具重新预测 |
 
-M9 已新增 `mini_pi/interaction.py`、`cli/interaction.py`、`tools/ask_user.py`、`security.py`、`config.py`；M10 的 `lsp/` 与三个 Tool 已装配，MCP 模块留到 M11。工具执行仍经过 Registry；Agent 只委托 Registry 清理，不读文件、启动进程或处理终端。
+M9 的问询和权限、M10 的 `lsp/`、M11 的 `mcp/client.py`、`mcp/catalog.py`、`mcp/schema.py` 与 `tools/mcp.py` 已装配。工具执行仍经过 Registry；Agent 只委托 Registry 清理，不读文件、启动进程或处理终端。
 
 ## 3. M9.1：简单 MITL（已实现）
 
@@ -69,7 +69,7 @@ CLI 参数 `--permissions workspace|readonly` 覆盖用户级配置，缺省 `wo
 | 内置 write/edit | 允许，仅 Workspace 内 | 拒绝 |
 | bash 任意命令 | 每次审批 | 拒绝 |
 | 受信任配置的只读 LSP 查询（M10 已装配） | 启动批准后允许 | 启动批准后允许 |
-| MCP 工具（M11 待装配） | 本地策略标明可信只读的才自动允许，其他每次审批 | 仅允许本地策略明确标为可信只读的工具 |
+| MCP 工具 | 本地策略标明可信只读的才自动允许，其他每次审批 | 仅允许本地策略明确标为可信只读的工具 |
 | 新 LSP/MCP 进程 | 启动前审批 argv、cwd 和环境变量名称 | 同样审批 |
 
 - 检查点在 Registry 参数校验后、实际 execute 前；没有批准时不启动命令、不写文件、不发送 `tools/call`。权限层覆盖全部模型发起工具，也覆盖外部进程启动。
@@ -81,7 +81,7 @@ CLI 参数 `--permissions workspace|readonly` 覆盖用户级配置，缺省 `wo
 
 新 entry 的解析与投影同时修改：新实现兼容旧 JSONL；旧实现遇到不认识的 entry 明确拒绝，未知 entry 仍不得静默跳过。原文件不改写，审批元数据不能插入 Provider 消息而破坏工具配对，compaction 保留这些事实且不把它们当摘要正文。
 
-当前实现以 `Tool.access` 表达可信宿主代码的分类；未知工具默认审批，外部 annotations 不参与判断。Registry 直接调用同样检查；Session 为每个运行时复制注册表并独立绑定 ControlEntry 提交入口，避免 `/new` 改走旧会话审计。`SecurityPolicy.start_server(id)` 只接收用户配置中的 id，展示 argv/cwd/env 名称并审批后才 Popen。M10 仅在配置中有一个 LSP server 时注册三个查询工具并懒启动，连接由 Registry 持有，Session/CLI 负责关闭；MCP 留到 M11。
+当前实现以 `Tool.access` 表达可信宿主代码的分类；未知工具默认审批，外部 annotations 不参与判断。Registry 直接调用同样检查；Session 为每个运行时复制注册表并独立绑定 ControlEntry 提交入口，避免 `/new` 改走旧会话审计。`SecurityPolicy.start_server(id)` 只接收用户配置中的 id，展示 argv/cwd/env 名称并审批后才 Popen。M10 仅在配置中有一个 LSP server 时注册三个查询工具并懒启动，连接由 Registry 持有，Session/CLI 负责关闭；MCP 按显式白名单在任务前发现并审批启动。
 
 ### 边界
 
@@ -116,7 +116,7 @@ CLI 参数 `--permissions workspace|readonly` 覆盖用户级配置，缺省 `wo
 
 ## 6. M11：本地 MCP 工具
 
-### M11.1：stdio 客户端
+### M11.1：stdio 客户端（已实现）
 
 - 第一版仅本地 stdio、tools 能力。优先使用官方 [Python SDK](https://github.com/modelcontextprotocol/python-sdk)，固定依赖与支持版本，按 [Lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle) 协商；不支持 server 返回版本时断开，不标榜支持整个最新规范。
 - 同步 Agent 外围持有一个受管的异步 SDK 生命周期，提供串行调用入口；不为每次请求新建 event loop，也不让 Loop/Provider 改为异步调度。LSP 与 MCP 不强行共用分帧实现：MCP stdio 是换行分隔消息。[Transports](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
@@ -126,7 +126,7 @@ CLI 参数 `--permissions workspace|readonly` 覆盖用户级配置，缺省 `wo
 
 **验收：** 真实子进程协议往返、分页、版本/能力不匹配、错误 id、日志污染、卡死/取消/崩溃、启动拒绝、环境秘密隔离与进程清理；不自动重试或重放可能有副作用的 tools/call。
 
-### M11.2：装配与恢复
+### M11.2：装配与恢复（已实现）
 
 - 工具仅按明确白名单启用，数量/描述/schema 大小受限；一次 run 的目录冻结。提供 CLI `/tools` 查看启用情况及来源，`/mcp reload` 仅在空闲时显式刷新；运行中的 list_changed 只标记需要刷新。
 - 为外部 `(server_id, original_tool_name)` 建立稳定 Provider 别名与反向表；按两个现有 Provider 的名称约束验证，点号/长名称用稳定编码与摘要处理，碰撞明确失败。不能通过拆字符串或截断名称猜回原工具。
@@ -137,6 +137,10 @@ CLI 参数 `--permissions workspace|readonly` 覆盖用户级配置，缺省 `wo
 - resume 先恢复历史调用原貌，再按当前用户配置装配；历史目录不会启动已移除 server。旧结果不重新调用远端，已禁用别名的新调用返回错误；当前工具/schema 的变化在新 user 消息前提交，禁止把旧别名绑定到另一工具。
 
 **验收：** 点号/超长/碰撞名称、参数错误和本地 refs、structuredContent/outputSchema/isError、不支持内容、有界输出、审批拒绝零调用；禁用/刷新/schema 变化、目录元数据与 compaction、旧 JSONL 读取、resume 不重放；对两个 Provider 做 wire 测试，并记录新增工具数/schema 的每请求 Token 估算与可用 Provider 实测差异，不承诺效率收益。
+
+**实现边界：** 固定 `mcp==1.26.0` 与 `jsonschema==4.26.0`，SDK 协商 2025-11-25，接受 SDK 声明的 2024-11-05、2025-03-26、2025-06-18、2025-11-25。每连接一个线程持有异步 SDK 生命周期，同步调用串行等待。最多 4 个 MCP server、32 个启用工具，发现最多 16 页/256 个工具；描述 4096 字符、每份 schema 32 KB、目录 256 KB、协议帧 2 MB、stderr 尾部 16 KB、调用参数/结果 50 KB、内容块 100 个。Schema 为受限 2020-12/draft-07，不支持递归/远程引用、format、未知关键词或必须采用 tasks 的工具；不支持项明确失败。输入约束原样保留。
+
+配置和白名单只从用户文件读取；空白名单不启动。任务前完成发现和目录持久化，整次 run 冻结。`/mcp reload` 仅刷新 MCP 配置，权限模式与 LSP 配置保持当前运行时设置；要改变它们需重新启动。目录发现失败后旧外部工具被移除，下一任务可重新发现和审批，业务调用从不重放。官方 `@modelcontextprotocol/server-filesystem@2026.8.31` 已验证真实读/列目录/写入审批与连接回收；模型为 FakeLLM。两个 Provider 的工具 wire 已离线验证，DeepSeek 两个目录的真实 input usage 对比见 [M11 输入成本基线](../benchmarks/m11-mcp-input-cost.md)。真实模型联合任务留给 M12；OpenAI 未配置，真实 API 未测。
 
 ## 7. M12：验收通过后结束项目
 

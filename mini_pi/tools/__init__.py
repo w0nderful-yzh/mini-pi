@@ -33,4 +33,5 @@ def build_default_registry(
     registry.register(GitStatusTool(workspace))
     registry.register(AskUserTool(interaction))
     registry.configure_lsp(workspace)
+    registry.configure_mcp()
     return registry

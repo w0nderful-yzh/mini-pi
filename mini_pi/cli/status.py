@@ -368,9 +368,18 @@ def render_last_run(
 
 def render_tools(console: Console, *, agent: Agent | AgentSession | None, cwd: Path) -> None:
     """列出当前工具；尚未连接时展示此 workspace 的默认 Registry。"""
-    schemas = agent.tool_schemas if agent is not None else build_default_registry(Workspace(cwd)).schemas()
+    schemas = (
+        agent.tool_schemas
+        if agent is not None
+        else build_default_registry(Workspace(cwd)).schemas()
+    )
+    if agent is not None and agent.mcp_status != "MCP disabled":
+        console.print(agent.mcp_status, markup=False, highlight=False)
     width = max((len(schema.name) for schema in schemas), default=0) + 2
     for schema in schemas:
         console.print(
-            f"{schema.name:<{width}}{schema.description}", markup=False, highlight=False, soft_wrap=not console.is_terminal
+            f"{schema.name:<{width}}{schema.description}",
+            markup=False,
+            highlight=False,
+            soft_wrap=not console.is_terminal,
         )

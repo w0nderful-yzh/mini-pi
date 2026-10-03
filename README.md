@@ -84,7 +84,7 @@ Python Coding Agent Harness
 | edit 语义 | 相对原文匹配、唯一匹配、多 edit 不重叠、支持 fuzzy | 只做精确唯一匹配，fuzzy 后置 |
 | Workspace 沙箱 | 无沙箱，绝对路径与 `../` 均放行 | 自建 `Workspace.resolve()`：`..`、绝对路径逃逸、symlink 逃逸全部 Fail Fast |
 | Shell 边界 | `bash` 是无沙箱本地 shell | 同样是无沙箱本地 shell：`bash` 只约束 `cwd`，可读写 workspace 之外、可联网；文件工具的边界不适用于它。接入不可信外部工具前重新评估执行权限 |
-| 执行权限 | 参考工具执行与 UI 交互分层 | Registry 校验后检查权限，CLI 处理单次审批，Session 先 fsync 审计。M10 只读 LSP 懒启动前独立审批，连接由 Registry 持有，Session/CLI 负责关闭；MCP 待实现。审批不提供 OS 沙箱隔离 |
+| 执行权限 | 参考工具执行与 UI 交互分层 | Registry 校验后检查权限，CLI 处理单次审批，Session 先 fsync 审计。LSP/MCP 启动前独立审批，连接由 Registry 持有，Session/CLI 负责关闭；MCP 的可信只读分类仅来自用户配置。审批不提供 OS 沙箱隔离 |
 | 上下文估算 | usage 锚点 + 其后消息的字符估算 | M7.8.1 按当前 wire 消息与工具 schema 预测下一请求；M7.8.2 用字符类权重校准 DeepSeek 输入；M7.9.3 按 1/3/7 工具实测把工具开销拆成「一次性模式开销 + 每工具 wire 结构开销 + schema 文本」，避免工具变多后系统性低估；M7.8.3 由运行时持有解析后的窗口策略，压缩决策与 CLI 展示共用。M8.3 的摘要切点与成本模型按片段自身内容估算，不重复计入历史整次请求的 `usage.total_tokens`；旧 usage 锚点仅保留在压缩前诊断，历史 input usage 单独展示 |
 | 原子写 | 普通 `writeFile` | `tempfile` + `os.replace` 原子写 |
 | System Prompt | prompt sections 存在 transcript 的 system message 中，可 diff | M7.2 已实现快照/patch；每次 run 前读取祖先链 `AGENTS.md` 并只记录变化 |
@@ -170,7 +170,7 @@ Agent Runtime 自己实现。
 
 ## 5. 目录结构
 
-当前实现范围（M1-M7.8 已完成，M8 未开始）：
+当前实现范围（M1–M11 已落地，M8 收尾于 M8.3，M12 联合验收待完成）：
 
 ```text
 mini-pi/
@@ -314,13 +314,14 @@ ask_user   关键问题等待真实回答（可选 2–3 个选项，必须独�
 lsp_definition  Python 定义位置（仅显式配置 LSP 后注册）
 lsp_references  Python 引用位置（仅显式配置 LSP 后注册）
 lsp_diagnostics 当前磁盘内容的 Python 诊断（仅显式配置 LSP 后注册）
+mcp_*     本地 MCP 白名单工具（任务前发现，以稳定别名绑定原始 server/tool）
 ```
 
 约定：
 
-- 参数用 pydantic 模型声明，registry 统一校验
+- 内置参数用 Pydantic 模型声明；MCP 使用受支持的原始 JSON Schema，Registry 统一在审批前校验
 - `ask_user` 通过宿主交互函数取得回答；Loop 不读终端。缺少处理函数或非 TTY 时停止本次 run，不继续让模型猜答案
-- Registry 直接调用也经过权限检查；宿主内置工具明确声明 `Tool.access`，未知工具默认需要审批。模型参数、工具名称或外部只读描述不能改变分类，未来 MCP annotations 不能用作自动授权依据
+- Registry 直接调用也经过权限检查；宿主内置工具明确声明 `Tool.access`，未知工具默认需要审批。模型参数、工具名称或外部只读描述不能改变分类，MCP annotations 不能用作自动授权依据
 - 可预期失败抛 `ToolError`，Loop 转成 `is_error` observation 回传模型
 - 非预期异常直接冒泡（Fail Fast）
 - 文件操作必须经过 `Workspace`，禁止工具自行 `open()`
@@ -388,7 +389,7 @@ mini-pi --max-run-input-tokens 100000  # 显式启用每次任务的累计输入
 - M9.1 起，模型可调用 `ask_user(question, options?)` 提出关键决策问题。CLI 收起活动区后等待，输入编号选择原始选项或输入自由文本；空白与无效序号只在本地重问，没有默认答案。回答作为带 `source=user` 的 ToolMessage 提交后，同一任务继续；等待期间不发新模型请求、不执行后续工具。`/cancel`、Ctrl+C、EOF 取消任务；stdin/stdout 任一非 TTY 时以 error 停止（一次性退出码 1），可在交互终端恢复会话并提供决定。回答不写入 REPL 输入历史，终端编号和提示不进入模型消息
 - M9.2 的权限配置仅来自 `~/.mini-pi/config.json`，CLI `--permissions workspace|readonly` 可显式覆盖，缺省为 `workspace`。workspace 允许工作区文件读写，**每次 bash 都要审批**；readonly 拒绝 write/edit/bash。审批显示完整已校验参数、工具身份和实际 cwd，先脱敏并转义控制字符；输入 `1/allow` 允许本次、`2/deny` 拒绝本次、`3/cancel` 取消任务，无默认批准。拒绝成为错误 observation，模型可继续已允许的工作；非 TTY 需要审批时停止为 error。批次内逐个审批，取消保留此前事实并补齐剩余结果
 - 审批的 `ControlEntry` 在副作用前写盘，只保存目标、宿主身份、参数/目录/配置指纹和 allow/deny，不保存参数正文或环境秘密，也不参与模型投影、usage 或摘要。写盘失败不执行；resume 和 `/new` 不继承一次性允许。`--no-session` 明确没有持久审批审计。包含新 entry 的会话不能由不认识它的旧版本恢复
-- 一次性进程默认只继承 PATH/HOME/TMPDIR、语言编码和时区环境，Provider Key 和其他任意父环境变量不透传；依赖 DATABASE_URL 等父环境的命令可能因此失败。本地 server 配置采用 `servers.<id> = {"kind":"lsp"或"mcp", "argv":[...], "cwd":绝对路径（可省略）, "env":{"子变量名":"宿主变量名"}, "timeout":10}`，env 只存引用且禁止转发 Provider Key；timeout 单位秒，范围 `(0,120]`。未配置的 server 拒绝启动，固定 argv 不拼 shell。LSP 已接入，MCP 连接和工具待实现
+- 一次性进程默认只继承 PATH/HOME/TMPDIR、语言编码和时区环境，Provider Key 和其他任意父环境变量不透传；依赖 DATABASE_URL 等父环境的命令可能因此失败。本地 server 配置采用 `servers.<id> = {"kind":"lsp"或"mcp", "argv":[...], "cwd":绝对路径（可省略）, "env":{"子变量名":"宿主变量名"}, "timeout":10}`，env 只存引用且禁止转发 Provider Key；timeout 单位秒，范围 `(0,120]`。未配置的 server 拒绝启动，固定 argv 不拼 shell。MCP 还需显式 `tools` 白名单和可选的 `readonly_tools` 子集
 
 最小用户级配置：
 
@@ -415,6 +416,34 @@ npm install --global pyright@1.1.414
 - 每次查询重新读取当前文件及已打开文件，按 server 声明同步版本。诊断返回 `version/content_hash/fresh`；使用当前 pull 结果或带匹配版本的推送，缺版本、过期、未就绪或查询中磁盘变化均报错，不能冒充零错误。仅跟踪显式打开文件，不扫描仓库或监听未打开依赖；固定分析配置为 `openFilesOnly/basic/autoSearchPaths=false`。诊断不替代测试。
 - 上限为 32 个打开文档、每文档 1 MB、协议帧 2 MB、结果 100 条且 50 KB、stderr 尾部 16 KB；截断结果保留合法 JSON 并标记 `truncated`。不支持 rename/codeAction/executeCommand/applyEdit，能力缺失显式失败。
 - 退出、`/new`、内存模式 `/reset`、初始化失败和任务取消均清理进程组；新会话创建失败保留旧运行时。断连不重放业务请求，下一次显式调用重新审批启动。SDK 用户应在 `finally` 调用 `AgentSession.close()` 或 `Agent.close()`。LSP server 是获准的本地进程，可以访问工作区外与网络；只读约束作用于客户端方法。
+
+启用本地 MCP：手动安装 server（验收使用官方 `@modelcontextprotocol/server-filesystem@2026.8.31`），将以下配置合并到用户文件。替换两个绝对路径，filesystem 的最后一个 argv 是允许目录；mini-pi 不自动安装 server。
+
+```sh
+npm install --global @modelcontextprotocol/server-filesystem@2026.8.31
+```
+
+```json
+{
+  "servers": {
+    "files": {
+      "kind": "mcp",
+      "argv": ["mcp-server-filesystem", "/absolute/workspace"],
+      "cwd": "/absolute/workspace",
+      "tools": ["read_file", "list_directory", "write_file"],
+      "readonly_tools": ["read_file", "list_directory"],
+      "timeout": 20
+    }
+  }
+}
+```
+
+- 未配置或白名单为空时不启动。首个任务前审批启动、分页发现白名单并持久化目录，之后复用连接；最多 4 个 MCP server、32 个启用工具。`readonly_tools` 表示用户对具体工具的信任：其余工具每次审批，readonly 模式拒绝；server 自称只读不能授权。获准的 server 可访问工作区外和网络，此配置不提供 OS 沙箱。
+- `/tools` 显示当前工具、原始来源和刷新状态。别名符合两种 Provider 的命名要求，由完整身份摘要生成并持有反向表，不截断猜原名。一次任务目录冻结；`list_changed` 只提示需 `/mcp reload`。该命令在空闲时重读 MCP 配置并重新审批启动，权限模式和 LSP 配置需重启才更改。刷新/发现失败移除旧外部工具，后续任务可重新发现，业务调用从不自动重放。
+- 固定 SDK `mcp==1.26.0`，同步运行时外围每连接持有一个线程和异步 SDK 生命周期。仅本地 stdio/tools，接受 SDK 声明的四个协议版本（2024-11-05、2025-03-26、2025-06-18、2025-11-25）；sampling、elicitation、roots 和其他 server 反向请求明确拒绝，通知不执行代码/URI。stdout 普通日志、错误 id 和非法响应导致断开。
+- 原始 Schema 支持受限 2020-12/draft-07、无环本地 `#/` 引用；不支持远程/递归引用、format、未知关键词、非 object 参数根或必须使用 tasks 的工具。不删 required、不转换参数类型，目录中的不支持项明确报错。单个描述最多 4096 字符，schema 32 KB，目录 256 KB，发现最多 16 页/256 个工具，帧 2 MB、stderr 16 KB、参数/结果 50 KB、内容块 100 个。
+- 文本和 structuredContent 返回合法有界 JSON；outputSchema 在截断前验证，超限结果明确标记 `truncated`。`isError`、不合法结构、图片/音频/资源块均报告错误；资源 URI 不自动打开。外部 modified_files 保持空列表，不能由它判断是否改过文件。调用失败不能证明 server 没有产生副作用。
+- `ToolCatalogEntry` 保存非秘密身份、原名/别名、schema 和配置指纹，先 fsync 再安装；它不进入模型、usage 或压缩。描述明确标为外部资料，不进入 Working rules。resume 按当前配置装配，历史目录不启动已移除 server，不恢复批准、不重放旧结果，历史别名不能绑定另一身份。SDK 使用者同样须显式 `close()`。
 
 - `--max-run-input-tokens` 显式启用每次 `run()` 的累计输入预算，默认关闭。Loop 在下一次模型请求前用 Provider 已报告 input 加当前投影估算检查；接近上限时只提示模型收敛一次，预计超限则以 `budget_limit` 停止。它是请求边界控制，单次请求仍可能超过预测；已提交的消息、工具结果和文件改动保留，交互模式下一条任务获得新预算
 
@@ -457,8 +486,8 @@ uv run pytest -m integration        # 需要 API Key
 | M7.9 | 完成语义、工作区状态、真实任务基线与 CLI 视觉整理 | 已完成（M7.9.1–M7.9.4；[任务基线](docs/benchmarks/m7-9-baseline.md)：真实 DeepSeek 4/4 completed；[视觉验收](docs/benchmarks/m7-9-4-cli-visual.md)：80/40 列、`TERM=dumb`、`NO_COLOR`、非 tty 全部通过） |
 | M8 | 成本效率评测、CLI 与上下文优化 | 已收尾于 M8.3；[M8.2](docs/benchmarks/m8-2-prompt-batching.md)合批 Prompt、[M8.3](docs/benchmarks/m8-3-context-cost.md)8k 候选未采纳；M8.4–M8.6 取消排期，未实现 |
 | M9 | 简单 MITL 与安全控制 | M9.1 问询、M9.2 权限与单次审批已实现 |
-| M10 | 只读 LSP | M10.1 定义/引用、M10.2 当前内容诊断/同步已实现；固定 Pyright 1.1.414 闭环通过，下一批 M11.1 |
-| M11 | 本地 MCP | 已规划、未实现；stdio、白名单工具、schema、权限与严格恢复 |
+| M10 | 只读 LSP | M10.1 定义/引用、M10.2 当前内容诊断/同步已实现；固定 Pyright 1.1.414 闭环通过 |
+| M11 | 本地 MCP | M11.1/M11.2 已实现；固定官方 filesystem server 读写/审批通过，两个 Provider 离线 wire、[DeepSeek 输入实测](docs/benchmarks/m11-mcp-input-cost.md)；下一批 M12 |
 | M12 | 联合验收与项目结束 | 已规划；四项能力闭环后停止新增功能，保留缺陷与必要兼容修复 |
 
 M1-M6 的详细任务拆解见 [`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md)。
@@ -478,7 +507,7 @@ M8 评测扩充 / CLI 再整理 / 上下文修正（已收尾）
   ↓
 M9 问询与权限控制（已完成）
   ↓
-M10 只读 LSP → M11 本地 MCP
+M10 只读 LSP → M11 本地 MCP（已完成）
   ↓
 M12 联合验收 → 项目完成
 ```
@@ -541,13 +570,13 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 - `edit` 仅支持精确唯一匹配，无 fuzzy 匹配（缩进/智能引号差异会失败）
 - 工具串行执行，无并行
 - **审批不是沙箱**：获准的 `bash` 是 `cwd = workspace root` 的无沙箱本地 shell（可以读写 workspace 之外、可以联网、读取用户凭据文件）。readonly 只限制客户端发起的操作，不能证明 git 或 server 进程没有副作用；明确环境隔离也不能阻止进程自行读取文件
-- 当前请求按 wire 消息与工具 schema 估算，字符类权重与工具模式开销都用真实 DeepSeek input usage 校准（[M7.8.2 四组固定样本](docs/benchmarks/m7-8-token-estimation.md)、[M7.9.3 工具数扫描与复验](docs/benchmarks/m7-9-baseline.md)）。工具开销按「一次性模式开销 + 每工具 wire 结构开销 + schema 文本」计算，0–7 个工具实测偏差在 ±5% 内；默认八工具、配置 LSP 后十一工具尚未完成真实 input 估算校准；OpenAI 与接近 1M 窗口的会话仍未量化。摘要切点与成本模型按片段自身消息内容估算，历史整次请求 usage 不属于单条消息或截取区域，预测始终标为 estimated
+- 当前请求按 wire 消息与工具 schema 估算，字符类权重与工具模式开销都用真实 DeepSeek input usage 校准（[M7.8.2 四组固定样本](docs/benchmarks/m7-8-token-estimation.md)、[M7.9.3 工具数扫描与复验](docs/benchmarks/m7-9-baseline.md)）。工具开销按「一次性模式开销 + 每工具 wire 结构开销 + schema 文本」计算，0–7 个工具实测偏差在 ±5% 内；[M11 两组短请求](docs/benchmarks/m11-mcp-input-cost.md)的默认八工具和增加两个 MCP 工具估算偏差分别为 −1.24% / −0.57%，仅各一个样本，未构成完整校准；配置 LSP 后十一工具、OpenAI 与接近 1M 窗口的会话仍未量化。摘要切点与成本模型按片段自身消息内容估算，历史整次请求 usage 不属于单条消息或截取区域，预测始终标为 estimated
 - 手动 `/compact`、prompt 前与工具轮之间的窗口触发，以及旧工具结果的成本感知提前压缩都已可用；[M8.3](docs/benchmarks/m8-3-context-cost.md)已记录真实任务逐请求 input 和全部摘要开销，默认成本近期保留目标仍为 20k，没有真实计费结论
 - 已知模型的窗口都是 1M 级；自定义小窗口的自动压缩只经离线夹具验证，尚无真实长任务样本。M7.7b 只用 DeepSeek 验证了手动 `/compact` 事务后的继续与 resume，OpenAI 因未配置 Key 未测
 - `prompt_toolkit` 是可降级能力：非 tty 或未安装时回退单行 REPL；交互终端缺依赖会在 REPL 顶部打印降级原因（补全/历史/多行编辑不可用）
 - `search` 的 `.gitignore` 规则仅在 rg 引擎下生效，Python 兜底使用固定忽略目录
 - 支持平台为 macOS / Linux；进程组与文件权限语义依赖 POSIX，Windows 未支持
-- 简单 MITL、工具权限与只读 Python LSP 已实现；MCP 客户端待实现，最后路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)；Task / Memory / Multi-Agent 不在本项目范围内
+- 简单 MITL、工具权限、只读 Python LSP 和本地 MCP 已实现；下一批联合验收，最后路线见 [`docs/plans/phase3-runtime-hardening.md`](docs/plans/phase3-runtime-hardening.md)；Task / Memory / Multi-Agent 不在本项目范围内
 
 ---
 
@@ -559,6 +588,7 @@ uv run mini-pi --cwd tests/fixtures/sample_project \
 - `tests/integration/` 是离线端到端目录：走生产装配路径（真实工具、真实 JSONL、FakeLLM），不加 `integration` marker；含自动压缩与四条固定任务形态的基线用例（只读、跨文件定位、修改后验证、失败后恢复）
 - 文件工具测试使用 `tmp_path`，不触碰真实项目文件
 - `tests/lsp/` 默认使用真实离线假 server，覆盖协议、文件同步、取消和进程回收。真实 Pyright 用例默认跳过；手动安装固定版本后设置 `MINI_PI_TEST_PYRIGHT=/绝对路径/pyright-langserver uv run pytest tests/lsp/test_pyright.py`，执行真实查询、edit、当前诊断与 unittest。此用例模型为 FakeLLM，不调用 Provider API，也不自动安装 server
+- `tests/mcp/` 使用真实离线假 server 验证初始化、分页、权限、取消、目录/恢复和 Provider wire；官方 filesystem server 用例默认跳过，手动安装固定版本后设置 `MINI_PI_TEST_MCP_FILESYSTEM=/绝对路径/mcp-server-filesystem uv run pytest tests/mcp/test_reference.py`，执行真实读/列目录/写入审批。模型为 FakeLLM，不自动安装 server
 
 详见 [`docs/plans/phase1-core-runtime.md`](docs/plans/phase1-core-runtime.md) 与 [`docs/plans/phase2-session-context.md`](docs/plans/phase2-session-context.md) 的验收命令。真实任务基线、Session 规模与工具开销用 `docs/benchmarks/m7-9-baseline.py` 复现（`scale` 离线，`real` / `tools` 需要 Key）。
 

@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from pydantic import TypeAdapter, ValidationError
@@ -25,6 +26,7 @@ from mini_pi.session.models import (
     MessageEntry,
     SessionEntry,
     SessionHeader,
+    ToolCatalogEntry,
 )
 
 _ENTRY_ADAPTER = TypeAdapter(SessionEntry)
@@ -195,6 +197,7 @@ class JsonlSession:
             cls._validate_loaded_entry(entry, known, line_number=line_number)
             known[entry.id] = entry
             entries.append(entry)
+        cls._validate_catalog_bindings(entries)
         return cls(path=file_path, header=header, entries=entries)
 
     @staticmethod
@@ -350,6 +353,37 @@ class JsonlSession:
         )
         self._append(entry)
         return entry
+
+    def append_tool_catalog(self, catalog: dict[str, Any]) -> ToolCatalogEntry:
+        """目录先 fsync 再安装，任何历史别名都禁止重新绑定到不同身份。"""
+        entry = ToolCatalogEntry(
+            type="tool_catalog",
+            id=uuid4(),
+            parentId=self._leaf_id,
+            timestamp=datetime.now(timezone.utc),
+            **catalog,
+        )
+        self._validate_catalog_bindings([*self._entries, entry])
+        self._append(entry)
+        return entry
+
+    @staticmethod
+    def _validate_catalog_bindings(entries: list[SessionEntry]) -> None:
+        """跨整个原始文件检查反向表，不因压缩或分支切换遗忘旧身份。"""
+        seen: dict[str, tuple[str, str]] = {}
+        for entry in entries:
+            if isinstance(entry, ToolCatalogEntry):
+                aliases: set[str] = set()
+                for tool in entry.tools:
+                    identity = (tool.server_id, tool.original_name)
+                    if tool.alias in aliases or (
+                        tool.alias in seen and seen[tool.alias] != identity
+                    ):
+                        raise SessionError(
+                            "tool catalog alias collision or historical identity changed"
+                        )
+                    aliases.add(tool.alias)
+                    seen[tool.alias] = identity
 
     def append_compaction(
         self,

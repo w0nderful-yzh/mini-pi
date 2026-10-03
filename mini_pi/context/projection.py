@@ -79,12 +79,12 @@ def project_messages(entries: Iterable[SessionEntry]) -> MessageProjection:
     - assistant tool_calls 与 tool result 必须完整、唯一配对，否则 Fail Fast。
     """
     # 运行时导入避免 session 包初始化期间与 jsonl 形成循环依赖
-    from mini_pi.session.models import CompactionEntry, ControlEntry
+    from mini_pi.session.models import CompactionEntry, ControlEntry, ToolCatalogEntry
 
     messages: list[Message] = []
     system_messages: list[SystemMessage] = []
     for entry in entries:
-        if isinstance(entry, ControlEntry):
+        if isinstance(entry, (ControlEntry, ToolCatalogEntry)):
             continue
         if isinstance(entry, CompactionEntry):
             raise SessionError("compaction entry requires M7.4c projection")
@@ -166,7 +166,7 @@ def project_compaction(entries: Iterable[SessionEntry]) -> CompactionProjection 
     - 摘要保持 user 级；compaction 之后的 system patch 续接快照
     """
     # 运行时导入避免 session 包初始化期间与 jsonl 形成循环依赖
-    from mini_pi.session.models import CompactionEntry, ControlEntry, MessageEntry
+    from mini_pi.session.models import CompactionEntry, ControlEntry, MessageEntry, ToolCatalogEntry
 
     path = list(entries)
     index = _index_entries(path)
@@ -196,7 +196,7 @@ def project_compaction(entries: Iterable[SessionEntry]) -> CompactionProjection 
     trailing_system: list[SystemMessage] = []
     for position in range(cut_at, len(path)):
         entry = path[position]
-        if isinstance(entry, (CompactionEntry, ControlEntry)):
+        if isinstance(entry, (CompactionEntry, ControlEntry, ToolCatalogEntry)):
             continue
         if isinstance(entry.message, SystemMessage):
             # 切点与 compaction 之间的 system 已进入快照；之后的 patch 才续接

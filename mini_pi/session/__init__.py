@@ -12,6 +12,7 @@ from mini_pi.session.models import (
     MessageEntry,
     SessionEntry,
     SessionHeader,
+    ToolCatalogEntry,
 )
 from mini_pi.session.runtime import AgentSession, CompactionExecution
 
@@ -25,6 +26,7 @@ __all__ = [
     "SessionEntry",
     "SessionHeader",
     "SessionReplay",
+    "ToolCatalogEntry",
     "discover_session_files",
     "session_dir_for_cwd",
 ]

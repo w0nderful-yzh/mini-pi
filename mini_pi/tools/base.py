@@ -6,8 +6,9 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
+from mini_pi.errors import ToolArgumentError
 from mini_pi.llm.types import ToolSchema
 from mini_pi.security import ToolAccess
 
@@ -42,6 +43,19 @@ class Tool(ABC):
             description=self.description,
             parameters=self.args_model.model_json_schema(),
         )
+
+    def validate_arguments(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """内置工具保留 Pydantic 校验和嵌套模型，外部工具可使用原始 JSON Schema。"""
+        try:
+            validated = self.args_model.model_validate(arguments).model_copy(deep=True)
+        except ValidationError as exc:
+            raise ToolArgumentError(f"invalid arguments for {self.name!r}: {exc}") from exc
+        return dict(validated)
+
+    @property
+    def identity(self) -> str:
+        """默认审批身份来自宿主类，外部工具显式绑定 server 与原名。"""
+        return f"{type(self).__module__}.{type(self).__qualname__}"
 
     @abstractmethod
     def execute(self, **kwargs: Any) -> ToolResult:

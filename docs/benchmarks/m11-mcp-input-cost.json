@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-10-03T08:33:01.262529+00:00",
+  "provider": "deepseek",
+  "model": "deepseek-flash",
+  "sdk": "mcp 1.26.0",
+  "reference_server": "filesystem 2026.8.31",
+  "requests": [
+    {
+      "variant": "default",
+      "tool_count": 8,
+      "tool_wire_bytes": 5351,
+      "estimated_input_tokens": 1591,
+      "measured_input_tokens": 1611,
+      "error_percent": -1.24,
+      "output_tokens": 81
+    },
+    {
+      "variant": "mcp_two",
+      "tool_count": 10,
+      "tool_wire_bytes": 6648,
+      "estimated_input_tokens": 1914,
+      "measured_input_tokens": 1925,
+      "error_percent": -0.57,
+      "output_tokens": 20
+    }
+  ],
+  "scope": "same short messages; no tool calls; one sample per catalog; not a savings claim"
+}

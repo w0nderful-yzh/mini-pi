@@ -29,6 +29,7 @@ SLASH_COMMANDS: tuple[str, ...] = (
     "/status",
     "/context",
     "/tools",
+    "/mcp",
     "/help",
     "/exit",
 )

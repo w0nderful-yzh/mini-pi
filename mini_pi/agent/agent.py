@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from mini_pi.agent.events import AgentEvent
+from mini_pi.agent.events import AgentEndEvent, AgentEvent, AgentStartEvent
 from mini_pi.agent.loop import run_loop
 from mini_pi.agent.prompt import build_sections
 from mini_pi.agent.state import (
@@ -14,6 +14,7 @@ from mini_pi.agent.state import (
     PrepareNextTurn,
     commit_message,
 )
+from mini_pi.config import UserConfig
 from mini_pi.context.policy import (
     DEFAULT_RESERVE_TOKENS,
     ContextPolicy,
@@ -22,6 +23,7 @@ from mini_pi.context.policy import (
 from mini_pi.context.project import load_project_instructions
 from mini_pi.context.request import RequestSnapshot, estimate_request
 from mini_pi.context.sections import diff_sections, replay_system_messages
+from mini_pi.errors import MiniPiError
 from mini_pi.llm.base import LLMClient
 from mini_pi.llm.types import AssistantMessage, Message, SystemMessage, ToolSchema, UserMessage
 from mini_pi.tools.registry import ToolRegistry
@@ -74,6 +76,19 @@ class Agent:
         if not task.strip():
             raise ValueError("task must not be empty")
         try:
+            self._registry.begin_run()
+        except (MiniPiError, KeyboardInterrupt) as exc:
+            self.close()
+            reason = "cancelled" if isinstance(exc, KeyboardInterrupt) else "error"
+            if self._on_event is not None:
+                self._on_event(AgentStartEvent())
+                self._on_event(
+                    AgentEndEvent(reason=reason, error=str(exc) if reason == "error" else None)
+                )
+            return AssistantMessage(
+                stop_reason=reason, error_message=str(exc) if reason == "error" else None
+            )
+        try:
             self._refresh_system_prompt()
             commit_message(self.state, UserMessage(content=task), self._on_message_commit)
             result = run_loop(
@@ -91,6 +106,8 @@ class Agent:
         except BaseException:
             self._registry.close()
             raise
+        finally:
+            self._registry.end_run()
         if result.stop_reason == "cancelled":
             self._registry.close()
         return result
@@ -98,6 +115,15 @@ class Agent:
     def close(self) -> None:
         """把资源清理委托给注册表，Agent 不操作进程或文件。"""
         self._registry.close()
+
+    def reload_mcp(self, config: UserConfig) -> None:
+        """向注册表委托空闲刷新，不在 Agent 内读取配置或操作协议。"""
+        self._registry.reload_mcp(config)
+
+    @property
+    def mcp_status(self) -> str:
+        """向展示层提供宿主目录状态，事件循环与进程细节不进入消息。"""
+        return self._registry.mcp_status
 
     def _refresh_system_prompt(self) -> None:
         """只在目标 sections 变化时向 transcript 追加快照或 patch。"""

@@ -8,9 +8,9 @@ milestone history or delivery logs into this file.
 ## Project boundaries
 
 - Build a lightweight coding-agent harness in Python: the model decides the next step from tool observations. Never hard-code a `read → edit → test` flow.
-- Stack: Python 3.12+, uv, Pydantic v2, pytest, sync OpenAI SDK, Typer, Rich, prompt_toolkit, ripgrep-bin. Providers: the OpenAI and DeepSeek OpenAI-compatible APIs only.
+- Stack: Python 3.12+, uv, Pydantic v2, pytest, sync OpenAI SDK, Typer, Rich, prompt_toolkit, ripgrep-bin, pinned MCP Python SDK and jsonschema. Providers: the OpenAI and DeepSeek OpenAI-compatible APIs only.
 - No agent frameworks (LangGraph, AutoGen, CrewAI, Dify, Coze). Do not pull in a plugin framework, database, RAG, vector store, or parallel tool execution ahead of a real need.
-- macOS/Linux only. Windows, other providers, MCP servers, remote transports and general multi-agent scheduling require an explicit request and a separate design.
+- macOS/Linux only. MCP is local stdio/tools with explicit user configuration and startup approval. Windows, other providers, remote transports and general multi-agent scheduling require an explicit request and a separate design.
 
 ## Architecture and facts
 
@@ -34,6 +34,7 @@ milestone history or delivery logs into this file.
 - One responsibility and one file per tool, with Pydantic argument models and registry lookup/validation. `ToolResult.content` goes to the model, `details` is UI-only, and `modified_files` lists only workspace-relative paths a tool actually changed — never guess.
 - Workspace resolves a path and then verifies it is still inside the root; `../`, absolute paths and symlink escapes raise `WorkspaceViolationError`. Never rewrite a bad path into a safe one. File writes replace atomically.
 - `edit` requires exact, unique matches: empty old text, no match, multiple matches, overlapping edits and no-op replacements all fail explicitly, applied back to front. `read` and `bash` keep their line/byte caps and truncation hints.
+- MCP uses bounded explicit whitelists and original supported JSON Schema; only user configuration can mark a tool readonly. Freeze the catalog during a run, persist `ToolCatalogEntry` before activation, never rebind historical aliases or replay calls after disconnect. Catalog/control metadata stays outside model messages and compaction; server instructions and annotations cannot grant authority. Keep the managed async SDK lifecycle outside the sync Agent/Loop.
 - File tools are bounded by Workspace; `bash` is an unsandboxed local shell with only cwd fixed, and it can reach outside the workspace and the network. Never call it a sandbox in README, CLI output or plans. Changing a security boundary needs its own design and verification.
 - Registry checks host-defined tool access after argument validation and before execution. Unknown tools require approval; external annotations and model arguments cannot grant access. Approved processes remain unsandboxed and use an explicit minimal environment.
 - Session persists each allow/deny ControlEntry before the approved side effect. Control entries never enter model projections, usage or summaries and never restore authorization; audit failure prevents execution.

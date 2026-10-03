@@ -71,6 +71,7 @@ _HELP_TEXT = """Available commands:
   /status [full]             show model, workspace, session, and context
   /context                   show estimated context categories
   /tools                     list available tools
+  /mcp reload                refresh configured MCP tools while idle
   /help                      show this help
   /exit                      quit mini-pi
 
@@ -383,7 +384,9 @@ def _switch_connection(
         if len(arguments) == 1:
             chosen_provider = arguments[0]
             # 同 provider 只换模型名时沿用当前模型，避免悄悄切回内置默认
-            chosen_model = model if chosen_provider == provider else DEFAULT_MODELS.get(chosen_provider, "")
+            chosen_model = (
+                model if chosen_provider == provider else DEFAULT_MODELS.get(chosen_provider, "")
+            )
         elif len(arguments) == 2:
             chosen_provider, chosen_model = arguments
         else:
@@ -612,11 +615,7 @@ def cli(
         return
 
     render_banner(console, enabled=not no_banner, mode=banner)
-    if (
-        agent is None
-        and isinstance(config_error, MissingAPIKeyError)
-        and sys.stdin.isatty()
-    ):
+    if agent is None and isinstance(config_error, MissingAPIKeyError) and sys.stdin.isatty():
         # 交互启动缺 Key：直接提示输入，免去用户记命令的成本
         agent = _prompt_and_build(
             security=security,
@@ -722,6 +721,25 @@ def cli(
             continue
         if stripped == "/tools":
             render_tools(console, agent=agent, cwd=workspace.root)
+            continue
+        if stripped == "/mcp reload":
+            if agent is None:
+                console.print(
+                    "MCP reload requires a connected runtime", style="yellow", markup=False
+                )
+                continue
+            try:
+                agent.reload_mcp(load_config())
+            except (MiniPiError, ValueError) as exc:
+                console.print(f"MCP reload failed: {exc}", style="red", markup=False)
+            except KeyboardInterrupt:
+                agent.close()
+                console.print("MCP reload cancelled", style="yellow", markup=False)
+            else:
+                console.print(agent.mcp_status, markup=False)
+            continue
+        if stripped == "/mcp" or stripped.startswith("/mcp "):
+            console.print("usage: /mcp reload", style="yellow", markup=False)
             continue
         if stripped == "/sessions":
             try:

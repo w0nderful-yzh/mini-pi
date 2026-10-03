@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import ValidationError
+from pydantic_core import to_json
 
+from mini_pi.config import UserConfig
 from mini_pi.errors import ToolArgumentError, ToolNotFoundError
 from mini_pi.llm.types import ToolCall, ToolSchema
+from mini_pi.mcp.catalog import CatalogRecorder, MCPCatalog
 from mini_pi.security import ControlRecorder, SecurityPolicy
 from mini_pi.tools.base import Tool, ToolResult
 from mini_pi.workspace.workspace import Workspace
@@ -25,6 +27,72 @@ class ToolRegistry:
         self._tools: dict[str, Tool] = {}
         self.security = security or SecurityPolicy(cwd=Path.cwd())
         self._lsp: LspClient | None = None
+        self._mcp: MCPCatalog | None = None
+        self._catalog_record: CatalogRecorder | None = None
+        self._running = False
+
+    def configure_mcp(self, record: CatalogRecorder | None = None) -> None:
+        """仅装配明确的 MCP 配置，Session 在发现前绑定目录审计回调。"""
+        self._catalog_record = record
+        if self.security.mcp_servers:
+            self._mcp = MCPCatalog(self.security, record)
+
+    def prepare_mcp(self) -> None:
+        """任务前发现目录，失败时移除所有旧外部工具以免误用失效 schema。"""
+        if self._running:
+            raise ValueError("MCP catalog is frozen during a run")
+        if self._mcp is None or self._mcp.ready:
+            return
+        from mini_pi.tools.mcp import MCPTool
+
+        self._tools = {
+            name: tool for name, tool in self._tools.items() if not isinstance(tool, MCPTool)
+        }
+        self._tools.update(self._mcp.prepare(set(self._tools)))
+
+    def begin_run(self) -> None:
+        """冻结整个任务的目录，运行中不响应外部刷新请求。"""
+        if self._running:
+            raise ValueError("runtime is already running")
+        self.prepare_mcp()
+        self._running = True
+
+    def end_run(self) -> None:
+        """任务退出后解冻宿主刷新入口。"""
+        self._running = False
+
+    def reload_mcp(self, config: UserConfig) -> None:
+        """仅空闲时刷新 MCP 配置，权限模式与 LSP 仍由当前运行时固定。"""
+        if self._running:
+            raise ValueError("MCP reload is only allowed while idle")
+        current = self.security.config
+        servers = {name: server for name, server in current.servers.items() if server.kind != "mcp"}
+        for name, server in config.servers.items():
+            if server.kind == "mcp":
+                if name in servers:
+                    raise ValueError("MCP server id conflicts with an existing LSP server")
+                servers[name] = server
+        replacement = UserConfig(permissions=current.permissions, servers=servers)
+        record = self._catalog_record
+        if self._mcp is not None:
+            self._mcp.close()
+        self.security = self.security.with_config(replacement)
+        self._mcp = MCPCatalog(self.security, record)
+        self.prepare_mcp()
+
+    @property
+    def mcp_status(self) -> str:
+        """CLI 显示连接来源状态，不把刷新提示注入模型消息。"""
+        if self._mcp is None or not self.security.mcp_servers:
+            return "MCP disabled"
+        state = (
+            "needs /mcp reload"
+            if self._mcp.needs_reload
+            else "ready"
+            if self._mcp.ready
+            else "not initialized"
+        )
+        return f"MCP {state}: {', '.join(self.security.mcp_servers)}"
 
     def configure_lsp(self, workspace: Workspace) -> None:
         """仅在明确配置时注册只读工具，不提前启动或读取任何代码。"""
@@ -39,22 +107,35 @@ class ToolRegistry:
         if self._lsp is not None:
             raise ValueError("LSP already configured")
         self._lsp = LspClient(workspace, self.security, server_id)
-        for tool in (LspDefinitionTool(self._lsp), LspReferencesTool(self._lsp), LspDiagnosticsTool(self._lsp)):
+        for tool in (
+            LspDefinitionTool(self._lsp),
+            LspReferencesTool(self._lsp),
+            LspDiagnosticsTool(self._lsp),
+        ):
             self.register(tool)
 
     def close(self) -> None:
         """释放注册表持有的外部连接，后续显式调用会重新审批启动。"""
         if self._lsp is not None:
             self._lsp.close()
+        if self._mcp is not None:
+            self._mcp.close()
 
-    def for_session(self, record: ControlRecorder) -> ToolRegistry:
+    def for_session(
+        self, record: ControlRecorder, catalog_record: CatalogRecorder | None = None
+    ) -> ToolRegistry:
         """复制注册表并绑定独立审计回调，权限和工具不从 Session 重建。"""
         registry = ToolRegistry(self.security.with_recorder(record))
-        registry._tools = self._tools.copy()
+        from mini_pi.tools.mcp import MCPTool
+
+        registry._tools = {
+            name: tool for name, tool in self._tools.items() if not isinstance(tool, MCPTool)
+        }
         if self._lsp is not None:
             for name in ("lsp_definition", "lsp_references", "lsp_diagnostics"):
                 del registry._tools[name]
             registry.configure_lsp(self._lsp.workspace)
+        registry.configure_mcp(catalog_record)
         return registry
 
     def register(self, tool: Tool) -> None:
@@ -72,18 +153,17 @@ class ToolRegistry:
         tool = self._tools.get(name)
         if tool is None:
             raise ToolNotFoundError(f"unknown tool: {name!r}")
-        try:
-            validated = tool.args_model.model_validate(arguments).model_copy(deep=True)
-        except ValidationError as exc:
-            # 参数校验失败是可预期失败：转 ToolArgumentError，由 Loop 回传模型纠正
-            raise ToolArgumentError(f"invalid arguments for {name!r}: {exc}") from exc
+        validated = tool.validate_arguments(arguments)
         # 审批只收到不可变文本，执行使用自己的深拷贝，调用方不能在等待时替换参数。
         self.security.check_tool(
-            name=name, identity=f"{type(tool).__module__}.{type(tool).__qualname__}",
-            access=tool.access, parameters=validated.model_dump_json(), cwd=tool.execution_cwd,
+            name=name,
+            identity=tool.identity,
+            access=tool.access,
+            parameters=to_json(validated).decode("utf-8"),
+            cwd=tool.execution_cwd,
         )
         # 浅取字段：model_dump() 会递归把嵌套模型转成 dict，破坏 execute 的类型标注
-        return tool.execute(**dict(validated))
+        return tool.execute(**validated)
 
     def validate_batch(self, calls: list[ToolCall]) -> None:
         """独占工具不能混入其他调用，必须在整批任何执行前拒绝。"""

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import (
@@ -89,4 +89,27 @@ class ControlEntry(SessionEntryBase):
     decision: Literal["allow", "deny"]
 
 
-SessionEntry = Annotated[MessageEntry | CompactionEntry | ControlEntry, Field(discriminator="type")]
+class CatalogTool(SessionModel):
+    """冻结目录中的非秘密身份与 schema，仅用于历史事实而非恢复授权。"""
+
+    server_id: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
+    original_name: Annotated[str, StringConstraints(min_length=1, max_length=1024)]
+    alias: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]{1,64}$")]
+    input_schema: dict[str, Any]
+    output_schema: dict[str, Any] | None
+    schema_fingerprint: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
+    config_fingerprint: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
+    access: Literal["read", "approval"]
+
+
+class ToolCatalogEntry(SessionEntryBase):
+    """当前目录落盘事实，模型投影、usage 与摘要明确排除。"""
+
+    type: Literal["tool_catalog"]
+    fingerprint: Annotated[str, StringConstraints(pattern=r"^[a-f0-9]{64}$")]
+    tools: list[CatalogTool] = Field(max_length=32)
+
+
+SessionEntry = Annotated[
+    MessageEntry | CompactionEntry | ControlEntry | ToolCatalogEntry, Field(discriminator="type")
+]
